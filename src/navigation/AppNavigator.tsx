@@ -4,6 +4,7 @@ import BottomNav from '../components/BottomNav';
 import ComingSoonScreen from '../screens/ComingSoonScreen';
 import HomeScreen from '../screens/HomeScreen';
 import LoginScreen from '../screens/LoginScreen';
+import ProfileHomeScreen from '../screens/profile/ProfileHomeScreen';
 import SignupCalendarScreen from '../screens/signup/SignupCalendarScreen';
 import SignupPersonalScreen from '../screens/signup/SignupPersonalScreen';
 import SignupStartScreen from '../screens/signup/SignupStartScreen';
@@ -52,7 +53,7 @@ function renderScreen(name: RouteName) {
     case 'Chat':
       return <ComingSoonScreen title="채팅방" />;
     case 'Profile':
-      return <ComingSoonScreen title="프로필" />;
+      return <ProfileHomeScreen />;
   }
 }
 

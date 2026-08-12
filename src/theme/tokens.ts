@@ -29,8 +29,12 @@ export const colors = {
   /** Figma 변수 bg/card */
   card: '#FFFFFF',
 
-  /** 헤더 / 하단 네비 배경 */
+  /** 헤더 / 하단 네비 / 카드 배경 */
   surface: '#F3F3F3',
+  /** 프로필 화면처럼 카드가 얹히는 한 단계 어두운 배경 */
+  surfaceSunken: '#E6E6E6',
+  /** 오렌지 틴트 (프로필 아바타 박스, "설정하기" 배지) */
+  primarySoft: '#F7EFE6',
   /** 로고 칩, 프로필 썸네일 배경 */
   surfaceStrong: '#E6E6E6',
   /** 알림 벨 글리프 */
