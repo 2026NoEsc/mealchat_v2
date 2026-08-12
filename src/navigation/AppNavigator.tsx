@@ -1,6 +1,7 @@
 import { StyleSheet, View } from 'react-native';
 
 import BottomNav from '../components/BottomNav';
+import ChatHomeScreen from '../screens/chat/ChatHomeScreen';
 import ComingSoonScreen from '../screens/ComingSoonScreen';
 import HomeScreen from '../screens/HomeScreen';
 import LoginScreen from '../screens/LoginScreen';
@@ -51,7 +52,7 @@ function renderScreen(name: RouteName) {
     case 'Schedule':
       return <ComingSoonScreen title="일정 조율" />;
     case 'Chat':
-      return <ComingSoonScreen title="채팅방" />;
+      return <ChatHomeScreen />;
     case 'Profile':
       return <ProfileHomeScreen />;
   }
