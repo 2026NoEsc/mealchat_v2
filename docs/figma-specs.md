@@ -50,6 +50,9 @@ Figma 파일 `xBf3b09D6Bj1dTiCixt25e` / 페이지 `Application UI` (`0:1`).
 
 - **프로필 홈** `159:544` → [ProfileHomeScreen](../src/screens/profile/ProfileHomeScreen.tsx)
 - **채팅방 홈** `549:3507` → [ChatHomeScreen](../src/screens/chat/ChatHomeScreen.tsx)
+- **일정 조율** `309:1077` → [ScheduleHomeScreen](../src/screens/schedule/ScheduleHomeScreen.tsx)
+
+> 하단 탭 4개(홈·일정 조율·채팅방·프로필)가 모두 실제 화면이다. `ComingSoonScreen` 은 더 이상 사용하지 않는다.
 
 ## 미구현 화면
 
@@ -73,7 +76,15 @@ Figma 파일 `xBf3b09D6Bj1dTiCixt25e` / 페이지 `Application UI` (`0:1`).
 | 이모티콘 패널 | `555:416` |
 
 ### 일정 조율 (`309:1430`)
-섹션 미조회 — `get_design_context` 로 하위 프레임 확인 필요
+| 화면 | node ID |
+|---|---|
+| 일정 추가 STEP 1 디테일 선택 | `309:1065` |
+| 일정 추가 STEP 2 시간 선택 | `160:733` |
+| 일정 추가 STEP 3 AI 추천 TOP3 | `159:491` |
+| 일정 추가 확정 | `160:827` |
+
+일정 조율 화면 색상: 이벤트 바 `#5B9BD5`(개인) `#B483C8`(발표) `#9C9C9C`(기기 동기화),
+일요일 `#F5556B` / 토요일 `#3BA3F5`, 강조 셀 `#FFF5EB`, 선택 셀 테두리 `#FF9900`
 
 ## 채팅방 홈 색상 (렌더에서 샘플링)
 

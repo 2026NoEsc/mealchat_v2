@@ -6,6 +6,7 @@ import ComingSoonScreen from '../screens/ComingSoonScreen';
 import HomeScreen from '../screens/HomeScreen';
 import LoginScreen from '../screens/LoginScreen';
 import ProfileHomeScreen from '../screens/profile/ProfileHomeScreen';
+import ScheduleHomeScreen from '../screens/schedule/ScheduleHomeScreen';
 import SignupCalendarScreen from '../screens/signup/SignupCalendarScreen';
 import SignupPersonalScreen from '../screens/signup/SignupPersonalScreen';
 import SignupStartScreen from '../screens/signup/SignupStartScreen';
@@ -50,7 +51,7 @@ function renderScreen(name: RouteName) {
     case 'Home':
       return <HomeScreen />;
     case 'Schedule':
-      return <ComingSoonScreen title="일정 조율" />;
+      return <ScheduleHomeScreen />;
     case 'Chat':
       return <ChatHomeScreen />;
     case 'Profile':
