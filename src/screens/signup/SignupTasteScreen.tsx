@@ -17,7 +17,7 @@ export default function SignupTasteScreen() {
       characterBox={{ left: 58, top: 48, width: 73, height: 88 }}
       description={['웰링이 손가락 떠 먹여주듯 먹여줄 수 있게', '메뉴 취향을 입력해주세요']}
       ctaLabel="음식 취향 입력하러가기"
-      onNext={() => navigate('SignupTerms')}
+      onNext={() => navigate('TasteGame')}
       onBack={goBack}
     />
   );

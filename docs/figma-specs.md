@@ -44,6 +44,9 @@ Figma 파일 `xBf3b09D6Bj1dTiCixt25e` / 페이지 `Application UI` (`0:1`).
 - **회원가입 5화면** → [screens/signup](../src/screens/signup)
   - 시작 `150:125` / 개인정보 `150:121` / 구글캘린더 `150:122` / 취향분석 `150:123` / 약관동의 `150:126`
   - 2~4단계는 [SignupIllustrationScreen](../src/screens/signup/SignupIllustrationScreen.tsx) 공통 레이아웃 사용
+- **취향게임 6화면** `296:2866`~`296:2966` → [TasteGameScreen](../src/screens/taste/TasteGameScreen.tsx)
+  - 6개 프레임이 데이터만 다르고 레이아웃이 동일해서 index state 를 쓰는 단일 화면으로 구현
+  - 음식 이미지는 `assets/taste/` 에 Figma export 로 저장
 
 ## 참고 — 회원가입 (`309:2256`) 원본 좌표
 

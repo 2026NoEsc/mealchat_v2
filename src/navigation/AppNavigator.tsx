@@ -9,6 +9,7 @@ import SignupPersonalScreen from '../screens/signup/SignupPersonalScreen';
 import SignupStartScreen from '../screens/signup/SignupStartScreen';
 import SignupTasteScreen from '../screens/signup/SignupTasteScreen';
 import SignupTermsScreen from '../screens/signup/SignupTermsScreen';
+import TasteGameScreen from '../screens/taste/TasteGameScreen';
 import { colors } from '../theme/tokens';
 import { useNavigation } from './NavigationContext';
 import { ROUTE_TO_TAB, TAB_ROUTES, type RouteName } from './routes';
@@ -40,6 +41,8 @@ function renderScreen(name: RouteName) {
       return <SignupCalendarScreen />;
     case 'SignupTaste':
       return <SignupTasteScreen />;
+    case 'TasteGame':
+      return <TasteGameScreen />;
     case 'SignupTerms':
       return <SignupTermsScreen />;
     case 'Home':

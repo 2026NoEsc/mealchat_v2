@@ -6,6 +6,7 @@ export type RouteName =
   | 'SignupPersonal'
   | 'SignupCalendar'
   | 'SignupTaste'
+  | 'TasteGame'
   | 'SignupTerms'
   | 'Home'
   | 'Schedule'
