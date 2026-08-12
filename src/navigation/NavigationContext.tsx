@@ -1,0 +1,63 @@
+import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+
+import type { Route, RouteName } from './routes';
+
+type NavigationValue = {
+  current: Route;
+  canGoBack: boolean;
+  navigate: (name: RouteName, params?: Record<string, unknown>) => void;
+  replace: (name: RouteName, params?: Record<string, unknown>) => void;
+  goBack: () => void;
+  /** 탭 전환 — 스택을 해당 루트로 초기화한다 */
+  resetTo: (name: RouteName) => void;
+};
+
+const NavigationContext = createContext<NavigationValue | null>(null);
+
+export function NavigationProvider({
+  initialRoute,
+  children,
+}: {
+  initialRoute: RouteName;
+  children: React.ReactNode;
+}) {
+  const [stack, setStack] = useState<Route[]>([{ name: initialRoute }]);
+
+  const navigate = useCallback((name: RouteName, params?: Record<string, unknown>) => {
+    setStack((prev) => [...prev, { name, params }]);
+  }, []);
+
+  const replace = useCallback((name: RouteName, params?: Record<string, unknown>) => {
+    setStack((prev) => [...prev.slice(0, -1), { name, params }]);
+  }, []);
+
+  const goBack = useCallback(() => {
+    setStack((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
+  }, []);
+
+  const resetTo = useCallback((name: RouteName) => {
+    setStack([{ name }]);
+  }, []);
+
+  const value = useMemo<NavigationValue>(
+    () => ({
+      current: stack[stack.length - 1],
+      canGoBack: stack.length > 1,
+      navigate,
+      replace,
+      goBack,
+      resetTo,
+    }),
+    [stack, navigate, replace, goBack, resetTo],
+  );
+
+  return <NavigationContext.Provider value={value}>{children}</NavigationContext.Provider>;
+}
+
+export function useNavigation() {
+  const ctx = useContext(NavigationContext);
+  if (!ctx) {
+    throw new Error('useNavigation 은 NavigationProvider 안에서만 사용할 수 있습니다.');
+  }
+  return ctx;
+}
