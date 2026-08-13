@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppHeader from '../../components/AppHeader';
+import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
@@ -45,6 +46,7 @@ const EVENTS: Event[] = [
  */
 export default function ScheduleHomeScreen() {
   const insets = useSafeAreaInsets();
+  const { navigate } = useNavigation();
   const [selected, setSelected] = useState(25);
   const [autoSync, setAutoSync] = useState(true);
 
@@ -111,7 +113,7 @@ export default function ScheduleHomeScreen() {
 
           <View style={styles.dayHeader}>
             <Text style={styles.dayTitle}>8월 13일 (목) 일정</Text>
-            <Pressable style={styles.addButton}>
+            <Pressable style={styles.addButton} onPress={() => navigate('ScheduleDetail')}>
               <Plus size={s(7)} color={colors.textOnAccent} strokeWidth={3} />
               <Text style={styles.addText}>일정 추가</Text>
             </Pressable>

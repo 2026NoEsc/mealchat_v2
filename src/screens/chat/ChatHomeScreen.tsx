@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppHeader from '../../components/AppHeader';
+import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
@@ -102,6 +103,7 @@ const ROOMS: Room[] = [
  */
 export default function ChatHomeScreen() {
   const insets = useSafeAreaInsets();
+  const { navigate } = useNavigation();
   const [code, setCode] = useState('');
 
   return (
@@ -142,7 +144,11 @@ export default function ChatHomeScreen() {
           </View>
 
           {ROOMS.map((room) => (
-            <RoomRow key={room.title} room={room} />
+            <RoomRow
+              key={room.title}
+              room={room}
+              onPress={() => navigate('ChatRoom', { title: room.title, avatar: room.avatar })}
+            />
           ))}
 
           <Text style={styles.footer}>밥약 방은 정산 후 자동으로 사라져요</Text>
@@ -152,9 +158,9 @@ export default function ChatHomeScreen() {
   );
 }
 
-function RoomRow({ room }: { room: Room }) {
+function RoomRow({ room, onPress }: { room: Room; onPress: () => void }) {
   return (
-    <Pressable style={[styles.row, room.highlight && styles.rowHighlight]}>
+    <Pressable style={[styles.row, room.highlight && styles.rowHighlight]} onPress={onPress}>
       <View style={[styles.themeBar, { backgroundColor: room.theme }]} />
 
       <View style={[styles.avatarBox, { backgroundColor: room.tint }]}>

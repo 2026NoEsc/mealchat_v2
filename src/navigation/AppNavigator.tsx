@@ -2,11 +2,16 @@ import { StyleSheet, View } from 'react-native';
 
 import BottomNav from '../components/BottomNav';
 import ChatHomeScreen from '../screens/chat/ChatHomeScreen';
+import ChatRoomScreen from '../screens/chat/ChatRoomScreen';
 import ComingSoonScreen from '../screens/ComingSoonScreen';
 import HomeScreen from '../screens/HomeScreen';
 import LoginScreen from '../screens/LoginScreen';
 import ProfileHomeScreen from '../screens/profile/ProfileHomeScreen';
+import ScheduleConfirmedScreen from '../screens/schedule/ScheduleConfirmedScreen';
+import ScheduleDetailScreen from '../screens/schedule/ScheduleDetailScreen';
 import ScheduleHomeScreen from '../screens/schedule/ScheduleHomeScreen';
+import ScheduleRecommendScreen from '../screens/schedule/ScheduleRecommendScreen';
+import ScheduleTimeScreen from '../screens/schedule/ScheduleTimeScreen';
 import SignupCalendarScreen from '../screens/signup/SignupCalendarScreen';
 import SignupPersonalScreen from '../screens/signup/SignupPersonalScreen';
 import SignupStartScreen from '../screens/signup/SignupStartScreen';
@@ -52,8 +57,18 @@ function renderScreen(name: RouteName) {
       return <HomeScreen />;
     case 'Schedule':
       return <ScheduleHomeScreen />;
+    case 'ScheduleDetail':
+      return <ScheduleDetailScreen />;
+    case 'ScheduleTime':
+      return <ScheduleTimeScreen />;
+    case 'ScheduleRecommend':
+      return <ScheduleRecommendScreen />;
+    case 'ScheduleConfirmed':
+      return <ScheduleConfirmedScreen />;
     case 'Chat':
       return <ChatHomeScreen />;
+    case 'ChatRoom':
+      return <ChatRoomScreen />;
     case 'Profile':
       return <ProfileHomeScreen />;
   }
