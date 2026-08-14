@@ -115,7 +115,11 @@ export default function ChatHomeScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Text style={styles.cardTitle}>MEALCHATING</Text>
-            <Pressable style={styles.plusButton} hitSlop={s(6)}>
+            {/* 새 밥약 만들기 — 일정 추가 플로우로 들어간다 */}
+            <Pressable
+              style={styles.plusButton}
+              hitSlop={s(6)}
+              onPress={() => navigate('ScheduleDetail')}>
               <Plus size={s(9)} color={colors.primary} strokeWidth={3} />
             </Pressable>
           </View>
@@ -138,7 +142,10 @@ export default function ChatHomeScreen() {
               autoCapitalize="characters"
               maxLength={6}
             />
-            <Pressable style={styles.enterButton}>
+            <Pressable
+              style={[styles.enterButton, code.length < 6 && styles.enterButtonDisabled]}
+              disabled={code.length < 6}
+              onPress={() => navigate('ChatRoom', { title: '오늘 점심팟', avatar: moa })}>
               <Text style={styles.enterText}>입장</Text>
             </Pressable>
           </View>
@@ -280,6 +287,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  enterButtonDisabled: {
+    opacity: 0.4,
   },
   enterText: {
     fontFamily: fontFamily.body,

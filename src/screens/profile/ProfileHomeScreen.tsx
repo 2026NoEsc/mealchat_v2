@@ -2,6 +2,8 @@ import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppHeader from '../../components/AppHeader';
+import { useNavigation } from '../../navigation/NavigationContext';
+import type { RouteName } from '../../navigation/routes';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
@@ -25,7 +27,15 @@ const STEPS: Step[] = [
   { done: false, label: '음식 취향 매칭', action: '게임 시작' },
 ];
 
-const LINKS = ['일정 입력하기', '내 친구 관리', '정보 공개 범위 설정'];
+/**
+ * `route` 가 없는 항목은 해당 화면이 아직 구현되지 않은 것이다.
+ * (내 친구 관리는 Figma 에도 화면이 없고, 정보 공개 범위는 `256:2494` 미구현)
+ */
+const LINKS: { label: string; route?: RouteName }[] = [
+  { label: '일정 입력하기', route: 'Schedule' },
+  { label: '내 친구 관리' },
+  { label: '정보 공개 범위 설정' },
+];
 
 /**
  * Figma 프로필/프로필 홈 (159:544) — 220 x 486
@@ -33,6 +43,7 @@ const LINKS = ['일정 입력하기', '내 친구 관리', '정보 공개 범위
  */
 export default function ProfileHomeScreen() {
   const insets = useSafeAreaInsets();
+  const { resetTo } = useNavigation();
 
   return (
     <View style={styles.screen}>
@@ -86,16 +97,22 @@ export default function ProfileHomeScreen() {
         </View>
 
         <View style={[styles.card, styles.cardSpacing, styles.linkCard]}>
-          {LINKS.map((label, i) => (
-            <Pressable key={label} style={[styles.linkRow, i > 0 && styles.linkDivider]}>
-              <Text style={styles.linkLabel}>{label}</Text>
+          {LINKS.map((link, i) => (
+            <Pressable
+              key={link.label}
+              style={[styles.linkRow, i > 0 && styles.linkDivider]}
+              disabled={!link.route}
+              onPress={() => link.route && resetTo(link.route)}>
+              <Text style={[styles.linkLabel, !link.route && styles.linkLabelDisabled]}>
+                {link.label}
+              </Text>
               <Text style={styles.linkArrow}>→</Text>
             </Pressable>
           ))}
         </View>
 
         <View style={styles.footer}>
-          <Pressable>
+          <Pressable onPress={() => resetTo('Login')}>
             <Text style={styles.logout}>로그아웃</Text>
           </Pressable>
           <Pressable>
@@ -289,6 +306,9 @@ const styles = StyleSheet.create({
     fontSize: fs(7.5),
     lineHeight: fs(10),
     color: colors.textPrimary,
+  },
+  linkLabelDisabled: {
+    color: colors.textMuted,
   },
   linkArrow: {
     fontFamily: fontFamily.body,

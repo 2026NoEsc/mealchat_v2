@@ -57,11 +57,14 @@ type SheetKey = 'schedule' | 'menu' | 'settlement' | null;
 export default function ChatRoomScreen() {
   const insets = useSafeAreaInsets();
   const { goBack, current } = useNavigation();
-  const params = current.params as { title?: string; avatar?: ImageSourcePropType } | undefined;
+  const params = current.params as
+    | { title?: string; avatar?: ImageSourcePropType; openSheet?: SheetKey }
+    | undefined;
 
   const [messages, setMessages] = useState<Message[]>(INITIAL);
   const [draft, setDraft] = useState('');
-  const [sheet, setSheet] = useState<SheetKey>(null);
+  // 홈의 "미완료 정산 보기" 처럼 특정 시트를 펼친 채로 들어오는 경로가 있다
+  const [sheet, setSheet] = useState<SheetKey>(params?.openSheet ?? null);
   const scrollRef = useRef<ScrollView>(null);
 
   const append = (message: Message) => setMessages((prev) => [...prev, message]);

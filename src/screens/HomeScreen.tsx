@@ -65,7 +65,10 @@ export default function HomeScreen() {
               <Paperclip size={s(13)} color={colors.textPrimary} strokeWidth={2} />
             </View>
             <Text style={styles.cardTitle}>다가올 일정</Text>
-            <Pressable style={styles.addButton} hitSlop={s(6)}>
+            <Pressable
+              style={styles.addButton}
+              hitSlop={s(6)}
+              onPress={() => navigate('ScheduleDetail')}>
               <Plus size={s(9)} color={colors.textOnAccent} strokeWidth={3} />
             </Pressable>
           </View>
@@ -96,7 +99,12 @@ export default function HomeScreen() {
           ))}
         </View>
 
-        <Pressable style={styles.payNudge}>
+        {/* 정산 UI 는 채팅방의 N빵 정산 시트뿐이라 해당 방을 열면서 시트를 펼친다 */}
+        <Pressable
+          style={styles.payNudge}
+          onPress={() =>
+            navigate('ChatRoom', { title: '오늘 점심팟', openSheet: 'settlement' })
+          }>
           <View style={styles.flex}>
             <Text style={styles.payTitle}>미완료 정산 1건</Text>
             <Text style={styles.paySub}>방이 사라져도 정산 내역은 남아 있어요</Text>
