@@ -37,7 +37,8 @@ type Message =
   | { kind: 'confirm'; title: string; date: string };
 
 const INITIAL: Message[] = [
-  { kind: 'date', text: '2026년 8월 12일 (수)' },
+  // 8/15 = 금 기준이므로 8/12 는 화요일 (Figma 는 "수" 로 적혀 있으나 자체 모순)
+  { kind: 'date', text: '2026년 8월 12일 (화)' },
   { kind: 'sys', text: '두두님이 초대 코드로 입장했어요' },
   { kind: 'msg', mine: false, name: '또리', avatar: ddori, text: '다들 수요일 점심 괜찮아요?', time: '오전 11:02' },
   { kind: 'msg', mine: true, text: '저는 좋아요! 면 종류면 더 좋고요', time: '오전 11:04' },

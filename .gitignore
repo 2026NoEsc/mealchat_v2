@@ -6,3 +6,6 @@ web-build/
 .env
 .env.local
 .DS_Store
+
+# Figma 페이지 렌더 원본 (scripts/crop-figma.ps1 의 입력). 수십 MB 라 커밋하지 않는다.
+.figma/

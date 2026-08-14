@@ -11,14 +11,29 @@ import { fontFamily, weight } from '../../theme/typography';
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
-/** Figma 캘린더의 2026년 8월 — 1일이 목요일 열(index 3)부터 시작한다 */
-const WEEKS: (number | null)[][] = [
-  [null, null, null, 1, 2, 3, 4],
-  [5, 6, 7, 8, 9, 10, 11],
-  [12, 13, 14, 15, 16, 17, 18],
-  [19, 20, 21, 22, 23, 24, 25],
-  [26, 27, 28, 29, 30, 31, null],
-];
+/**
+ * 2026년 8월 1일이 놓이는 요일 열(0=일).
+ *
+ * 앱 전체가 `8/15 = 금요일` 기준으로 통일돼 있고(채팅 배너·확정 카드·AI 추천·
+ * 일정 추가 STEP 2 그리드), 거기서 역산하면 8/1 도 금요일이다.
+ * Figma 캘린더는 1일을 수요일 열에 그려 두었으나 같은 파일의 STEP 2 그리드
+ * (`13수`)와 어긋나므로 STEP 2 쪽 기준을 따른다.
+ */
+const FIRST_COLUMN = 5;
+const DAYS_IN_MONTH = 31;
+
+/** 날짜 → 요일 열 인덱스 */
+const columnOf = (day: number) => (day - 1 + FIRST_COLUMN) % 7;
+
+const WEEKS: (number | null)[][] = (() => {
+  const cells: (number | null)[] = Array<number | null>(FIRST_COLUMN).fill(null);
+  for (let day = 1; day <= DAYS_IN_MONTH; day += 1) cells.push(day);
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const rows: (number | null)[][] = [];
+  for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
+  return rows;
+})();
 
 /** 연한 배경으로 강조된 날 */
 const TINTED = [3, 18];
@@ -47,7 +62,8 @@ const EVENTS: Event[] = [
 export default function ScheduleHomeScreen() {
   const insets = useSafeAreaInsets();
   const { navigate } = useNavigation();
-  const [selected, setSelected] = useState(25);
+  // 아래 EVENTS 가 13일 일정이므로 선택 상태도 13일로 맞춘다
+  const [selected, setSelected] = useState(13);
   const [autoSync, setAutoSync] = useState(true);
 
   return (
@@ -112,7 +128,9 @@ export default function ScheduleHomeScreen() {
           <View style={styles.divider} />
 
           <View style={styles.dayHeader}>
-            <Text style={styles.dayTitle}>8월 13일 (목) 일정</Text>
+            <Text style={styles.dayTitle}>
+              8월 {selected}일 ({WEEKDAYS[columnOf(selected)]}) 일정
+            </Text>
             <Pressable style={styles.addButton} onPress={() => navigate('ScheduleDetail')}>
               <Plus size={s(7)} color={colors.textOnAccent} strokeWidth={3} />
               <Text style={styles.addText}>일정 추가</Text>
