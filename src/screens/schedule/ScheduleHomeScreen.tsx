@@ -4,36 +4,13 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppHeader from '../../components/AppHeader';
+import { buildWeeks, columnOf, MONTH, WEEKDAYS, YEAR } from '../../lib/calendar';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
 
-const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
-
-/**
- * 2026년 8월 1일이 놓이는 요일 열(0=일).
- *
- * 앱 전체가 `8/15 = 금요일` 기준으로 통일돼 있고(채팅 배너·확정 카드·AI 추천·
- * 일정 추가 STEP 2 그리드), 거기서 역산하면 8/1 도 금요일이다.
- * Figma 캘린더는 1일을 수요일 열에 그려 두었으나 같은 파일의 STEP 2 그리드
- * (`13수`)와 어긋나므로 STEP 2 쪽 기준을 따른다.
- */
-const FIRST_COLUMN = 5;
-const DAYS_IN_MONTH = 31;
-
-/** 날짜 → 요일 열 인덱스 */
-const columnOf = (day: number) => (day - 1 + FIRST_COLUMN) % 7;
-
-const WEEKS: (number | null)[][] = (() => {
-  const cells: (number | null)[] = Array<number | null>(FIRST_COLUMN).fill(null);
-  for (let day = 1; day <= DAYS_IN_MONTH; day += 1) cells.push(day);
-  while (cells.length % 7 !== 0) cells.push(null);
-
-  const rows: (number | null)[][] = [];
-  for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
-  return rows;
-})();
+const WEEKS = buildWeeks();
 
 /** 연한 배경으로 강조된 날 */
 const TINTED = [3, 18];
@@ -89,7 +66,9 @@ export default function ScheduleHomeScreen() {
             <Pressable hitSlop={s(8)}>
               <Text style={styles.navArrow}>‹</Text>
             </Pressable>
-            <Text style={styles.navMonth}>2026년 8월</Text>
+            <Text style={styles.navMonth}>
+              {YEAR}년 {MONTH}월
+            </Text>
             <Pressable hitSlop={s(8)}>
               <Text style={styles.navArrow}>›</Text>
             </Pressable>
@@ -129,7 +108,7 @@ export default function ScheduleHomeScreen() {
 
           <View style={styles.dayHeader}>
             <Text style={styles.dayTitle}>
-              8월 {selected}일 ({WEEKDAYS[columnOf(selected)]}) 일정
+              {MONTH}월 {selected}일 ({WEEKDAYS[columnOf(selected)]}) 일정
             </Text>
             <Pressable style={styles.addButton} onPress={() => navigate('ScheduleDetail')}>
               <Plus size={s(7)} color={colors.textOnAccent} strokeWidth={3} />

@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { formatDate, MONTH, weekdayOf, YEAR } from '../../lib/calendar';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors, shadows } from '../../theme/tokens';
@@ -37,14 +38,13 @@ type Message =
   | { kind: 'confirm'; title: string; date: string };
 
 const INITIAL: Message[] = [
-  // 8/15 = 금 기준이므로 8/12 는 화요일 (Figma 는 "수" 로 적혀 있으나 자체 모순)
-  { kind: 'date', text: '2026년 8월 12일 (화)' },
+  { kind: 'date', text: `${YEAR}년 ${formatDate(12)}` },
   { kind: 'sys', text: '두두님이 초대 코드로 입장했어요' },
   { kind: 'msg', mine: false, name: '또리', avatar: ddori, text: '다들 수요일 점심 괜찮아요?', time: '오전 11:02' },
   { kind: 'msg', mine: true, text: '저는 좋아요! 면 종류면 더 좋고요', time: '오전 11:04' },
   { kind: 'msg', mine: false, name: '두두', avatar: dudu, text: '국밥 어때요 국밥', time: '오전 11:05' },
   { kind: 'sticker', name: '웰링', avatar: welling, sticker: welling, time: '오전 11:06' },
-  { kind: 'confirm', title: '일정이 확정됐어요', date: '8월 15일 (금) 18:30' },
+  { kind: 'confirm', title: '일정이 확정됐어요', date: `${formatDate(15)} 18:30` },
 ];
 
 type SheetKey = 'schedule' | 'menu' | 'settlement' | null;
@@ -106,7 +106,9 @@ export default function ChatRoomScreen() {
       </View>
 
       <View style={styles.banner}>
-        <Text style={styles.bannerText}>8/15 (금) 18:30 · 조선칼국수 하단점</Text>
+        <Text style={styles.bannerText}>
+          {MONTH}/15 ({weekdayOf(15)}) 18:30 · 조선칼국수 하단점
+        </Text>
       </View>
 
       <ScrollView

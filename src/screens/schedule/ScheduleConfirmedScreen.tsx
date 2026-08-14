@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppHeader from '../../components/AppHeader';
 import { CompleteButton } from '../../components/ui/Button';
+import { formatDate, YEAR } from '../../lib/calendar';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors, shadows } from '../../theme/tokens';
@@ -52,7 +53,7 @@ export default function ScheduleConfirmedScreen() {
 
           <InfoRow
             icon={<CalendarDays size={s(9)} color={colors.primary} strokeWidth={2} />}
-            text={`2026년 ${pick?.when ?? '8월 15일 (금) 18:30'}`}
+            text={`${YEAR}년 ${pick?.when ?? `${formatDate(15)} 18:30`}`}
           />
           <InfoRow
             icon={<MapPin size={s(9)} color={colors.primary} strokeWidth={2} />}

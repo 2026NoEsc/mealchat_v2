@@ -4,19 +4,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppHeader from '../../components/AppHeader';
 import { CompleteButton } from '../../components/ui/Button';
+import { weekdayOf } from '../../lib/calendar';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
 import ScheduleStepHeader from './ScheduleStepHeader';
 
-const DAYS = [
-  { day: 13, label: '수' },
-  { day: 14, label: '목' },
-  { day: 15, label: '금' },
-  { day: 16, label: '토' },
-  { day: 17, label: '일' },
-];
+/** 요일은 실제 달력에서 파생한다 ([lib/calendar](../../lib/calendar.ts)) */
+const DAYS = [13, 14, 15, 16, 17].map((day) => ({ day, label: weekdayOf(day) }));
 
 const HOURS = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
 
@@ -25,7 +21,7 @@ const END_HOUR = HOURS[HOURS.length - 1] + 1;
 
 const key = (dayIndex: number, hour: number) => `${dayIndex}-${hour}`;
 
-/** Figma 기본 선택 상태 — 15(금)18~20, 16(토)12~14, 17(일)19~21 */
+/** Figma 기본 선택 상태 — 15일 18~20, 16일 12~14, 17일 19~21 */
 const INITIAL = new Set([
   key(2, 18), key(2, 19),
   key(3, 12), key(3, 13),
@@ -68,9 +64,9 @@ export default function ScheduleTimeScreen() {
         <View style={styles.card}>
           <View style={styles.headRow}>
             <View style={styles.hourLabel} />
-            {DAYS.map((d, i) => (
+            {DAYS.map((d) => (
               <View key={d.day} style={styles.col}>
-                <Text style={[styles.headText, i === DAYS.length - 1 && styles.sunday]}>
+                <Text style={[styles.headText, d.label === '일' && styles.sunday]}>
                   {d.day}·{d.label}
                 </Text>
               </View>

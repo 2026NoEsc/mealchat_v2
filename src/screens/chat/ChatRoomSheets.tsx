@@ -4,6 +4,7 @@ import { Image, ImageSourcePropType, Pressable, StyleSheet, Text, View } from 'r
 
 import BottomSheet from '../../components/BottomSheet';
 import { CompleteButton } from '../../components/ui/Button';
+import { MONTH, weekdayOf } from '../../lib/calendar';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
@@ -25,13 +26,11 @@ type SheetProps = {
 
 /* ------------------------------------------------------------------ 일정 조율 */
 
-/** 8/15 = 금요일 기준 — 채팅방 배너·확정 카드·AI 추천 화면과 요일을 맞춘다 */
-const DAYS = [
-  { day: '14', label: '목요일' },
-  { day: '15', label: '금요일' },
-  { day: '16', label: '토요일' },
-  { day: '17', label: '일요일' },
-];
+/** 요일은 실제 달력에서 파생한다 ([lib/calendar](../../lib/calendar.ts)) */
+const DAYS = [14, 15, 16, 17].map((day) => ({
+  day: String(day),
+  label: `${weekdayOf(day)}요일`,
+}));
 
 const SLOTS = [
   { time: '11:30 – 12:30', count: 2 },
@@ -79,7 +78,9 @@ export function ScheduleSheet({ visible, onClose, onConfirm }: SheetProps) {
         showNext
         style={styles.cta}
         onPress={() => {
-          onConfirm(`8월 ${DAYS[day].day}일 (${DAYS[day].label[0]}) ${SLOTS[slot].time} 로 일정을 제안했어요`);
+          onConfirm(
+            `${MONTH}월 ${DAYS[day].day}일 (${DAYS[day].label[0]}) ${SLOTS[slot].time} 로 일정을 제안했어요`,
+          );
           onClose();
         }}
       />

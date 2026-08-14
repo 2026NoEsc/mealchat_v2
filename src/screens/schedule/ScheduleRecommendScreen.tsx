@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppHeader from '../../components/AppHeader';
 import { CompleteButton } from '../../components/ui/Button';
+import { formatDate } from '../../lib/calendar';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors, shadows } from '../../theme/tokens';
@@ -21,7 +22,7 @@ type Pick = {
 const PICKS: Pick[] = [
   {
     rank: '1순위',
-    when: '8월 15일 (금) 18:30',
+    when: `${formatDate(15)} 18:30`,
     score: 92,
     attend: '4 / 4명 참석 • ☀ 맑음',
     travel: '평균 이동 18분',
@@ -29,7 +30,7 @@ const PICKS: Pick[] = [
   },
   {
     rank: '2순위',
-    when: '8월 16일 (토) 12:00',
+    when: `${formatDate(16)} 12:00`,
     score: 78,
     attend: '3 / 4명 참석 • ⛅ 흐림',
     travel: '평균 이동 24분',
@@ -37,7 +38,7 @@ const PICKS: Pick[] = [
   },
   {
     rank: '3순위',
-    when: '8월 21일 (목) 19:00',
+    when: `${formatDate(21)} 19:00`,
     score: 61,
     attend: '3 / 4명 참석 • 🌧 비',
     travel: '평균 이동 31분',
