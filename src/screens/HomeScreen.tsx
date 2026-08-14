@@ -1,11 +1,9 @@
 import { Paperclip, Plus } from 'lucide-react-native';
-import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AdCarousel from '../components/AdCarousel';
 import AppHeader from '../components/AppHeader';
-import NotificationPanel from '../components/NotificationPanel';
 import { CompleteButton } from '../components/ui/Button';
 import { useNavigation } from '../navigation/NavigationContext';
 import { fs, s } from '../theme/scale';
@@ -44,12 +42,11 @@ const UPCOMING: UpcomingItem[] = [
 export default function HomeScreen() {
   const { navigate } = useNavigation();
   const insets = useSafeAreaInsets();
-  const [showNotifications, setShowNotifications] = useState(false);
 
   return (
     <View style={styles.screen}>
       <View style={{ height: insets.top, backgroundColor: colors.surface }} />
-      <AppHeader hasUnread onPressBell={() => setShowNotifications(true)} />
+      <AppHeader />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.greeting}>안녕하세요, 모아님!</Text>
@@ -115,13 +112,9 @@ export default function HomeScreen() {
         <CompleteButton
           label="일정잡기"
           style={styles.cta}
-          onPress={() => navigate('Schedule')}
+          onPress={() => navigate('ScheduleDetail')}
         />
       </ScrollView>
-
-      {showNotifications ? (
-        <NotificationPanel onClose={() => setShowNotifications(false)} />
-      ) : null}
     </View>
   );
 }

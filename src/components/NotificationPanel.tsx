@@ -56,11 +56,23 @@ const NOTICES: Notice[] = [
  * Figma 알림 패널 (549:3408) — 196 x 350 오버레이
  * 타이틀 y12 / 필터 y37 h22 / 행 y68·112·156·200·244 (h39, 간격 5) / 안내문 y333
  */
-export default function NotificationPanel({ onClose }: { onClose: () => void }) {
+export default function NotificationPanel({
+  onClose,
+  onMarkAllRead,
+}: {
+  onClose: () => void;
+  onMarkAllRead?: () => void;
+}) {
   const insets = useSafeAreaInsets();
   const [filter, setFilter] = useState<Filter>('전체');
+  const [notices, setNotices] = useState<Notice[]>(NOTICES);
 
-  const visible = filter === '전체' ? NOTICES : NOTICES.filter((n) => n.kind === filter);
+  const visible = filter === '전체' ? notices : notices.filter((n) => n.kind === filter);
+
+  const markAllRead = () => {
+    setNotices((prev) => prev.map((n) => ({ ...n, unread: false })));
+    onMarkAllRead?.();
+  };
 
   return (
     <View style={styles.overlay}>
@@ -70,7 +82,7 @@ export default function NotificationPanel({ onClose }: { onClose: () => void }) 
       <View style={[styles.panel, { marginTop: insets.top + s(48) }]}>
         <View style={styles.header}>
           <Text style={styles.title}>알림</Text>
-          <Pressable onPress={onClose} hitSlop={s(8)}>
+          <Pressable onPress={markAllRead} hitSlop={s(8)}>
             <Text style={styles.readAll}>모두 읽음</Text>
           </Pressable>
         </View>

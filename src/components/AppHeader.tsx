@@ -4,20 +4,20 @@ import { fs, s } from '../theme/scale';
 import { colors, radii, shadows } from '../theme/tokens';
 import { fontFamily, weight } from '../theme/typography';
 import { BellIcon } from './icons';
+import { useNotifications } from './NotificationsProvider';
 
 const logo = require('../../assets/brand/logo-main.png');
-
-type Props = {
-  /** 알림 미확인 표시 (홈 화면의 벨 우상단 오렌지 점) */
-  hasUnread?: boolean;
-  onPressBell?: () => void;
-};
 
 /**
  * Figma AppHeader (46:22) — 220 x 42
  * 로고 칩 #E6E6E6 / 워드마크 #FF9900 12px / 우측 알림 벨
+ *
+ * 벨은 화면마다 배선하지 않고 [NotificationsProvider](./NotificationsProvider.tsx) 에
+ * 직접 연결되므로, 헤더를 놓는 것만으로 모든 화면에서 알림이 열린다.
  */
-export default function AppHeader({ hasUnread, onPressBell }: Props) {
+export default function AppHeader() {
+  const { hasUnread, open: onPressBell } = useNotifications();
+
   return (
     <View style={styles.container}>
       <View style={styles.logoChip} />
