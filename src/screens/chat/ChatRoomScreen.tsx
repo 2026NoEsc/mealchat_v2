@@ -20,10 +20,12 @@ import { fs, s } from '../../theme/scale';
 import { colors, shadows } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
 import { MembersSheet, MenuSheet, ScheduleSheet, SettlementSheet } from './ChatRoomSheets';
+import EmoticonPanel from './EmoticonPanel';
 
 const ddori = require('../../../assets/brand/ddori.png');
 const dudu = require('../../../assets/brand/dudu.png');
 const welling = require('../../../assets/brand/welling2.png');
+const moa = require('../../../assets/brand/moa.png');
 
 /** Figma 채팅방 색상 — 말풍선 시간 / 날짜 구분선 / 시스템 말풍선 글자 */
 const TIME_GRAY = '#B4B2A8';
@@ -67,6 +69,7 @@ export default function ChatRoomScreen() {
   const [draft, setDraft] = useState('');
   // 홈의 "미완료 정산 보기" 처럼 특정 시트를 펼친 채로 들어오는 경로가 있다
   const [sheet, setSheet] = useState<SheetKey>(params?.openSheet ?? null);
+  const [emoticonOpen, setEmoticonOpen] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
   const append = (message: Message) => setMessages((prev) => [...prev, message]);
@@ -168,13 +171,24 @@ export default function ChatRoomScreen() {
             onSubmitEditing={send}
             returnKeyType="send"
           />
-          <Smile size={s(10)} color={TIME_GRAY} strokeWidth={2} />
+          <Pressable onPress={() => setEmoticonOpen((v) => !v)} hitSlop={s(6)}>
+            <Smile size={s(10)} color={emoticonOpen ? colors.primary : TIME_GRAY} strokeWidth={2} />
+          </Pressable>
         </View>
 
         <Pressable style={styles.sendButton} onPress={send}>
           <Send size={s(9)} color={colors.textOnAccent} strokeWidth={2.5} />
         </Pressable>
       </View>
+
+      {emoticonOpen ? (
+        <EmoticonPanel
+          onPick={(sticker) => {
+            append({ kind: 'sticker', name: '모아(나)', avatar: moa, sticker: sticker.source, time: nowLabel() });
+            setEmoticonOpen(false);
+          }}
+        />
+      ) : null}
 
       <ScheduleSheet
         visible={sheet === 'schedule'}

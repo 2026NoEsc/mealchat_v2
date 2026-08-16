@@ -23,8 +23,7 @@ type Step = { done: boolean; label: string; action: string; route?: RouteName };
 
 const STEPS: Step[] = [
   { done: true, label: '프로필 이모지 수정', action: '완료됨' },
-  // 사는 곳 설정 = 출발지 설정 화면(256:2333) 인데 아직 없어 공개 범위로 대신 보낸다
-  { done: false, label: '사는 곳 설정', action: '설정하기', route: 'Privacy' },
+  { done: false, label: '사는 곳 설정', action: '설정하기', route: 'Origin' },
   { done: false, label: '음식 취향 매칭', action: '게임 시작', route: 'TasteGame' },
 ];
 

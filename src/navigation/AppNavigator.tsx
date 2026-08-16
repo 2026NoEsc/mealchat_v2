@@ -8,6 +8,7 @@ import ComingSoonScreen from '../screens/ComingSoonScreen';
 import HomeScreen from '../screens/HomeScreen';
 import LoginScreen from '../screens/LoginScreen';
 import FriendsScreen from '../screens/profile/FriendsScreen';
+import OriginScreen from '../screens/profile/OriginScreen';
 import PrivacyScreen from '../screens/profile/PrivacyScreen';
 import ProfileHomeScreen from '../screens/profile/ProfileHomeScreen';
 import ScheduleConfirmedScreen from '../screens/schedule/ScheduleConfirmedScreen';
@@ -80,6 +81,8 @@ function renderScreen(name: RouteName) {
       return <FriendsScreen />;
     case 'Privacy':
       return <PrivacyScreen />;
+    case 'Origin':
+      return <OriginScreen />;
   }
 }
 

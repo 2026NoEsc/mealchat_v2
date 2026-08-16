@@ -40,7 +40,7 @@ const MEMBERS: Member[] = [
  */
 export default function RoomDetailScreen() {
   const insets = useSafeAreaInsets();
-  const { goBack, resetTo, current } = useNavigation();
+  const { goBack, navigate, resetTo, current } = useNavigation();
   const title = (current.params as { title?: string } | undefined)?.title ?? '오늘 점심팟';
 
   const [copied, setCopied] = useState(false);
@@ -77,7 +77,7 @@ export default function RoomDetailScreen() {
         <View style={[styles.card, styles.cardSpacing]}>
           <View style={styles.placeHeader}>
             <Text style={styles.placeTitle}>약속 장소</Text>
-            <Pressable hitSlop={s(6)}>
+            <Pressable hitSlop={s(6)} onPress={() => navigate('Origin')}>
               <Text style={styles.changeText}>변경</Text>
             </Pressable>
           </View>
