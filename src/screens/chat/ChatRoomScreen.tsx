@@ -56,7 +56,7 @@ type SheetKey = 'schedule' | 'menu' | 'settlement' | null;
  */
 export default function ChatRoomScreen() {
   const insets = useSafeAreaInsets();
-  const { goBack, current } = useNavigation();
+  const { goBack, navigate, current } = useNavigation();
   const params = current.params as
     | { title?: string; avatar?: ImageSourcePropType; openSheet?: SheetKey }
     | undefined;
@@ -150,9 +150,10 @@ export default function ChatRoomScreen() {
       </View>
 
       <View style={[styles.inputBar, { paddingBottom: insets.bottom }]}>
-        <View style={styles.plusButton}>
+        {/* 대화 중 새 약속 잡기 — 일정 추가 플로우로 보낸다 */}
+        <Pressable style={styles.plusButton} onPress={() => navigate('ScheduleDetail')}>
           <Text style={styles.plusText}>＋</Text>
-        </View>
+        </Pressable>
 
         <View style={styles.input}>
           <TextInput

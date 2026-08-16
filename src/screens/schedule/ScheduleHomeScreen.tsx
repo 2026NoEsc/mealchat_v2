@@ -5,31 +5,34 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppHeader from '../../components/AppHeader';
 import { buildWeeks, columnOf, MONTH, WEEKDAYS, YEAR } from '../../lib/calendar';
-import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
+import { EventSheet, MemoSheet, type PersonalEvent } from './PersonalEventSheet';
 
 const WEEKS = buildWeeks();
 
-/** 연한 배경으로 강조된 날 */
+/** 연한 배경으로 강조된 날 (Figma 표현 유지) */
 const TINTED = [3, 18];
-/** 일정이 있어 점이 찍힌 날 */
-const DOTTED = [19, 23, 24, 30];
 
-type Event = {
-  title: string;
-  time: string;
-  color: string;
-  /** 기기 캘린더에서 동기화된 일정 — 편집 대신 잠금 칩 */
-  device?: boolean;
+/**
+ * 날짜별 일정. 13일은 Figma 원본이고, 나머지는 Figma 에서 점이 찍혀 있던
+ * 19·23·24·30 일을 채운 것이다. 점은 이 데이터에서 파생된다.
+ */
+const INITIAL_EVENTS: Record<number, PersonalEvent[]> = {
+  13: [
+    { id: 'a', title: '알바', time: '18:00 ~ 22:00', color: '#5B9BD5' },
+    { id: 'b', title: 'CCrate 중간발표', time: '12:00 ~ 13:00', color: '#B483C8' },
+    { id: 'c', title: 'MedEve 스터디', time: '09:00 ~ 10:30', color: '#9C9C9C', device: true },
+  ],
+  19: [{ id: 'd', title: '알바', time: '18:00 ~ 22:00', color: '#5B9BD5' }],
+  23: [{ id: 'e', title: '가족 모임', time: '12:00 ~ 15:00', color: '#04CDA3' }],
+  24: [
+    { id: 'f', title: '알바', time: '18:00 ~ 22:00', color: '#5B9BD5' },
+    { id: 'g', title: '치과', time: '10:00 ~ 11:00', color: '#9C9C9C', device: true },
+  ],
+  30: [{ id: 'h', title: '동아리 정기모임', time: '19:00 ~ 21:00', color: '#B483C8' }],
 };
-
-const EVENTS: Event[] = [
-  { title: '알바', time: '18:00 ~ 22:00', color: '#5B9BD5' },
-  { title: 'CCrate 중간발표', time: '12:00 ~ 13:00', color: '#B483C8' },
-  { title: 'MedEve 스터디', time: '09:00 ~ 10:30', color: '#9C9C9C', device: true },
-];
 
 /**
  * Figma 일정 조율 (309:1077) — 220 x 486
@@ -38,10 +41,42 @@ const EVENTS: Event[] = [
  */
 export default function ScheduleHomeScreen() {
   const insets = useSafeAreaInsets();
-  const { navigate } = useNavigation();
-  // 아래 EVENTS 가 13일 일정이므로 선택 상태도 13일로 맞춘다
   const [selected, setSelected] = useState(13);
   const [autoSync, setAutoSync] = useState(true);
+
+  const [eventsByDay, setEventsByDay] = useState(INITIAL_EVENTS);
+  const [memosByDay, setMemosByDay] = useState<Record<number, string>>({});
+
+  const [eventSheet, setEventSheet] = useState<{ open: boolean; editing: PersonalEvent | null }>({
+    open: false,
+    editing: null,
+  });
+  const [memoSheet, setMemoSheet] = useState(false);
+
+  const events = eventsByDay[selected] ?? [];
+  const memo = memosByDay[selected] ?? '';
+  /** 점은 일정 데이터에서 파생한다 — 하드코딩하면 추가/삭제와 어긋난다 */
+  const dotted = new Set(
+    Object.entries(eventsByDay)
+      .filter(([, list]) => list.length > 0)
+      .map(([day]) => Number(day)),
+  );
+
+  const saveEvent = (event: PersonalEvent) =>
+    setEventsByDay((prev) => {
+      const list = prev[selected] ?? [];
+      const exists = list.some((e) => e.id === event.id);
+      return {
+        ...prev,
+        [selected]: exists ? list.map((e) => (e.id === event.id ? event : e)) : [...list, event],
+      };
+    });
+
+  const deleteEvent = (id: string) =>
+    setEventsByDay((prev) => ({
+      ...prev,
+      [selected]: (prev[selected] ?? []).filter((e) => e.id !== id),
+    }));
 
   return (
     <View style={styles.screen}>
@@ -97,7 +132,7 @@ export default function ScheduleHomeScreen() {
                     ]}
                     onPress={() => setSelected(day)}>
                     <Text style={[styles.day, dayColor(di)]}>{day}</Text>
-                    {DOTTED.includes(day) ? <View style={styles.dot} /> : null}
+                    {dotted.has(day) ? <View style={styles.dot} /> : null}
                   </Pressable>
                 );
               })}
@@ -110,41 +145,69 @@ export default function ScheduleHomeScreen() {
             <Text style={styles.dayTitle}>
               {MONTH}월 {selected}일 ({WEEKDAYS[columnOf(selected)]}) 일정
             </Text>
-            <Pressable style={styles.addButton} onPress={() => navigate('ScheduleDetail')}>
+            {/* 캘린더 기본 기능 — 개인 일정을 이 날짜에 직접 추가한다 */}
+            <Pressable
+              style={styles.addButton}
+              onPress={() => setEventSheet({ open: true, editing: null })}>
               <Plus size={s(7)} color={colors.textOnAccent} strokeWidth={3} />
               <Text style={styles.addText}>일정 추가</Text>
             </Pressable>
           </View>
 
-          {EVENTS.map((event) => (
-            <View key={event.title} style={styles.eventRow}>
-              <View style={[styles.eventBar, { backgroundColor: event.color }]} />
-              <View style={styles.eventBody}>
-                <Text style={styles.eventTitle}>{event.title}</Text>
-                <View style={styles.eventTimeRow}>
-                  <Clock size={s(6.5)} color={colors.textMuted} strokeWidth={2} />
-                  <Text style={styles.eventTime}>{event.time}</Text>
+          {events.length === 0 ? (
+            <Text style={styles.emptyText}>등록된 일정이 없어요</Text>
+          ) : (
+            events.map((event) => (
+              <View key={event.id} style={styles.eventRow}>
+                <View style={[styles.eventBar, { backgroundColor: event.color }]} />
+                <View style={styles.eventBody}>
+                  <Text style={styles.eventTitle}>{event.title}</Text>
+                  <View style={styles.eventTimeRow}>
+                    <Clock size={s(6.5)} color={colors.textMuted} strokeWidth={2} />
+                    <Text style={styles.eventTime}>{event.time}</Text>
+                  </View>
                 </View>
+
+                {event.device ? (
+                  <View style={styles.deviceChip}>
+                    <Lock size={s(6)} color={colors.textMuted} strokeWidth={2} />
+                    <Text style={styles.deviceText}>기기</Text>
+                  </View>
+                ) : (
+                  <Pressable
+                    style={styles.editButton}
+                    onPress={() => setEventSheet({ open: true, editing: event })}>
+                    <Pencil size={s(7.5)} color={colors.textMuted} strokeWidth={2} />
+                  </Pressable>
+                )}
               </View>
+            ))
+          )}
 
-              {event.device ? (
-                <View style={styles.deviceChip}>
-                  <Lock size={s(6)} color={colors.textMuted} strokeWidth={2} />
-                  <Text style={styles.deviceText}>기기</Text>
-                </View>
-              ) : (
-                <Pressable style={styles.editButton}>
-                  <Pencil size={s(7.5)} color={colors.textMuted} strokeWidth={2} />
-                </Pressable>
-              )}
-            </View>
-          ))}
-
-          <Pressable style={styles.memoBox}>
-            <Text style={styles.memoText}>＋ 이 날짜에 약속 메모 남기기</Text>
+          <Pressable style={styles.memoBox} onPress={() => setMemoSheet(true)}>
+            <Text style={[styles.memoText, !!memo && styles.memoTextFilled]}>
+              {memo || '＋ 이 날짜에 약속 메모 남기기'}
+            </Text>
           </Pressable>
         </View>
       </ScrollView>
+
+      <EventSheet
+        visible={eventSheet.open}
+        day={selected}
+        editing={eventSheet.editing}
+        onClose={() => setEventSheet({ open: false, editing: null })}
+        onSave={saveEvent}
+        onDelete={deleteEvent}
+      />
+
+      <MemoSheet
+        visible={memoSheet}
+        day={selected}
+        memo={memo}
+        onClose={() => setMemoSheet(false)}
+        onSave={(next) => setMemosByDay((prev) => ({ ...prev, [selected]: next }))}
+      />
     </View>
   );
 }
@@ -398,6 +461,18 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  emptyText: {
+    marginTop: s(10),
+    marginBottom: s(2),
+    textAlign: 'center',
+    fontFamily: fontFamily.body,
+    fontSize: fs(6.5),
+    lineHeight: fs(9),
+    color: colors.textMuted,
+  },
+  memoTextFilled: {
+    color: colors.textPrimary,
   },
   memoText: {
     fontFamily: fontFamily.body,

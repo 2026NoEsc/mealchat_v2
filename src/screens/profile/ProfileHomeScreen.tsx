@@ -27,14 +27,10 @@ const STEPS: Step[] = [
   { done: false, label: '음식 취향 매칭', action: '게임 시작' },
 ];
 
-/**
- * `route` 가 없는 항목은 해당 화면이 아직 구현되지 않은 것이다.
- * (내 친구 관리는 Figma 에도 화면이 없고, 정보 공개 범위는 `256:2494` 미구현)
- */
-const LINKS: { label: string; route?: RouteName }[] = [
+const LINKS: { label: string; route: RouteName }[] = [
   { label: '일정 입력하기', route: 'Schedule' },
-  { label: '내 친구 관리' },
-  { label: '정보 공개 범위 설정' },
+  { label: '내 친구 관리', route: 'Friends' },
+  { label: '정보 공개 범위 설정', route: 'Privacy' },
 ];
 
 /**
@@ -43,7 +39,7 @@ const LINKS: { label: string; route?: RouteName }[] = [
  */
 export default function ProfileHomeScreen() {
   const insets = useSafeAreaInsets();
-  const { resetTo } = useNavigation();
+  const { navigate, resetTo } = useNavigation();
 
   return (
     <View style={styles.screen}>
@@ -101,11 +97,8 @@ export default function ProfileHomeScreen() {
             <Pressable
               key={link.label}
               style={[styles.linkRow, i > 0 && styles.linkDivider]}
-              disabled={!link.route}
-              onPress={() => link.route && resetTo(link.route)}>
-              <Text style={[styles.linkLabel, !link.route && styles.linkLabelDisabled]}>
-                {link.label}
-              </Text>
+              onPress={() => navigate(link.route)}>
+              <Text style={styles.linkLabel}>{link.label}</Text>
               <Text style={styles.linkArrow}>→</Text>
             </Pressable>
           ))}
@@ -306,9 +299,6 @@ const styles = StyleSheet.create({
     fontSize: fs(7.5),
     lineHeight: fs(10),
     color: colors.textPrimary,
-  },
-  linkLabelDisabled: {
-    color: colors.textMuted,
   },
   linkArrow: {
     fontFamily: fontFamily.body,

@@ -6,6 +6,8 @@ import ChatRoomScreen from '../screens/chat/ChatRoomScreen';
 import ComingSoonScreen from '../screens/ComingSoonScreen';
 import HomeScreen from '../screens/HomeScreen';
 import LoginScreen from '../screens/LoginScreen';
+import FriendsScreen from '../screens/profile/FriendsScreen';
+import PrivacyScreen from '../screens/profile/PrivacyScreen';
 import ProfileHomeScreen from '../screens/profile/ProfileHomeScreen';
 import ScheduleConfirmedScreen from '../screens/schedule/ScheduleConfirmedScreen';
 import ScheduleDetailScreen from '../screens/schedule/ScheduleDetailScreen';
@@ -71,6 +73,10 @@ function renderScreen(name: RouteName) {
       return <ChatRoomScreen />;
     case 'Profile':
       return <ProfileHomeScreen />;
+    case 'Friends':
+      return <FriendsScreen />;
+    case 'Privacy':
+      return <PrivacyScreen />;
   }
 }
 

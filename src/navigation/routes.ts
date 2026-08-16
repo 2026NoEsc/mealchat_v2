@@ -16,7 +16,9 @@ export type RouteName =
   | 'ScheduleConfirmed'
   | 'Chat'
   | 'ChatRoom'
-  | 'Profile';
+  | 'Profile'
+  | 'Friends'
+  | 'Privacy';
 
 export type Route = {
   name: RouteName;
@@ -32,6 +34,9 @@ export const TAB_ROUTES: Record<TabKey, RouteName> = {
 };
 
 export const ROUTE_TO_TAB: Partial<Record<RouteName, TabKey>> = {
+  // 프로필 하위 화면도 Figma 상 하단 탭이 유지된다 (프로필 탭 활성)
+  Friends: 'profile',
+  Privacy: 'profile',
   Home: 'home',
   Schedule: 'schedule',
   // 일정 추가 3단계와 확정 화면도 하단 탭을 유지한다 (Figma 309:1065 / 160:733 / 159:491 / 160:827)
