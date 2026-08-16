@@ -1,4 +1,3 @@
-import { ChevronDown } from 'lucide-react-native';
 import { useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -13,6 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import SignupHeader from '../../components/SignupHeader';
+import BankSelect from '../../components/ui/BankSelect';
 import { AccentButton } from '../../components/ui/Button';
 import TextField, { fieldStyles } from '../../components/ui/TextField';
 import { useNavigation } from '../../navigation/NavigationContext';
@@ -33,6 +33,7 @@ export default function SignupPersonalScreen() {
   const [email, setEmail] = useState('nayana@gmail.com');
   const [password, setPassword] = useState('password');
   const [passwordConfirm, setPasswordConfirm] = useState('password');
+  const [bank, setBank] = useState<string | null>('농협');
   const [account, setAccount] = useState('2467332464666');
   const [birth, setBirth] = useState({ year: '2002', month: '12', day: '20' });
 
@@ -78,10 +79,9 @@ export default function SignupPersonalScreen() {
 
           <Text style={[styles.label, styles.accountLabel]}>계좌번호</Text>
           <View style={styles.accountRow}>
-            <Pressable style={styles.bankChip}>
-              <Text style={styles.bankText}>농협</Text>
-              <ChevronDown size={s(7)} color={colors.textMuted} strokeWidth={2.5} />
-            </Pressable>
+            <View style={styles.bankChip}>
+              <BankSelect value={bank} onChange={setBank} />
+            </View>
             <TextInput
               style={styles.accountInput}
               value={account}
@@ -179,13 +179,6 @@ const styles = StyleSheet.create({
   },
   bankChip: {
     width: s(51),
-    height: s(19),
-    borderRadius: s(8),
-    backgroundColor: colors.card,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: s(5),
   },
   bankText: {
     fontFamily: fontFamily.body,

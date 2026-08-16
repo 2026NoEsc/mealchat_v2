@@ -25,7 +25,6 @@ import EmoticonPanel from './EmoticonPanel';
 const ddori = require('../../../assets/brand/ddori.png');
 const dudu = require('../../../assets/brand/dudu.png');
 const welling = require('../../../assets/brand/welling2.png');
-const moa = require('../../../assets/brand/moa.png');
 
 /** Figma 채팅방 색상 — 말풍선 시간 / 날짜 구분선 / 시스템 말풍선 글자 */
 const TIME_GRAY = '#B4B2A8';
@@ -36,7 +35,14 @@ type Message =
   | { kind: 'date'; text: string }
   | { kind: 'sys'; text: string }
   | { kind: 'msg'; mine: boolean; name?: string; avatar?: ImageSourcePropType; text: string; time: string }
-  | { kind: 'sticker'; name: string; avatar: ImageSourcePropType; sticker: ImageSourcePropType; time: string }
+  | {
+      kind: 'sticker';
+      mine?: boolean;
+      name?: string;
+      avatar?: ImageSourcePropType;
+      sticker: ImageSourcePropType;
+      time: string;
+    }
   | { kind: 'confirm'; title: string; date: string };
 
 const INITIAL: Message[] = [
@@ -184,7 +190,7 @@ export default function ChatRoomScreen() {
       {emoticonOpen ? (
         <EmoticonPanel
           onPick={(sticker) => {
-            append({ kind: 'sticker', name: '모아(나)', avatar: moa, sticker: sticker.source, time: nowLabel() });
+            append({ kind: 'sticker', mine: true, sticker: sticker.source, time: nowLabel() });
             setEmoticonOpen(false);
           }}
         />
@@ -266,6 +272,16 @@ function Row({ message }: { message: Message }) {
       );
 
     case 'sticker':
+      if (message.mine) {
+        return (
+          <View style={styles.mineRow}>
+            <Text style={styles.time}>{message.time}</Text>
+            <View style={styles.sticker}>
+              <Image source={message.sticker} style={styles.stickerImage} resizeMode="contain" />
+            </View>
+          </View>
+        );
+      }
       return (
         <View style={styles.otherRow}>
           <View style={styles.avatar}>

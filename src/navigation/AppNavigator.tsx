@@ -10,6 +10,7 @@ import LoginScreen from '../screens/LoginScreen';
 import FriendsScreen from '../screens/profile/FriendsScreen';
 import OriginScreen from '../screens/profile/OriginScreen';
 import PrivacyScreen from '../screens/profile/PrivacyScreen';
+import ProfileEditScreen from '../screens/profile/ProfileEditScreen';
 import ProfileHomeScreen from '../screens/profile/ProfileHomeScreen';
 import ScheduleConfirmedScreen from '../screens/schedule/ScheduleConfirmedScreen';
 import ScheduleDetailScreen from '../screens/schedule/ScheduleDetailScreen';
@@ -83,6 +84,8 @@ function renderScreen(name: RouteName) {
       return <PrivacyScreen />;
     case 'Origin':
       return <OriginScreen />;
+    case 'ProfileEdit':
+      return <ProfileEditScreen />;
   }
 }
 

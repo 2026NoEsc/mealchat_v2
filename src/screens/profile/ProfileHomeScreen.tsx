@@ -22,7 +22,7 @@ const INFO: InfoRow[] = [
 type Step = { done: boolean; label: string; action: string; route?: RouteName };
 
 const STEPS: Step[] = [
-  { done: true, label: '프로필 이모지 수정', action: '완료됨' },
+  { done: true, label: '프로필 이모지 수정', action: '완료됨', route: 'ProfileEdit' },
   { done: false, label: '사는 곳 설정', action: '설정하기', route: 'Origin' },
   { done: false, label: '음식 취향 매칭', action: '게임 시작', route: 'TasteGame' },
 ];
@@ -54,11 +54,14 @@ export default function ProfileHomeScreen() {
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <View style={styles.card}>
-          <View style={styles.avatarBox}>
-            <Image source={avatar} style={styles.avatar} resizeMode="contain" />
-          </View>
-          <Text style={styles.name}>나야나#433</Text>
-          <Text style={styles.bio}>&ldquo;오늘도 맛있는 하루&rdquo;</Text>
+          {/* 아바타·이름을 누르면 프로필 수정 (309:1086) 으로 들어간다 */}
+          <Pressable style={styles.identity} onPress={() => navigate('ProfileEdit')}>
+            <View style={styles.avatarBox}>
+              <Image source={avatar} style={styles.avatar} resizeMode="contain" />
+            </View>
+            <Text style={styles.name}>나야나#433</Text>
+            <Text style={styles.bio}>&ldquo;오늘도 맛있는 하루&rdquo;</Text>
+          </Pressable>
 
           <View style={styles.infoList}>
             {INFO.map((row) => (
@@ -146,6 +149,9 @@ const styles = StyleSheet.create({
   },
   cardSpacing: {
     marginTop: s(6),
+  },
+  identity: {
+    alignItems: 'center',
   },
   avatarBox: {
     // ph x9 y8 안의 av x71.5 y2 36×36 → 카드 중앙
