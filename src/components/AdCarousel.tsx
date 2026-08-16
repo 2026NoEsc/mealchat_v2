@@ -40,7 +40,9 @@ export default function AdCarousel({ images }: { images: ImageSourcePropType[] }
 const styles = StyleSheet.create({
   container: {
     width: '100%',
-    aspectRatio: 213 / 127.594,
+    // 홈 화면의 배너 카드 실측값 (Figma 84:101 — 197 × 109).
+    // AD Viewer 컴포넌트 원형(213 × 127.594)보다 이쪽이 실제 배치에 맞다.
+    aspectRatio: 197 / 109,
     borderRadius: s(10.29),
     backgroundColor: colors.surface,
     overflow: 'hidden',
