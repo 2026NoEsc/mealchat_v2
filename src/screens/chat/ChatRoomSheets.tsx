@@ -416,3 +416,137 @@ const styles = StyleSheet.create({
     color: colors.primary,
   },
 });
+
+/* ------------------------------------------------------------------ 참여 멤버 */
+
+type RoomMember = {
+  name: string;
+  status: string;
+  role: '방장' | '메이트';
+  avatar: ImageSourcePropType;
+  me?: boolean;
+};
+
+/** Figma 채팅/멤버 패널 (553:768) */
+const ROOM_MEMBERS: RoomMember[] = [
+  { name: '모아(나)', status: '온라인', role: '방장', avatar: moa, me: true },
+  { name: '두두', status: '온라인', role: '메이트', avatar: dudu },
+  { name: '또리', status: '3시간 전', role: '메이트', avatar: ddori },
+  { name: '웰링', status: '온라인', role: '메이트', avatar: welling },
+];
+
+export function MembersSheet({
+  visible,
+  onClose,
+  onInvite,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onInvite: () => void;
+}) {
+  return (
+    <BottomSheet
+      visible={visible}
+      title="참여 멤버"
+      subtitle={`멤버 ${ROOM_MEMBERS.length}명 · 초대코드 VF4HLD`}
+      onClose={onClose}>
+      <View style={memberStyles.list}>
+        {ROOM_MEMBERS.map((member) => (
+          <View
+            key={member.name}
+            style={[memberStyles.row, member.me && memberStyles.rowMe]}>
+            <View style={memberStyles.avatarBox}>
+              <Image source={member.avatar} style={memberStyles.avatar} resizeMode="contain" />
+            </View>
+
+            <View style={memberStyles.body}>
+              <Text style={memberStyles.name}>{member.name}</Text>
+              <Text style={memberStyles.status}>{member.status}</Text>
+            </View>
+
+            {member.role === '방장' ? (
+              <View style={memberStyles.badge}>
+                <Text style={memberStyles.badgeText}>방장</Text>
+              </View>
+            ) : (
+              <Text style={memberStyles.role}>메이트</Text>
+            )}
+          </View>
+        ))}
+      </View>
+
+      <CompleteButton label="＋ 메이트 초대" style={memberStyles.cta} onPress={onInvite} />
+    </BottomSheet>
+  );
+}
+
+const memberStyles = StyleSheet.create({
+  list: {
+    marginTop: s(10),
+    gap: s(5),
+  },
+  row: {
+    height: s(30),
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: s(7),
+    borderRadius: s(8),
+    backgroundColor: colors.surface,
+  },
+  rowMe: {
+    backgroundColor: TINT,
+    borderWidth: s(0.8),
+    borderColor: colors.primary,
+  },
+  avatarBox: {
+    width: s(18),
+    height: s(18),
+    borderRadius: s(6),
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatar: {
+    width: s(12),
+    height: s(14),
+  },
+  body: {
+    flex: 1,
+    marginLeft: s(7),
+  },
+  name: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(7),
+    lineHeight: fs(9),
+    fontWeight: weight.semibold,
+    color: colors.textPrimary,
+  },
+  status: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(5.5),
+    lineHeight: fs(7),
+    color: colors.textMuted,
+  },
+  badge: {
+    paddingHorizontal: s(5),
+    paddingVertical: s(2),
+    borderRadius: s(5),
+    backgroundColor: colors.primary,
+  },
+  badgeText: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(5.5),
+    lineHeight: fs(7),
+    fontWeight: weight.bold,
+    color: colors.textOnAccent,
+  },
+  role: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(6),
+    lineHeight: fs(8),
+    color: colors.textMuted,
+  },
+  cta: {
+    marginTop: s(14),
+  },
+});

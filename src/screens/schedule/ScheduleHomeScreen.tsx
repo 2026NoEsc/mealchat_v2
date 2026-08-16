@@ -4,13 +4,11 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppHeader from '../../components/AppHeader';
-import { buildWeeks, columnOf, MONTH, WEEKDAYS, YEAR } from '../../lib/calendar';
+import { buildWeeksOf, columnOfIn, MONTH, shiftMonth, WEEKDAYS, YEAR } from '../../lib/calendar';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
 import { EventSheet, MemoSheet, type PersonalEvent } from './PersonalEventSheet';
-
-const WEEKS = buildWeeks();
 
 /** 연한 배경으로 강조된 날 (Figma 표현 유지) */
 const TINTED = [3, 18];
@@ -41,7 +39,11 @@ const INITIAL_EVENTS: Record<number, PersonalEvent[]> = {
  */
 export default function ScheduleHomeScreen() {
   const insets = useSafeAreaInsets();
+  const [month, setMonth] = useState({ year: YEAR, month: MONTH });
   const [selected, setSelected] = useState(13);
+  /** 일정 데이터는 기준 달(2026년 8월)에만 있다 */
+  const isBaseMonth = month.year === YEAR && month.month === MONTH;
+  const weeks = buildWeeksOf(month.year, month.month);
   const [autoSync, setAutoSync] = useState(true);
 
   const [eventsByDay, setEventsByDay] = useState(INITIAL_EVENTS);
@@ -53,11 +55,11 @@ export default function ScheduleHomeScreen() {
   });
   const [memoSheet, setMemoSheet] = useState(false);
 
-  const events = eventsByDay[selected] ?? [];
-  const memo = memosByDay[selected] ?? '';
+  const events = isBaseMonth ? eventsByDay[selected] ?? [] : [];
+  const memo = isBaseMonth ? memosByDay[selected] ?? '' : '';
   /** 점은 일정 데이터에서 파생한다 — 하드코딩하면 추가/삭제와 어긋난다 */
   const dotted = new Set(
-    Object.entries(eventsByDay)
+    (isBaseMonth ? Object.entries(eventsByDay) : [])
       .filter(([, list]) => list.length > 0)
       .map(([day]) => Number(day)),
   );
@@ -98,13 +100,13 @@ export default function ScheduleHomeScreen() {
 
         <View style={styles.card}>
           <View style={styles.nav}>
-            <Pressable hitSlop={s(8)}>
+            <Pressable hitSlop={s(8)} onPress={() => setMonth((m) => shiftMonth(m.year, m.month, -1))}>
               <Text style={styles.navArrow}>‹</Text>
             </Pressable>
             <Text style={styles.navMonth}>
-              {YEAR}년 {MONTH}월
+              {month.year}년 {month.month}월
             </Text>
-            <Pressable hitSlop={s(8)}>
+            <Pressable hitSlop={s(8)} onPress={() => setMonth((m) => shiftMonth(m.year, m.month, 1))}>
               <Text style={styles.navArrow}>›</Text>
             </Pressable>
           </View>
@@ -117,7 +119,7 @@ export default function ScheduleHomeScreen() {
             ))}
           </View>
 
-          {WEEKS.map((week, wi) => (
+          {weeks.map((week, wi) => (
             <View key={wi} style={styles.weekRow}>
               {week.map((day, di) => {
                 if (day === null) return <View key={di} style={styles.cell} />;
@@ -143,7 +145,8 @@ export default function ScheduleHomeScreen() {
 
           <View style={styles.dayHeader}>
             <Text style={styles.dayTitle}>
-              {MONTH}월 {selected}일 ({WEEKDAYS[columnOf(selected)]}) 일정
+              {month.month}월 {selected}일 (
+              {WEEKDAYS[columnOfIn(month.year, month.month, selected)]}) 일정
             </Text>
             {/* 캘린더 기본 기능 — 개인 일정을 이 날짜에 직접 추가한다 */}
             <Pressable

@@ -1,4 +1,4 @@
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppHeader from '../../components/AppHeader';
@@ -19,12 +19,13 @@ const INFO: InfoRow[] = [
   { label: '음식 취향', value: '아직 설정 안됨', danger: true },
 ];
 
-type Step = { done: boolean; label: string; action: string };
+type Step = { done: boolean; label: string; action: string; route?: RouteName };
 
 const STEPS: Step[] = [
   { done: true, label: '프로필 이모지 수정', action: '완료됨' },
-  { done: false, label: '사는 곳 설정', action: '설정하기' },
-  { done: false, label: '음식 취향 매칭', action: '게임 시작' },
+  // 사는 곳 설정 = 출발지 설정 화면(256:2333) 인데 아직 없어 공개 범위로 대신 보낸다
+  { done: false, label: '사는 곳 설정', action: '설정하기', route: 'Privacy' },
+  { done: false, label: '음식 취향 매칭', action: '게임 시작', route: 'TasteGame' },
 ];
 
 const LINKS: { label: string; route: RouteName }[] = [
@@ -40,6 +41,12 @@ const LINKS: { label: string; route: RouteName }[] = [
 export default function ProfileHomeScreen() {
   const insets = useSafeAreaInsets();
   const { navigate, resetTo } = useNavigation();
+
+  const confirmDelete = () =>
+    Alert.alert('계정을 삭제할까요?', '모든 밥약 기록과 정산 내역이 사라지고 되돌릴 수 없어요.', [
+      { text: '취소', style: 'cancel' },
+      { text: '삭제', style: 'destructive', onPress: () => resetTo('Login') },
+    ]);
 
   return (
     <View style={styles.screen}>
@@ -83,11 +90,14 @@ export default function ProfileHomeScreen() {
                 {step.done ? '✓' : '○'}
               </Text>
               <Text style={styles.stepLabel}>{step.label}</Text>
-              <View style={[styles.badge, step.done ? styles.badgeDone : styles.badgeAction]}>
+              <Pressable
+                style={[styles.badge, step.done ? styles.badgeDone : styles.badgeAction]}
+                disabled={!step.route}
+                onPress={() => step.route && navigate(step.route)}>
                 <Text style={[styles.badgeText, step.done ? styles.badgeTextDone : styles.badgeTextAction]}>
                   {step.action}
                 </Text>
-              </View>
+              </Pressable>
             </View>
           ))}
         </View>
@@ -108,7 +118,7 @@ export default function ProfileHomeScreen() {
           <Pressable onPress={() => resetTo('Login')}>
             <Text style={styles.logout}>로그아웃</Text>
           </Pressable>
-          <Pressable>
+          <Pressable onPress={confirmDelete}>
             <Text style={styles.deleteAccount}>계정 삭제</Text>
           </Pressable>
         </View>

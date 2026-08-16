@@ -19,7 +19,7 @@ import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors, shadows } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
-import { MenuSheet, ScheduleSheet, SettlementSheet } from './ChatRoomSheets';
+import { MembersSheet, MenuSheet, ScheduleSheet, SettlementSheet } from './ChatRoomSheets';
 
 const ddori = require('../../../assets/brand/ddori.png');
 const dudu = require('../../../assets/brand/dudu.png');
@@ -47,7 +47,7 @@ const INITIAL: Message[] = [
   { kind: 'confirm', title: '일정이 확정됐어요', date: `${formatDate(15)} 18:30` },
 ];
 
-type SheetKey = 'schedule' | 'menu' | 'settlement' | null;
+type SheetKey = 'schedule' | 'menu' | 'settlement' | 'members' | null;
 
 /**
  * Figma 채팅/채팅방 (315:4324) — 220 x 486
@@ -60,6 +60,8 @@ export default function ChatRoomScreen() {
   const params = current.params as
     | { title?: string; avatar?: ImageSourcePropType; openSheet?: SheetKey }
     | undefined;
+
+  const title = params?.title ?? '오늘 점심팟';
 
   const [messages, setMessages] = useState<Message[]>(INITIAL);
   const [draft, setDraft] = useState('');
@@ -94,7 +96,7 @@ export default function ChatRoomScreen() {
         <View style={styles.headerCenter}>
           <View style={styles.headerTitleRow}>
             <Text style={styles.headerTitle} numberOfLines={1}>
-              {params?.title ?? '오늘 점심팟'}
+              {title}
             </Text>
             <View style={styles.countChip}>
               <Text style={styles.countText}>4</Text>
@@ -103,7 +105,7 @@ export default function ChatRoomScreen() {
           <Text style={styles.timer}>11:47:22 후 방이 사라져요.</Text>
         </View>
 
-        <Pressable hitSlop={s(8)}>
+        <Pressable hitSlop={s(8)} onPress={() => navigate('RoomDetail', { title })}>
           <MoreVertical size={s(13)} color={SYS_TEXT} strokeWidth={2} />
         </Pressable>
       </View>
@@ -146,6 +148,7 @@ export default function ChatRoomScreen() {
         <ActionButton
           icon={<Users size={s(13)} color={SYS_TEXT} strokeWidth={2} />}
           label="멤버"
+          onPress={() => setSheet('members')}
         />
       </View>
 
@@ -187,6 +190,14 @@ export default function ChatRoomScreen() {
         visible={sheet === 'settlement'}
         onClose={() => setSheet(null)}
         onConfirm={(text) => append({ kind: 'sys', text })}
+      />
+      <MembersSheet
+        visible={sheet === 'members'}
+        onClose={() => setSheet(null)}
+        onInvite={() => {
+          setSheet(null);
+          append({ kind: 'sys', text: '초대 코드를 복사했어요 — VF4HLD' });
+        }}
       />
     </KeyboardAvoidingView>
   );

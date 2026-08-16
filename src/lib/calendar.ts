@@ -39,3 +39,33 @@ export const buildWeeks = (): (number | null)[][] => {
   for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
   return rows;
 };
+
+/* ------------------------------------------------------ 임의의 달 (월 이동용) */
+
+/** 실제 달력 기준으로 해당 달의 1일이 놓이는 요일 열 */
+export const firstColumnOf = (year: number, month: number) =>
+  new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+
+export const daysInMonth = (year: number, month: number) =>
+  new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+/** 해당 달의 달력 그리드 */
+export const buildWeeksOf = (year: number, month: number): (number | null)[][] => {
+  const cells: (number | null)[] = Array<number | null>(firstColumnOf(year, month)).fill(null);
+  for (let day = 1; day <= daysInMonth(year, month); day += 1) cells.push(day);
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const rows: (number | null)[][] = [];
+  for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
+  return rows;
+};
+
+/** 해당 달 기준 날짜 → 요일 열 */
+export const columnOfIn = (year: number, month: number, day: number) =>
+  (day - 1 + firstColumnOf(year, month)) % 7;
+
+/** 한 달 앞/뒤로 이동 (연도 넘김 처리) */
+export const shiftMonth = (year: number, month: number, delta: number) => {
+  const m = month - 1 + delta;
+  return { year: year + Math.floor(m / 12), month: ((m % 12) + 12) % 12 + 1 };
+};

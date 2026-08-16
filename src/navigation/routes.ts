@@ -16,6 +16,7 @@ export type RouteName =
   | 'ScheduleConfirmed'
   | 'Chat'
   | 'ChatRoom'
+  | 'RoomDetail'
   | 'Profile'
   | 'Friends'
   | 'Privacy';
