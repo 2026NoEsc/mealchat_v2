@@ -4,7 +4,6 @@ import BottomNav from '../components/BottomNav';
 import ChatHomeScreen from '../screens/chat/ChatHomeScreen';
 import ChatRoomScreen from '../screens/chat/ChatRoomScreen';
 import RoomDetailScreen from '../screens/chat/RoomDetailScreen';
-import ComingSoonScreen from '../screens/ComingSoonScreen';
 import HomeScreen from '../screens/HomeScreen';
 import LoginScreen from '../screens/LoginScreen';
 import FriendsScreen from '../screens/profile/FriendsScreen';

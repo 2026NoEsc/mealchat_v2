@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "advisories": [
+    {
+      "id": "GHSA-w3rx-r6r6-pgpr",
+      "package": "image-size",
+      "reason": "Metro build-time asset inspection only. The repository blocks ICNS, JXL, HEIF/HEIC, and AVIF files by extension and file signature, and currently contains only PNG and SVG assets.",
+      "expiresOn": "2026-09-30"
+    },
+    {
+      "id": "GHSA-5p2g-fcmc-qvqq",
+      "package": "image-size",
+      "reason": "Metro build-time asset inspection only. The repository blocks ICNS, JXL, HEIF/HEIC, and AVIF files by extension and file signature, and currently contains only PNG and SVG assets.",
+      "expiresOn": "2026-09-30"
+    },
+    {
+      "id": "GHSA-w5hq-g745-h8pq",
+      "package": "uuid",
+      "reason": "The transitive xcode package is build-time only and calls uuid.v4(); the advisory affects v3, v5, and v6 buffer handling.",
+      "expiresOn": "2026-09-30"
+    }
+  ]
+}

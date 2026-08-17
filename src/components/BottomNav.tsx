@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { fs, s } from '../theme/scale';
-import { colors, radii, shadows } from '../theme/tokens';
+import { colors, shadows } from '../theme/tokens';
 import { fontFamily, weight } from '../theme/typography';
 import { CalendarIcon, ChatIcon, HomeIcon, ProfileIcon } from './icons';
 
