@@ -68,10 +68,16 @@ Docker Desktop 이 있으면 `npx supabase start` 로 로컬 스택을 띄우고
 | 파일 | 원격 적용 |
 |---|---|
 | `20260817000000_remote_schema.sql` (baseline) | 적용됨 (repair 로 기록) |
-| `20260817131934_security_auth_foundation.sql` | **대기** |
-| `20260817144252_terms_consent_records.sql` | **대기** |
-| `20260817172900_room_invitations.sql` | **대기** |
-| `20260817173500_private_profile_split.sql` | **대기** |
+| `20260817131934_security_auth_foundation.sql` | 적용됨 |
+| `20260817144252_terms_consent_records.sql` | 적용됨 |
+| `20260817172900_room_invitations.sql` | 적용됨 |
+| `20260817173500_private_profile_split.sql` | 적용됨 |
+
+운영 적용 전에 `db dump --data-only` 로 받은 실제 데이터를 로컬 baseline DB 에 복원하고
+그 위에 네 건을 `migration up` 으로 돌려 리허설했다. 테이블이 비어 있지 않았기 때문에
+(프로필 2, 방 4, 메시지 3, 인증 사용자 4) 반드시 필요한 단계였다.
+특히 `profiles.personal_data` 에 키 16 개가 들어 있어서, 컬럼 이동 없이 설계했다면
+그대로 사라졌을 값이다. **파괴적 마이그레이션 전에는 이 리허설을 반복한다.**
 
 baseline 은 원격에 이미 존재하던 스키마를 `db dump` 로 보존한 것이라
 `migration repair --status applied` 로 실행 없이 기록만 했다.
@@ -100,10 +106,21 @@ baseline 은 원격에 이미 존재하던 스키마를 `db dump` 로 보존한 
 자동으로 참가자에 넣는다. 나가기는 자기 행 DELETE 정책으로 가능하고,
 남을 내보내는 기능은 아직 없다.
 
+#### 운영 DB 현재 상태
+
+`anon` 의 테이블 권한은 0 이다 (baseline 에서는 10 개 테이블 전부에 `GRANT ALL`).
+남은 `GRANT USAGE ON SCHEMA public TO anon` 은 PostgREST 가 스키마에 닿기 위해
+필요한 것이고, 테이블 권한이 없으므로 그것만으로는 아무것도 읽지 못한다.
+
+기존 사용자에게는 `profile_consents` 행이 없다. 어떤 버전에 동의했는지 기록이 없어
+일부러 만들지 않았다 — 행이 없는 상태가 "동의 기록 없음"이라는 정확한 사실이다.
+로그인 후 현재 버전 동의가 없으면 재동의를 받는 화면이 후속 작업이다.
+
 #### 아직 남은 일
 
-- **마이그레이션 4건이 운영에 적용되지 않았다.** 이제 초대 RPC 가 함께 있으므로
-  방 참가가 끊기지 않고 한 번에 적용할 수 있다.
+- **Dashboard 설정 두 가지가 남았다.** Auth Redirect URLs 에 `mealchat://auth/callback`
+  과 `mealchat://auth/reset` 을 등록하고, leaked-password protection 을 켠다.
+  이건 마이그레이션으로 할 수 없다.
 - **이메일 확인이 켜져 있으면 가입 시점에 계좌·생년월일이 저장되지 않는다.**
   `profile_private` 쓰기는 세션을 요구하는데 확인 대기 중에는 세션이 없다.
   사용자 메타데이터로 넘기면 JWT 에 실려 나가므로 그 방법은 쓰지 않는다.
