@@ -2,8 +2,10 @@ import { fromBirthDate, toBirthDate } from '../src/lib/birthDate';
 import {
   countLikedTastes,
   formatAccount,
+  formatAmount,
   formatBirthDate,
   maskAccountNumber,
+  relativeTime,
 } from '../src/lib/format';
 
 describe('fromBirthDate', () => {
@@ -89,5 +91,42 @@ describe('countLikedTastes', () => {
     expect(countLikedTastes({})).toBe(0);
     expect(countLikedTastes(null)).toBe(0);
     expect(countLikedTastes(undefined)).toBe(0);
+  });
+});
+
+describe('relativeTime', () => {
+  const NOW = new Date('2026-08-18T12:00:00');
+
+  it('1분 미만은 방금 전', () => {
+    expect(relativeTime('2026-08-18T11:59:30', NOW)).toBe('방금 전');
+  });
+
+  it('시간 단위로 줄인다', () => {
+    expect(relativeTime('2026-08-18T11:30:00', NOW)).toBe('30분 전');
+    expect(relativeTime('2026-08-18T09:00:00', NOW)).toBe('3시간 전');
+  });
+
+  it('하루 전은 어제', () => {
+    expect(relativeTime('2026-08-17T10:00:00', NOW)).toBe('어제');
+  });
+
+  it('일주일이 넘으면 날짜로', () => {
+    expect(relativeTime('2026-08-01T10:00:00', NOW)).toBe('8월 1일');
+  });
+
+  it('미래 시각도 방금 전으로 흘린다', () => {
+    // 기기 시계가 서버보다 빠를 때 "-3분 전" 이 뜨는 것을 막는다
+    expect(relativeTime('2026-08-18T12:05:00', NOW)).toBe('방금 전');
+  });
+
+  it('읽을 수 없으면 빈 문자열', () => {
+    expect(relativeTime('nope', NOW)).toBe('');
+  });
+});
+
+describe('formatAmount', () => {
+  it('천 단위로 끊는다', () => {
+    expect(formatAmount(12000)).toBe('12,000원');
+    expect(formatAmount(0)).toBe('0원');
   });
 });

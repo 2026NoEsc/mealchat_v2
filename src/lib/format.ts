@@ -35,3 +35,30 @@ export function countLikedTastes(tastes: Record<string, boolean> | null | undefi
   if (!tastes) return 0;
   return Object.values(tastes).filter(Boolean).length;
 }
+
+/** `방금 전`, `1시간 전`, `어제`, `8월 13일` */
+export function relativeTime(iso: string, now: Date = new Date()): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+
+  const ms = now.getTime() - date.getTime();
+  if (ms < 0) return '방금 전';
+
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 1) return '방금 전';
+  if (minutes < 60) return `${minutes}분 전`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}시간 전`;
+
+  const days = Math.floor(hours / 24);
+  if (days === 1) return '어제';
+  if (days < 7) return `${days}일 전`;
+
+  return `${date.getMonth() + 1}월 ${date.getDate()}일`;
+}
+
+/** `12,000원` */
+export function formatAmount(amount: number): string {
+  return `${amount.toLocaleString('ko-KR')}원`;
+}
