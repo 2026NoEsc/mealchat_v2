@@ -1,10 +1,13 @@
 import { Clock, Lock, Pencil, Plus } from 'lucide-react-native';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
 import { buildWeeksOf, columnOfIn, MONTH, shiftMonth, WEEKDAYS, YEAR } from '../../lib/calendar';
+import { createEvent, deleteNote, saveMemo as saveMemoNote, updateEvent } from '../../lib/calendarNotes';
+import { groupNotes, useMonthNotes } from '../../schedule/useMonthNotes';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
@@ -14,40 +17,21 @@ import { EventSheet, MemoSheet, type PersonalEvent } from './PersonalEventSheet'
 const TINTED = [3, 18];
 
 /**
- * 날짜별 일정. 13일은 Figma 원본이고, 나머지는 Figma 에서 점이 찍혀 있던
- * 19·23·24·30 일을 채운 것이다. 점은 이 데이터에서 파생된다.
- */
-const INITIAL_EVENTS: Record<number, PersonalEvent[]> = {
-  13: [
-    { id: 'a', title: '알바', time: '18:00 ~ 22:00', color: '#5B9BD5' },
-    { id: 'b', title: 'CCrate 중간발표', time: '12:00 ~ 13:00', color: '#B483C8' },
-    { id: 'c', title: 'MedEve 스터디', time: '09:00 ~ 10:30', color: '#9C9C9C', device: true },
-  ],
-  19: [{ id: 'd', title: '알바', time: '18:00 ~ 22:00', color: '#5B9BD5' }],
-  23: [{ id: 'e', title: '가족 모임', time: '12:00 ~ 15:00', color: '#04CDA3' }],
-  24: [
-    { id: 'f', title: '알바', time: '18:00 ~ 22:00', color: '#5B9BD5' },
-    { id: 'g', title: '치과', time: '10:00 ~ 11:00', color: '#9C9C9C', device: true },
-  ],
-  30: [{ id: 'h', title: '동아리 정기모임', time: '19:00 ~ 21:00', color: '#B483C8' }],
-};
-
-/**
  * Figma 일정 조율 (309:1077) — 220 x 486
  * 타이틀 y79 / 서브 y102 / 캘린더 카드 x8 y116 206×325.8 /
  * 주 행 y37.4 부터 28.83 간격 / 구분선 y181.6 / 일정 행 y208.2 부터 28.8 간격
  */
 export default function ScheduleHomeScreen() {
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
   const [month, setMonth] = useState({ year: YEAR, month: MONTH });
   const [selected, setSelected] = useState(13);
-  /** 일정 데이터는 기준 달(2026년 8월)에만 있다 */
-  const isBaseMonth = month.year === YEAR && month.month === MONTH;
   const weeks = buildWeeksOf(month.year, month.month);
   const [autoSync, setAutoSync] = useState(true);
 
-  const [eventsByDay, setEventsByDay] = useState(INITIAL_EVENTS);
-  const [memosByDay, setMemosByDay] = useState<Record<number, string>>({});
+  const { notes, status, reload } = useMonthNotes(month.year, month.month);
+  const { eventsByDay, memosByDay, memoIdByDay } = groupNotes(notes);
 
   /*
    * session 은 시트를 열 때만 증가한다. 시트 안의 입력 폼은 이 값으로 초기화되고,
@@ -65,30 +49,72 @@ export default function ScheduleHomeScreen() {
   const openMemoSheet = () =>
     setMemoSheet((prev) => ({ open: true, session: prev.session + 1 }));
 
-  const events = isBaseMonth ? eventsByDay[selected] ?? [] : [];
-  const memo = isBaseMonth ? memosByDay[selected] ?? '' : '';
+  const events = eventsByDay[selected] ?? [];
+  const memo = memosByDay[selected] ?? '';
   /** 점은 일정 데이터에서 파생한다 — 하드코딩하면 추가/삭제와 어긋난다 */
   const dotted = new Set(
-    (isBaseMonth ? Object.entries(eventsByDay) : [])
+    Object.entries(eventsByDay)
       .filter(([, list]) => list.length > 0)
       .map(([day]) => Number(day)),
   );
 
-  const saveEvent = (event: PersonalEvent) =>
-    setEventsByDay((prev) => {
-      const list = prev[selected] ?? [];
-      const exists = list.some((e) => e.id === event.id);
-      return {
-        ...prev,
-        [selected]: exists ? list.map((e) => (e.id === event.id ? event : e)) : [...list, event],
-      };
-    });
+  const dateOf = (day: number) =>
+    `${month.year}-${String(month.month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
-  const deleteEvent = (id: string) =>
-    setEventsByDay((prev) => ({
-      ...prev,
-      [selected]: (prev[selected] ?? []).filter((e) => e.id !== id),
-    }));
+  const saveEvent = async (event: PersonalEvent) => {
+    if (!userId) return;
+    const [start, end] = event.time.split('~').map((part) => part.trim());
+    /* id 가 서버에 있는 것이면 수정, 시트가 만든 임시 id 면 새로 만든다 */
+    const existing = events.some((item) => item.id === event.id);
+
+    const error = existing
+      ? await updateEvent(event.id, {
+          title: event.title,
+          time: start,
+          endTime: end,
+          color: event.color,
+        })
+      : (
+          await createEvent({
+            profileId: userId,
+            date: dateOf(selected),
+            title: event.title,
+            time: start,
+            endTime: end,
+            color: event.color,
+          })
+        ).error;
+
+    if (error) {
+      Alert.alert('저장 실패', error.message);
+      return;
+    }
+    reload();
+  };
+
+  const deleteEvent = async (id: string) => {
+    const error = await deleteNote(id);
+    if (error) {
+      Alert.alert('삭제 실패', error.message);
+      return;
+    }
+    reload();
+  };
+
+  const saveMemo = async (next: string) => {
+    if (!userId) return;
+    const error = await saveMemoNote({
+      profileId: userId,
+      date: dateOf(selected),
+      existingId: memoIdByDay[selected] ?? null,
+      content: next,
+    });
+    if (error) {
+      Alert.alert('저장 실패', error.message);
+      return;
+    }
+    reload();
+  };
 
   return (
     <View style={styles.screen}>
@@ -167,7 +193,9 @@ export default function ScheduleHomeScreen() {
             </Pressable>
           </View>
 
-          {events.length === 0 ? (
+          {status === 'loading' ? (
+            <Text style={styles.emptyText}>불러오는 중...</Text>
+          ) : events.length === 0 ? (
             <Text style={styles.emptyText}>등록된 일정이 없어요</Text>
           ) : (
             events.map((event) => (
@@ -212,8 +240,8 @@ export default function ScheduleHomeScreen() {
         editing={eventSheet.editing}
         // editing 을 남겨둬야 닫히는 동안 제목·버튼이 그대로 보인다
         onClose={() => setEventSheet((prev) => ({ ...prev, open: false }))}
-        onSave={saveEvent}
-        onDelete={deleteEvent}
+        onSave={(event) => void saveEvent(event)}
+        onDelete={(id) => void deleteEvent(id)}
       />
 
       <MemoSheet
@@ -222,7 +250,7 @@ export default function ScheduleHomeScreen() {
         day={selected}
         memo={memo}
         onClose={() => setMemoSheet((prev) => ({ ...prev, open: false }))}
-        onSave={(next) => setMemosByDay((prev) => ({ ...prev, [selected]: next }))}
+        onSave={(next) => void saveMemo(next)}
       />
     </View>
   );
