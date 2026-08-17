@@ -1,34 +1,41 @@
-# Dependency security policy
+# 의존성 보안 정책
 
-Last reviewed: 2026-08-17
+최종 검토일: 2026-08-17
 
-## Current controls
+## 현재 적용 중인 보안 통제
 
-- `postcss` is overridden to `8.5.26`, above the patched threshold for the known source-map vulnerabilities. It is not allowlisted.
-- `npm run security:assets` rejects ICNS, JXL, HEIF/HEIC, and AVIF files by extension and file signature before Metro can inspect them.
-- `npm run security:audit` permits only the three GHSA entries in `security/audit-allowlist.json`.
-- A new, unidentified, expired, or resolved-but-still-listed advisory fails the audit gate.
-- Exceptions expire at 00:00 UTC on the recorded `expiresOn` date. The current review deadline is 2026-09-30.
+- `postcss`는 알려진 source map 취약점의 패치 기준보다 높은 `8.5.26` 버전으로 강제 적용하고 있습니다. 따라서 예외 허용 목록(allowlist)에 포함하지 않습니다.
+- `npm run security:assets`는 Metro가 파일을 분석하기 전에 확장자와 파일 시그니처를 검사하여 ICNS, JXL, HEIF/HEIC, AVIF 형식의 파일을 차단합니다.
+- `npm run security:audit`는 `security/audit-allowlist.json`에 등록된 아래 3개의 GHSA 보안 권고만 예외로 허용합니다.
+- 새롭게 발견된 보안 권고, 식별되지 않은 보안 권고, 만료된 예외, 또는 이미 해결되었지만 예외 목록에 남아 있는 보안 권고가 발견될 경우 보안 감사가 실패하도록 설정되어 있습니다.
+- 예외는 `expiresOn`에 기록된 날짜의 **00:00 UTC**에 만료됩니다.
+- 현재 예외 항목의 재검토 기한은 **2026-09-30**입니다.
 
-The allowlist records root advisories, not every derived package that `npm audit` reports through the same dependency chain. An audit count above zero is therefore expected until upstream packages publish and adopt patched dependencies.
+예외 목록에는 `npm audit`에서 동일한 의존성 체인을 통해 파생되어 표시되는 모든 패키지가 아니라, **최상위 원인이 되는 보안 권고(root advisory)**만 기록합니다.
 
-## Accepted temporary exceptions
+따라서 상위 패키지에서 취약한 의존성을 패치한 버전을 배포하고 프로젝트에서 해당 버전을 적용하기 전까지는 `npm audit` 결과의 취약점 개수가 0보다 크게 표시될 수 있으며, 이는 현재 정책상 예상된 동작입니다.
 
-| Advisory | Package | Reason | Expires |
+## 임시 허용된 보안 예외
+
+| 보안 권고 | 패키지 | 예외 허용 사유 | 만료일 |
 | --- | --- | --- | --- |
-| `GHSA-w3rx-r6r6-pgpr` | `image-size` | Metro build-time path; vulnerable asset formats are blocked. | 2026-09-30 |
-| `GHSA-5p2g-fcmc-qvqq` | `image-size` | Metro build-time path; vulnerable asset formats are blocked. | 2026-09-30 |
-| `GHSA-w5hq-g745-h8pq` | `uuid` | The build-time `xcode` package calls `uuid.v4()`; the advisory affects v3, v5, and v6 buffer handling. | 2026-09-30 |
+| `GHSA-w3rx-r6r6-pgpr` | `image-size` | Metro 빌드 단계에서 사용되는 의존성이며, 취약점의 영향을 받을 수 있는 이미지 형식은 별도의 보안 검사에서 차단하고 있습니다. | 2026-09-30 |
+| `GHSA-5p2g-fcmc-qvqq` | `image-size` | Metro 빌드 단계에서 사용되는 의존성이며, 취약점의 영향을 받을 수 있는 이미지 형식은 별도의 보안 검사에서 차단하고 있습니다. | 2026-09-30 |
+| `GHSA-w5hq-g745-h8pq` | `uuid` | 빌드 단계에서 사용되는 `xcode` 패키지는 `uuid.v4()`를 호출합니다. 해당 보안 권고는 v3, v5, v6의 버퍼 처리와 관련된 취약점이므로 현재 사용 경로에는 직접적인 영향이 없습니다. | 2026-09-30 |
 
-## Expo SDK upgrade roadmap
+## Expo SDK 업그레이드 계획
 
-Do not use `npm audit fix --force` to jump SDK versions. Upgrade one Expo SDK at a time so each compatibility break can be isolated:
+`npm audit fix --force`를 사용하여 Expo SDK 버전을 한 번에 올리지 않습니다.
 
-1. Create a dedicated upgrade branch and preserve the current quality/build baseline.
-2. Upgrade SDK 54 to 55, then run `npx expo install --fix` and `npx expo-doctor`.
-3. Run the complete quality gate, all-platform Expo export, and native Android/iOS builds.
-4. Repeat the same process for SDK 55 to 56.
-5. Repeat the same process for SDK 56 to 57.
-6. Remove an audit exception only after the lockfile no longer contains the advisory and all checks pass.
+Expo SDK는 한 단계씩 업그레이드하여 각 버전에서 발생하는 호환성 문제를 개별적으로 확인하고 해결합니다.
 
-Reference: https://docs.expo.dev/workflow/upgrading-expo-sdk-walkthrough/
+1. Expo SDK 업그레이드 전용 브랜치를 생성하고 현재의 품질 검사 및 빌드 성공 상태를 기준점으로 보존합니다.
+2. Expo SDK `54 → 55` 업그레이드를 진행한 뒤 다음 명령을 실행합니다.
+   - `npx expo install --fix`
+   - `npx expo-doctor`
+3. 전체 품질 검사, 모든 플랫폼 대상 Expo export, Android 및 iOS 네이티브 빌드를 수행합니다.
+4. 동일한 절차로 Expo SDK `55 → 56` 업그레이드를 진행합니다.
+5. 동일한 절차로 Expo SDK `56 → 57` 업그레이드를 진행합니다.
+6. 해당 보안 권고가 `package-lock.json`에서 완전히 제거되고 모든 검증 절차를 통과한 경우에만 예외 목록에서 해당 항목을 삭제합니다.
+
+참고 문서: https://docs.expo.dev/workflow/upgrading-expo-sdk-walkthrough/
