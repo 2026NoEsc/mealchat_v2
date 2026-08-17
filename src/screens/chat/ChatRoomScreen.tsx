@@ -182,7 +182,7 @@ export default function ChatRoomScreen() {
           <Text style={styles.timer}>{room ? roomTimerLabel(room.expiresAt) : ' '}</Text>
         </View>
 
-        <Pressable hitSlop={s(8)} onPress={() => navigate('RoomDetail', { title })}>
+        <Pressable hitSlop={s(8)} onPress={() => navigate('RoomDetail', { roomId, title })}>
           <MoreVertical size={s(13)} color={SYS_TEXT} strokeWidth={2} />
         </Pressable>
       </View>
