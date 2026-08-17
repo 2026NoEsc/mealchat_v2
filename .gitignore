@@ -1,11 +1,70 @@
+# Dependencies and package-manager state
 node_modules/
+.npm/
+.yarn/
+.pnpm-store/
+
+# Expo / Metro / generated output
 .expo/
+.expo-shared/
 dist/
 web-build/
+coverage/
+expo-env.d.ts
+.metro-health-check*
+*.tsbuildinfo
+
+# Expo CNG native projects. If native code is intentionally managed by hand,
+# remove these rules and commit the native projects as a deliberate migration.
+/android/
+/ios/
+.gradle/
+.kotlin/
+*.apk
+*.aab
+*.ipa
+*.xcarchive
+*.dSYM/
+
+# Environment files. Templates stay tracked.
+.env*
+!.env.example
+!.env.*.example
+
+# Firebase, EAS submit credentials, and mobile signing material
+google-services.json
+GoogleService-Info.plist
+google-service-account-key.json
+credentials*.json
+service-account*.json
+*firebase-adminsdk*.json
+*.jks
+*.keystore
+*.key
+*.p8
+*.p12
+*.pfx
+*.pem
+*.mobileprovision
+
+# Logs and local caches
 *.log
-.env
-.env.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.cache/
+.eslintcache
+tmp/
+*.orig
+*.orig.*
+
+# Editor and operating-system files
+.vscode/
+.idea/
 .DS_Store
+Thumbs.db
+Desktop.ini
 
 # Figma 페이지 렌더 원본 (scripts/crop-figma.ps1 의 입력). 수십 MB 라 커밋하지 않는다.
 .figma/

@@ -10,10 +10,13 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "ts:check": "tsc --noEmit",
-    "lint": "eslint src",
-    "lint:fix": "eslint src --fix",
+    "lint": "eslint src scripts --max-warnings=0",
+    "lint:fix": "eslint src scripts --fix",
+    "security:assets": "node scripts/check-asset-formats.mjs",
+    "security:audit": "node scripts/check-dependency-audit.mjs",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "quality": "npm run security:assets && npm run ts:check && npm run lint && npm test -- --ci --runInBand && expo install --check && npm run security:audit"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
@@ -32,16 +35,22 @@
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
     "react-native-safe-area-context": "~5.6.0",
-    "react-native-svg": "^15.12.1",
+    "react-native-svg": "15.12.1",
     "react-native-web": "^0.21.0"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@types/jest": "29.5.14",
     "@types/react": "~19.1.10",
     "eslint": "^9.39.5",
-    "eslint-config-expo": "^57.0.1",
+    "eslint-config-expo": "~10.0.0",
     "jest": "^29.7.0",
-    "jest-expo": "^57.0.3",
+    "jest-expo": "~54.0.17",
     "typescript": "~5.9.2"
+  },
+  "overrides": {
+    "@expo/metro-config": {
+      "postcss": "8.5.26"
+    }
   }
 }
