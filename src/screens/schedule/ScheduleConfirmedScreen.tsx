@@ -1,10 +1,13 @@
 import { CalendarDays, Footprints, MapPin } from 'lucide-react-native';
-import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Alert, Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
 import { CompleteButton } from '../../components/ui/Button';
-import { formatDate, YEAR } from '../../lib/calendar';
+import { formatDate, MONTH, YEAR } from '../../lib/calendar';
+import { createRoom } from '../../lib/rooms';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors, shadows } from '../../theme/tokens';
@@ -26,9 +29,41 @@ type Pick = { when: string; travel: string; place: string };
 export default function ScheduleConfirmedScreen() {
   const insets = useSafeAreaInsets();
   const { navigate, current } = useNavigation();
-  const params = current.params as { pick?: Pick; name?: string } | undefined;
+  const { user } = useAuth();
+  const params = current.params as
+    | { pick?: Pick; name?: string; day?: number }
+    | undefined;
   const pick = params?.pick;
-  const title = params?.name || '회사 팀 점심';
+  const title = params?.name || '새 밥약';
+  const [creating, setCreating] = useState(false);
+
+  /*
+   * 여기까지 온 시점에는 아직 방이 없다. 화면에 들어오자마자 만들면 뒤로 갔다
+   * 다시 오는 것만으로 빈 방이 쌓이므로, 채팅방으로 이동할 때 한 번만 만든다.
+   */
+  const openRoom = async () => {
+    if (!user?.id) return;
+
+    setCreating(true);
+    const meetingDate = `${YEAR}-${String(MONTH).padStart(2, '0')}-${String(params?.day ?? 15).padStart(2, '0')}`;
+    const { roomId, error } = await createRoom({
+      ownerId: user.id,
+      title,
+      meetingDate,
+      // 약속 다음 날까지 방을 남겨 정산할 시간을 준다
+      expiresAt: new Date(`${meetingDate}T23:59:59`).toISOString(),
+      locationName: pick?.place ?? null,
+      confirmedSlot: pick ? `${pick.when} · ${pick.place}` : null,
+    });
+    setCreating(false);
+
+    if (error || !roomId) {
+      Alert.alert('방 만들기 실패', error?.message ?? '잠시 후 다시 시도해 주세요.');
+      return;
+    }
+
+    navigate('ChatRoom', { roomId, title });
+  };
 
   return (
     <View style={styles.screen}>
@@ -79,10 +114,11 @@ export default function ScheduleConfirmedScreen() {
         <Text style={styles.note}>스마트폰 캘린더에 자동 저장했어요</Text>
 
         <CompleteButton
-          label="채팅방으로 이동"
+          label={creating ? '방 만드는 중' : '채팅방으로 이동'}
           showNext
           style={styles.cta}
-          onPress={() => navigate('ChatRoom', { title, avatar: moa })}
+          disabled={creating}
+          onPress={() => void openRoom()}
         />
       </ScrollView>
     </View>

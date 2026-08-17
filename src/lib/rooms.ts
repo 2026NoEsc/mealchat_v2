@@ -262,3 +262,56 @@ export async function fetchMySettlements(): Promise<{
     error: null,
   };
 }
+
+/** 초대 코드에 헷갈리는 글자(0/O, 1/I)를 빼고 만든다 */
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+function randomCode(): string {
+  let code = '';
+  for (let i = 0; i < 6; i += 1) {
+    code += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+  }
+  return code;
+}
+
+/**
+ * 방을 만든다. 트리거가 방장을 참가자로 넣는다.
+ *
+ * rooms.code 가 UNIQUE 라 아주 드물게 부딪힐 수 있다. 그때는 다른 코드로 몇 번
+ * 더 시도한다 — 서버에서 코드를 만들게 옮기는 것이 더 낫지만, 그러려면 RPC 가
+ * 방 생성 전체를 맡아야 해서 별도 작업이다.
+ */
+export async function createRoom(input: {
+  ownerId: string;
+  title: string;
+  meetingDate: string;
+  expiresAt: string;
+  locationName?: string | null;
+  confirmedSlot?: string | null;
+  color?: string;
+}): Promise<{ roomId: string | null; code: string | null; error: Error | null }> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const code = randomCode();
+    const { data, error } = await supabase
+      .from('rooms')
+      .insert({
+        code,
+        title: input.title,
+        meeting_date: input.meetingDate,
+        expires_at: input.expiresAt,
+        owner_id: input.ownerId,
+        location_name: input.locationName ?? null,
+        confirmed_slot: input.confirmedSlot ?? null,
+        is_confirmed: Boolean(input.confirmedSlot),
+        color: input.color ?? '#FF9900',
+      })
+      .select('id')
+      .maybeSingle<{ id: string }>();
+
+    if (!error) return { roomId: data?.id ?? null, code, error: null };
+    // 23505 = unique_violation. 코드가 겹친 경우에만 다시 만든다.
+    if (error.code !== '23505') return { roomId: null, code: null, error };
+  }
+
+  return { roomId: null, code: null, error: new Error('초대 코드를 만들지 못했어요. 다시 시도해 주세요.') };
+}
