@@ -4,6 +4,7 @@ import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '../../auth/AuthProvider';
 import { useSignupDraft } from '../../auth/SignupDraftProvider';
+import { saveSignupPrivateProfile } from '../../lib/profile';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
@@ -57,6 +58,23 @@ export default function SignupTermsScreen() {
       displayName: draft.nickname,
       marketingOptIn: agreed.marketing,
     });
+
+    /*
+     * 계좌·생년월일은 본인만 볼 수 있는 행에 들어가고 그 쓰기는 세션을 요구한다.
+     * 이메일 확인이 켜져 있으면 이 시점에 세션이 없으므로 저장할 수 없다.
+     * 사용자 메타데이터로 넘기는 방법도 있지만 그건 JWT 에 실려 나가므로 쓰지 않는다.
+     */
+    let privateSaveFailed = false;
+    if (!result.error && !result.confirmationRequired && result.userId) {
+      const saveError = await saveSignupPrivateProfile(result.userId, {
+        bank: draft.bank,
+        account: draft.account,
+        birth: draft.birth,
+        tastes: draft.tastes,
+      });
+      privateSaveFailed = Boolean(saveError);
+    }
+
     setSubmitting(false);
 
     if (result.error) {
@@ -65,9 +83,18 @@ export default function SignupTermsScreen() {
     }
 
     resetDraft();
+
     if (result.confirmationRequired) {
-      Alert.alert('이메일 확인 필요', '이메일의 확인 링크를 연 뒤 로그인해 주세요.');
+      Alert.alert(
+        '이메일 확인 필요',
+        '이메일의 확인 링크를 연 뒤 로그인해 주세요.\n계좌와 생년월일은 로그인 후 프로필에서 입력할 수 있어요.',
+      );
       resetTo('Login');
+      return;
+    }
+
+    if (privateSaveFailed) {
+      Alert.alert('일부 정보 미저장', '계좌와 생년월일은 프로필에서 다시 입력해 주세요.');
     }
   };
 
