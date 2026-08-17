@@ -30,3 +30,19 @@ export function toBirthDate(birth: BirthInput): string | null {
 
   return iso;
 }
+
+/** date 컬럼 값을 세 칸 입력으로 되돌린다. 값이 없으면 빈 칸을 준다. */
+export function fromBirthDate(value: string | null | undefined): BirthInput {
+  const empty = { year: '', month: '', day: '' };
+  if (!value) return empty;
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!match) return empty;
+
+  // 앞의 0 은 입력 칸에서 지운다 (03 월 -> 3)
+  return {
+    year: match[1],
+    month: String(Number(match[2])),
+    day: String(Number(match[3])),
+  };
+}
