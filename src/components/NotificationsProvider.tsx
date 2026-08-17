@@ -1,6 +1,8 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { useAuth } from '../auth/AuthProvider';
+import { fetchMyNotifications, type RoomNotification } from '../lib/settlements';
 import NotificationPanel from './NotificationPanel';
 
 type NotificationsValue = {
@@ -18,25 +20,59 @@ const NotificationsContext = createContext<NotificationsValue | null>(null);
  *
  * 패널은 하단 탭까지 덮어야 하므로 네비게이터 바깥에서 렌더하고,
  * 헤더는 화면마다 다시 배선할 필요 없이 이 컨텍스트로 벨을 연결한다.
+ *
+ * 읽음 여부는 서버에 없다. notifications 에 읽음 컬럼이 없어서, 이 세션에서
+ * "모두 읽음"을 눌렀는지만 기억한다. 앱을 다시 켜면 다시 점이 붙는다.
  */
 export function NotificationsProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
+
   const [visible, setVisible] = useState(false);
-  const [hasUnread, setHasUnread] = useState(true);
+  const [dismissed, setDismissed] = useState(false);
+  const [notices, setNotices] = useState<RoomNotification[]>([]);
+
+  useEffect(() => {
+    if (!userId) {
+      setNotices([]);
+      return;
+    }
+
+    let active = true;
+    void fetchMyNotifications()
+      .then(({ data }) => {
+        if (active) setNotices(data ?? []);
+      })
+      .catch(() => {
+        if (active) setNotices([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [userId]);
 
   const open = useCallback(() => setVisible(true), []);
   const close = useCallback(() => setVisible(false), []);
-  const markAllRead = useCallback(() => setHasUnread(false), []);
+  const markAllRead = useCallback(() => setDismissed(true), []);
 
   const value = useMemo<NotificationsValue>(
-    () => ({ hasUnread, open, close, markAllRead }),
-    [hasUnread, open, close, markAllRead],
+    () => ({ hasUnread: notices.length > 0 && !dismissed, open, close, markAllRead }),
+    [notices.length, dismissed, open, close, markAllRead],
   );
 
   return (
     <NotificationsContext.Provider value={value}>
       <View style={styles.root}>
         {children}
-        {visible ? <NotificationPanel onClose={close} onMarkAllRead={markAllRead} /> : null}
+        {visible ? (
+          <NotificationPanel
+            notices={notices}
+            allRead={dismissed}
+            onClose={close}
+            onMarkAllRead={markAllRead}
+          />
+        ) : null}
       </View>
     </NotificationsContext.Provider>
   );

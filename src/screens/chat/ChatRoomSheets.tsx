@@ -1,10 +1,29 @@
 import { Camera } from 'lucide-react-native';
-import { useState } from 'react';
-import { Image, ImageSourcePropType, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  Alert,
+  Image,
+  ImageSourcePropType,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
+import { useAuth } from '../../auth/AuthProvider';
 import BottomSheet from '../../components/BottomSheet';
 import { CompleteButton } from '../../components/ui/Button';
 import { MONTH, weekdayOf } from '../../lib/calendar';
+import { formatAmount } from '../../lib/format';
+import {
+  createRoomSettlement,
+  fetchRoomSettlement,
+  sendSettlementNotification,
+  setSettlementCompleted,
+  type Settlement,
+  type SettlementMember,
+} from '../../lib/settlements';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
@@ -143,18 +162,80 @@ export function MenuSheet({ visible, onClose, onConfirm }: SheetProps) {
 
 /* ------------------------------------------------------------------ N빵 정산 */
 
-const MEMBERS: { name: string; state: '완료' | '대기'; avatar: ImageSourcePropType }[] = [
-  { name: '모아', state: '완료', avatar: moa },
-  { name: '두두', state: '대기', avatar: dudu },
-  { name: '또리', state: '완료', avatar: ddori },
-  { name: '웰링', state: '대기', avatar: welling },
-];
-
-const TOTAL = 48000;
-
 /** Figma 채팅/정산 패널 (553:727) */
-export function SettlementSheet({ visible, onClose, onConfirm }: SheetProps) {
-  const each = TOTAL / MEMBERS.length;
+export function SettlementSheet({
+  visible,
+  roomId,
+  onClose,
+  onConfirm,
+}: SheetProps & { roomId: string | null }) {
+  const { user } = useAuth();
+  const [settlement, setSettlement] = useState<Settlement | null>(null);
+  const [amountText, setAmountText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
+
+  useEffect(() => {
+    if (!visible || !roomId) return;
+
+    let active = true;
+    void fetchRoomSettlement(roomId)
+      .then(({ data }) => {
+        if (!active) return;
+        setSettlement(data);
+        if (data) setAmountText(String(data.totalAmount));
+      })
+      .catch(() => {
+        if (active) setSettlement(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [visible, roomId, reloadToken]);
+
+  const amount = Number(amountText.replace(/[^0-9]/g, '')) || 0;
+  const members = settlement?.members ?? [];
+  /* 아직 정산이 없으면 나눌 인원을 알 수 없어 1 로 둔다 */
+  const splitCount = settlement?.splitCount ?? members.length ?? 1;
+  const each = splitCount > 0 ? Math.ceil(amount / splitCount) : amount;
+
+  const request = async () => {
+    if (!roomId || amount <= 0) return;
+
+    setBusy(true);
+    const { error } = await createRoomSettlement({ roomId, title: '식사 정산', amount });
+    if (!error) {
+      await sendSettlementNotification({
+        roomId,
+        title: 'N빵 정산 요청이 도착했어요!',
+        message: `1인당 ${formatAmount(each)}`,
+        amount: each,
+      });
+    }
+    setBusy(false);
+
+    if (error) {
+      Alert.alert('정산 요청 실패', error.message);
+      return;
+    }
+
+    setReloadToken((token) => token + 1);
+    onConfirm(`1인당 ${formatAmount(each)} 정산 요청을 보냈어요`);
+    onClose();
+  };
+
+  const toggleMine = async (member: SettlementMember) => {
+    setBusy(true);
+    const error = await setSettlementCompleted(member.id, !member.isCompleted);
+    setBusy(false);
+
+    if (error) {
+      Alert.alert('변경 실패', error.message);
+      return;
+    }
+    setReloadToken((token) => token + 1);
+  };
 
   return (
     <BottomSheet
@@ -163,27 +244,53 @@ export function SettlementSheet({ visible, onClose, onConfirm }: SheetProps) {
       subtitle="결제 금액을 입력하면 자동으로 나눠요"
       onClose={onClose}>
       <View style={styles.amountRow}>
-        <View>
+        <View style={styles.amountLeft}>
           <Text style={styles.amountLabel}>총 결제금액</Text>
-          <Text style={styles.amountTotal}>₩{TOTAL.toLocaleString()}</Text>
+          <TextInput
+            style={styles.amountInput}
+            value={amountText}
+            onChangeText={setAmountText}
+            keyboardType="number-pad"
+            placeholder="0"
+            placeholderTextColor={colors.textMuted}
+          />
         </View>
         <View style={styles.amountRight}>
           <Text style={[styles.amountLabel, styles.accentText]}>1인당</Text>
-          <Text style={[styles.amountTotal, styles.accentText]}>₩{each.toLocaleString()}</Text>
+          <Text style={[styles.amountTotal, styles.accentText]}>{formatAmount(each)}</Text>
         </View>
       </View>
 
-      <View style={styles.memberRow}>
-        {MEMBERS.map((m) => (
-          <View key={m.name} style={styles.memberCard}>
-            <Image source={m.avatar} style={styles.memberAvatar} resizeMode="contain" />
-            <Text style={styles.memberName}>{m.name}</Text>
-            <Text style={[styles.memberState, m.state === '완료' && styles.accentText]}>
-              {m.state}
-            </Text>
-          </View>
-        ))}
-      </View>
+      {members.length === 0 ? (
+        <Text style={styles.settlementEmpty}>
+          {settlement ? '정산 참가자가 없어요' : '아직 정산이 없어요. 금액을 넣고 요청해 보세요.'}
+        </Text>
+      ) : (
+        <View style={styles.memberRow}>
+          {members.map((member) => {
+            const mine = member.profileId === user?.id;
+            return (
+              <Pressable
+                key={member.id}
+                style={styles.memberCard}
+                disabled={busy || !mine}
+                onPress={() => void toggleMine(member)}>
+                <View style={[styles.memberDot, member.isCompleted && styles.memberDotDone]}>
+                  <Text style={styles.memberInitial}>
+                    {[...member.name.trim()][0] ?? '?'}
+                  </Text>
+                </View>
+                <Text style={styles.memberName} numberOfLines={1}>
+                  {member.name}
+                </Text>
+                <Text style={[styles.memberState, member.isCompleted && styles.accentText]}>
+                  {member.isCompleted ? '완료' : mine ? '눌러서 완료' : '대기'}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
 
       <View style={styles.receiptBox}>
         <Camera size={s(9)} color={colors.primary} strokeWidth={2} />
@@ -191,13 +298,11 @@ export function SettlementSheet({ visible, onClose, onConfirm }: SheetProps) {
       </View>
 
       <CompleteButton
-        label="정산 요청 보내기"
+        label={busy ? '보내는 중' : '정산 요청 보내기'}
         showNext
         style={styles.cta}
-        onPress={() => {
-          onConfirm(`1인당 ₩${each.toLocaleString()} 정산 요청을 보냈어요`);
-          onClose();
-        }}
+        disabled={busy || amount <= 0 || !roomId}
+        onPress={() => void request()}
       />
     </BottomSheet>
   );
@@ -206,6 +311,40 @@ export function SettlementSheet({ visible, onClose, onConfirm }: SheetProps) {
 const styles = StyleSheet.create({
   accentText: {
     color: colors.primary,
+  },
+  amountLeft: {
+    flex: 1,
+  },
+  amountInput: {
+    paddingVertical: 0,
+    fontFamily: fontFamily.body,
+    fontSize: fs(14),
+    fontWeight: weight.extrabold,
+    color: colors.textPrimary,
+  },
+  settlementEmpty: {
+    marginTop: s(14),
+    textAlign: 'center',
+    fontFamily: fontFamily.body,
+    fontSize: fs(7),
+    color: colors.textMuted,
+  },
+  memberDot: {
+    width: s(20),
+    height: s(20),
+    borderRadius: s(999),
+    backgroundColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  memberDotDone: {
+    backgroundColor: colors.primary,
+  },
+  memberInitial: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(8),
+    fontWeight: weight.bold,
+    color: colors.textOnAccent,
   },
   rowOn: {
     backgroundColor: TINT,

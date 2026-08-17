@@ -285,6 +285,7 @@ export default function ChatRoomScreen() {
         onConfirm={(text) => append({ kind: 'sys', text })}
       />
       <SettlementSheet
+        roomId={roomId}
         visible={sheet === 'settlement'}
         onClose={() => setSheet(null)}
         onConfirm={(text) => append({ kind: 'sys', text })}

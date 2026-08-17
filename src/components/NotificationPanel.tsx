@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { formatAmount, relativeTime } from '../lib/format';
+import type { RoomNotification } from '../lib/settlements';
 import { fs, s } from '../theme/scale';
 import { colors } from '../theme/tokens';
 import { fontFamily, weight } from '../theme/typography';
@@ -9,70 +11,34 @@ import { fontFamily, weight } from '../theme/typography';
 const FILTERS = ['전체', '일정', '정산', '메이트'] as const;
 type Filter = (typeof FILTERS)[number];
 
-type Notice = {
-  title: string;
-  body: string;
-  time: string;
-  unread?: boolean;
-  kind: Exclude<Filter, '전체'> | '메뉴';
-};
-
-const NOTICES: Notice[] = [
-  {
-    title: '일정이 확정됐어요!',
-    body: '회사 팀 점심 / 8월 15일 18:30',
-    time: '방금 전',
-    unread: true,
-    kind: '일정',
-  },
-  {
-    title: 'N빵 정산 요청이 도착했어요!',
-    body: '모아님이 12,000원을 요청했어요.',
-    time: '1시간 전',
-    unread: true,
-    kind: '정산',
-  },
-  {
-    title: '새 메이트가 들어왔어요',
-    body: '두두님이 오늘 점심팟에 참여했어요.',
-    time: '3시간 전',
-    kind: '메이트',
-  },
-  {
-    title: '방이 곧 사라져요',
-    body: '오늘 점심팟 / 12시간 남음',
-    time: '어제',
-    kind: '일정',
-  },
-  {
-    title: '메뉴 투표가 시작됐어요',
-    body: '또리님이 메뉴 투표를 열었어요.',
-    time: '어제',
-    kind: '메뉴',
-  },
-];
+/**
+ * notifications 에는 종류 컬럼이 없다. 금액이 실려 있으면 정산 요청, 아니면 일정
+ * 안내로 나눈다. 메이트·메뉴 알림을 만드는 곳이 아직 없어 그 필터는 늘 비어 있다.
+ */
+function noticeKind(notice: RoomNotification): Exclude<Filter, '전체'> {
+  return notice.amount > 0 ? '정산' : '일정';
+}
 
 /**
  * Figma 알림 패널 (549:3408) — 196 x 350 오버레이
  * 타이틀 y12 / 필터 y37 h22 / 행 y68·112·156·200·244 (h39, 간격 5) / 안내문 y333
  */
 export default function NotificationPanel({
+  notices,
+  allRead,
   onClose,
   onMarkAllRead,
 }: {
+  notices: RoomNotification[];
+  allRead: boolean;
   onClose: () => void;
   onMarkAllRead?: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const [filter, setFilter] = useState<Filter>('전체');
-  const [notices, setNotices] = useState<Notice[]>(NOTICES);
 
-  const visible = filter === '전체' ? notices : notices.filter((n) => n.kind === filter);
-
-  const markAllRead = () => {
-    setNotices((prev) => prev.map((n) => ({ ...n, unread: false })));
-    onMarkAllRead?.();
-  };
+  const visible =
+    filter === '전체' ? notices : notices.filter((notice) => noticeKind(notice) === filter);
 
   return (
     <View style={styles.overlay}>
@@ -82,7 +48,7 @@ export default function NotificationPanel({
       <View style={[styles.panel, { marginTop: insets.top + s(48) }]}>
         <View style={styles.header}>
           <Text style={styles.title}>알림</Text>
-          <Pressable onPress={markAllRead} hitSlop={s(8)}>
+          <Pressable onPress={onMarkAllRead} hitSlop={s(8)}>
             <Text style={styles.readAll}>모두 읽음</Text>
           </Pressable>
         </View>
@@ -102,16 +68,28 @@ export default function NotificationPanel({
         </View>
 
         <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-          {visible.map((n) => (
-            <View key={n.title} style={[styles.row, n.unread && styles.rowUnread]}>
-              <View style={styles.rowBody}>
-                <Text style={styles.rowTitle}>{n.title}</Text>
-                <Text style={styles.rowSub}>{n.body}</Text>
+          {visible.length === 0 ? (
+            <Text style={styles.empty}>
+              {notices.length === 0 ? '아직 알림이 없어요' : '이 분류에는 알림이 없어요'}
+            </Text>
+          ) : (
+            visible.map((notice) => (
+              <View key={notice.id} style={[styles.row, !allRead && styles.rowUnread]}>
+                <View style={styles.rowBody}>
+                  <Text style={styles.rowTitle} numberOfLines={1}>
+                    {notice.title}
+                  </Text>
+                  <Text style={styles.rowSub} numberOfLines={1}>
+                    {notice.amount > 0
+                      ? `${notice.message} · ${formatAmount(notice.amount)}`
+                      : notice.message}
+                  </Text>
+                </View>
+                <Text style={styles.rowTime}>{relativeTime(notice.createdAt)}</Text>
+                {allRead ? <View style={styles.dotSpacer} /> : <View style={styles.dot} />}
               </View>
-              <Text style={styles.rowTime}>{n.time}</Text>
-              {n.unread ? <View style={styles.dot} /> : <View style={styles.dotSpacer} />}
-            </View>
-          ))}
+            ))
+          )}
 
           <Text style={styles.footer}>최근 30일의 알림을 보여드려요</Text>
         </ScrollView>
@@ -243,6 +221,13 @@ const styles = StyleSheet.create({
   dotSpacer: {
     marginLeft: s(4),
     width: s(6),
+  },
+  empty: {
+    marginTop: s(30),
+    textAlign: 'center',
+    fontFamily: fontFamily.body,
+    fontSize: fs(7),
+    color: colors.textMuted,
   },
   footer: {
     marginTop: s(10),
