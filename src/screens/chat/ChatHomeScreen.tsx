@@ -20,6 +20,7 @@ import {
   timeLabel,
   type RoomStatus,
 } from '../../lib/roomFormat';
+import { previewText } from '../../lib/emoticon';
 import { joinRoomByCode, type RoomSummary } from '../../lib/rooms';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useMyRooms } from '../../rooms/useMyRooms';
@@ -153,7 +154,7 @@ function RoomRow({ room, onPress }: { room: RoomSummary; onPress: () => void }) 
         </View>
 
         <Text style={styles.preview} numberOfLines={1}>
-          {room.lastMessage?.text ?? '아직 대화가 없어요'}
+          {room.lastMessage ? previewText(room.lastMessage.text) : '아직 대화가 없어요'}
         </Text>
 
         <View style={styles.metaRow}>

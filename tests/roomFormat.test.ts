@@ -5,6 +5,7 @@ import {
   remainingLabel,
   ROOM_STATUS_LABEL,
   roomStatus,
+  roomTimerLabel,
   timeLabel,
 } from '../src/lib/roomFormat';
 
@@ -101,5 +102,21 @@ describe('participantMeta', () => {
 
   it('시간을 못 읽으면 인원만', () => {
     expect(participantMeta(2, 'nope', NOW)).toBe('2명');
+  });
+});
+
+describe('roomTimerLabel', () => {
+  it('남았으면 문장으로 자연스럽게 이어진다', () => {
+    expect(roomTimerLabel('2026-08-18T20:00:00', NOW)).toBe('8시간 뒤 방이 사라져요');
+    expect(roomTimerLabel('2026-08-18T12:30:00', NOW)).toBe('30분 뒤 방이 사라져요');
+  });
+
+  it('이미 지났으면 카운트다운이 아니라 종료를 알린다', () => {
+    // "종료됨 방이 사라져요" 처럼 어색해지는 것을 막는다
+    expect(roomTimerLabel('2026-08-17T12:00:00', NOW)).toBe('이미 종료된 밥약이에요');
+  });
+
+  it('읽을 수 없으면 빈 문자열', () => {
+    expect(roomTimerLabel('nope', NOW)).toBe('');
   });
 });

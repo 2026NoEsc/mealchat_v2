@@ -1,5 +1,6 @@
 import { ImageSourcePropType, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { normalizeStickerId } from '../../lib/emoticon';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
@@ -17,6 +18,16 @@ export const STICKERS: Sticker[] = [
   { id: 'ttori-angry', source: require('../../../assets/stickers/ttori-angry.png') },
   { id: 'welling-full', source: require('../../../assets/stickers/welling-full.png') },
 ];
+
+/**
+ * 저장된 이모티콘 이름으로 스티커를 찾는다.
+ *
+ * 운영 데이터에는 앱에 없는 이름(`welling_thumbs`)도 들어 있다. 예전 클라이언트가
+ * 다른 목록을 썼다는 뜻이라, 못 찾는 경우를 정상 경로로 다뤄야 한다.
+ */
+export function findSticker(id: string): Sticker | null {
+  return STICKERS.find((sticker) => sticker.id === normalizeStickerId(id)) ?? null;
+}
 
 /**
  * Figma 채팅/이모티콘 (555:416) — 220 x 136

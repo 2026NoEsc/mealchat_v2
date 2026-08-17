@@ -1,3 +1,4 @@
+import { toEmoticonToken } from './emoticon';
 import { supabase } from './supabase';
 
 export type RoomParticipant = {
@@ -13,6 +14,7 @@ export type RoomSummary = {
   title: string;
   color: string;
   isConfirmed: boolean;
+  confirmedSlot: string | null;
   expiresAt: string;
   meetingDate: string;
   participants: RoomParticipant[];
@@ -42,6 +44,7 @@ type RoomRow = {
   title: string;
   color: string;
   is_confirmed: boolean;
+  confirmed_slot: string | null;
   expires_at: string;
   meeting_date: string;
   participants: ParticipantRow[] | null;
@@ -79,7 +82,7 @@ export async function fetchMyRooms(): Promise<{
   const { data, error } = await supabase
     .from('rooms')
     .select(
-      'id, code, title, color, is_confirmed, expires_at, meeting_date, ' +
+      'id, code, title, color, is_confirmed, confirmed_slot, expires_at, meeting_date, ' +
         'participants(id, profile_id, name, avatar_color), ' +
         'messages(message, sender_name, created_at)',
     )
@@ -99,6 +102,7 @@ export async function fetchMyRooms(): Promise<{
       title: row.title,
       color: row.color,
       isConfirmed: row.is_confirmed,
+      confirmedSlot: row.confirmed_slot,
       expiresAt: row.expires_at,
       meetingDate: row.meeting_date,
       participants: (row.participants ?? []).map(toParticipant),
@@ -109,6 +113,42 @@ export async function fetchMyRooms(): Promise<{
   });
 
   return { data: rooms, error: null };
+}
+
+/** 채팅방 헤더가 쓰는 방 한 건. 정책이 이미 접근을 제한하므로 id 로만 찾는다. */
+export async function fetchRoom(roomId: string): Promise<{
+  data: RoomSummary | null;
+  error: Error | null;
+}> {
+  const { data, error } = await supabase
+    .from('rooms')
+    .select(
+      'id, code, title, color, is_confirmed, confirmed_slot, expires_at, meeting_date, ' +
+        'participants(id, profile_id, name, avatar_color), ' +
+        'messages(message, sender_name, created_at)',
+    )
+    .eq('id', roomId)
+    .limit(1, { referencedTable: 'messages' })
+    .maybeSingle<RoomRow>();
+
+  if (error) return { data: null, error };
+  if (!data) return { data: null, error: null };
+
+  return {
+    data: {
+      id: data.id,
+      code: data.code,
+      title: data.title,
+      color: data.color,
+      isConfirmed: data.is_confirmed,
+      confirmedSlot: data.confirmed_slot,
+      expiresAt: data.expires_at,
+      meetingDate: data.meeting_date,
+      participants: (data.participants ?? []).map(toParticipant),
+      lastMessage: null,
+    },
+    error: null,
+  };
 }
 
 export async function fetchRoomMessages(roomId: string): Promise<{
@@ -148,6 +188,11 @@ export async function sendRoomMessage(roomId: string, text: string): Promise<Err
 
   const { error } = await supabase.from('messages').insert({ room_id: roomId, message: trimmed });
   return error;
+}
+
+/** 이모티콘도 같은 messages 테이블에 토큰 문자열로 실어 보낸다. */
+export async function sendRoomSticker(roomId: string, stickerId: string): Promise<Error | null> {
+  return sendRoomMessage(roomId, toEmoticonToken(stickerId));
 }
 
 /**

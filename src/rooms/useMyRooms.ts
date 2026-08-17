@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { useAuth } from '../auth/AuthProvider';
-import { fetchMyRooms, fetchRoomMessages, type RoomMessage, type RoomSummary } from '../lib/rooms';
+import {
+  fetchMyRooms,
+  fetchRoom,
+  fetchRoomMessages,
+  type RoomMessage,
+  type RoomSummary,
+} from '../lib/rooms';
 
 type Status = 'loading' | 'ready' | 'error';
 
@@ -94,4 +100,31 @@ export function useRoomMessages(roomId: string | null) {
   }, [roomId, reloadToken]);
 
   return { messages, status, error, reload };
+}
+
+/** 채팅방 헤더가 쓰는 방 한 건 */
+export function useRoom(roomId: string | null) {
+  const [room, setRoom] = useState<RoomSummary | null>(null);
+
+  useEffect(() => {
+    if (!roomId) {
+      setRoom(null);
+      return;
+    }
+
+    let active = true;
+    void fetchRoom(roomId)
+      .then(({ data }) => {
+        if (active) setRoom(data);
+      })
+      .catch(() => {
+        if (active) setRoom(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [roomId]);
+
+  return room;
 }

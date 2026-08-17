@@ -23,7 +23,18 @@ export const ROOM_STATUS_LABEL: Record<RoomStatus, string> = {
   expired: '종료',
 };
 
-/** 만료까지 남은 시간. 하루가 넘으면 일 단위로 줄인다. */
+/** 남은 시간을 단위 하나로 줄인다. 하루가 넘으면 일, 한 시간이 넘으면 시간. */
+function durationText(ms: number): string {
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 60) return `${Math.max(minutes, 1)}분`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}시간`;
+
+  return `${Math.floor(hours / 24)}일`;
+}
+
+/** 목록에 쓰는 짧은 표기 */
 export function remainingLabel(expiresAt: string, now: Date = new Date()): string | null {
   const expires = new Date(expiresAt);
   if (Number.isNaN(expires.getTime())) return null;
@@ -31,13 +42,21 @@ export function remainingLabel(expiresAt: string, now: Date = new Date()): strin
   const ms = expires.getTime() - now.getTime();
   if (ms <= 0) return '종료됨';
 
-  const minutes = Math.floor(ms / 60000);
-  if (minutes < 60) return `${Math.max(minutes, 1)}분 남음`;
+  return `${durationText(ms)} 남음`;
+}
 
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}시간 남음`;
+/**
+ * 채팅방 헤더에 쓰는 한 문장.
+ * 목록용 표기를 그대로 문장에 넣으면 "종료됨 방이 사라져요" 처럼 어색해진다.
+ */
+export function roomTimerLabel(expiresAt: string, now: Date = new Date()): string {
+  const expires = new Date(expiresAt);
+  if (Number.isNaN(expires.getTime())) return '';
 
-  return `${Math.floor(hours / 24)}일 남음`;
+  const ms = expires.getTime() - now.getTime();
+  if (ms <= 0) return '이미 종료된 밥약이에요';
+
+  return `${durationText(ms)} 뒤 방이 사라져요`;
 }
 
 /** 오전/오후 12시간제. 채팅 말풍선과 목록 시간에 함께 쓴다. */

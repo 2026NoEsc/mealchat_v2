@@ -16,16 +16,16 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../auth/AuthProvider';
-import { MONTH, weekdayOf } from '../../lib/calendar';
-import { dayKey, dayLabel, timeLabel } from '../../lib/roomFormat';
-import { sendRoomMessage, type RoomMessage } from '../../lib/rooms';
+import { parseEmoticonToken } from '../../lib/emoticon';
+import { dayKey, dayLabel, roomTimerLabel, timeLabel } from '../../lib/roomFormat';
+import { sendRoomMessage, sendRoomSticker, type RoomMessage } from '../../lib/rooms';
 import { useNavigation } from '../../navigation/NavigationContext';
-import { useRoomMessages } from '../../rooms/useMyRooms';
+import { useRoom, useRoomMessages } from '../../rooms/useMyRooms';
 import { fs, s } from '../../theme/scale';
 import { colors, shadows } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
 import { MembersSheet, MenuSheet, ScheduleSheet, SettlementSheet } from './ChatRoomSheets';
-import EmoticonPanel from './EmoticonPanel';
+import EmoticonPanel, { findSticker } from './EmoticonPanel';
 
 /** Figma 채팅방 색상 — 말풍선 시간 / 날짜 구분선 / 시스템 말풍선 글자 */
 const TIME_GRAY = '#B4B2A8';
@@ -59,14 +59,29 @@ function toDisplayMessages(rows: RoomMessage[], myId: string | null): Message[] 
     }
 
     const mine = Boolean(myId) && row.senderId === myId;
+    // 내 말풍선에는 이름을 붙이지 않는다
+    const name = mine ? undefined : row.senderName;
+    const time = timeLabel(row.createdAt);
+    const emoticon = parseEmoticonToken(row.text);
+
+    if (emoticon) {
+      const sticker = findSticker(emoticon);
+      if (sticker) {
+        out.push({ kind: 'sticker', mine, name, sticker: sticker.source, time });
+      } else {
+        // 앱에 없는 이모티콘 — 토큰을 그대로 보여주느니 사람이 읽을 말로 바꾼다
+        out.push({ kind: 'msg', mine, name, color: row.senderColor, text: '(이모티콘)', time });
+      }
+      continue;
+    }
+
     out.push({
       kind: 'msg',
       mine,
-      // 내 말풍선에는 이름을 붙이지 않는다
-      name: mine ? undefined : row.senderName,
+      name,
       color: row.senderColor,
       text: row.text,
-      time: timeLabel(row.createdAt),
+      time,
     });
   }
 
@@ -91,6 +106,7 @@ export default function ChatRoomScreen() {
   const roomId = params?.roomId ?? null;
   const title = params?.title ?? '밥약';
 
+  const room = useRoom(roomId);
   const { messages: remoteMessages, status, reload } = useRoomMessages(roomId);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -126,6 +142,16 @@ export default function ChatRoomScreen() {
     reload();
   };
 
+  const sendSticker = async (stickerId: string) => {
+    if (!roomId) return;
+    const error = await sendRoomSticker(roomId, stickerId);
+    if (error) {
+      Alert.alert('전송 실패', error.message);
+      return;
+    }
+    reload();
+  };
+
   return (
     <KeyboardAvoidingView
       style={styles.screen}
@@ -145,10 +171,10 @@ export default function ChatRoomScreen() {
               {title}
             </Text>
             <View style={styles.countChip}>
-              <Text style={styles.countText}>4</Text>
+              <Text style={styles.countText}>{room ? room.participants.length : '-'}</Text>
             </View>
           </View>
-          <Text style={styles.timer}>11:47:22 후 방이 사라져요.</Text>
+          <Text style={styles.timer}>{room ? roomTimerLabel(room.expiresAt) : ' '}</Text>
         </View>
 
         <Pressable hitSlop={s(8)} onPress={() => navigate('RoomDetail', { title })}>
@@ -156,11 +182,11 @@ export default function ChatRoomScreen() {
         </Pressable>
       </View>
 
-      <View style={styles.banner}>
-        <Text style={styles.bannerText}>
-          {MONTH}/15 ({weekdayOf(15)}) 18:30 · 조선칼국수 하단점
-        </Text>
-      </View>
+      {room?.isConfirmed && room.confirmedSlot ? (
+        <View style={styles.banner}>
+          <Text style={styles.bannerText}>{room.confirmedSlot}</Text>
+        </View>
+      ) : null}
 
       <ScrollView
         ref={scrollRef}
@@ -237,8 +263,8 @@ export default function ChatRoomScreen() {
       {emoticonOpen ? (
         <EmoticonPanel
           onPick={(sticker) => {
-            append({ kind: 'sticker', mine: true, sticker: sticker.source, time: nowLabel() });
             setEmoticonOpen(false);
+            void sendSticker(sticker.id);
           }}
         />
       ) : null}
@@ -379,14 +405,6 @@ function ActionButton({
       <Text style={styles.actionLabel}>{label}</Text>
     </Pressable>
   );
-}
-
-/** 지금 시각을 "오전 11:04" 형태로 */
-function nowLabel() {
-  const d = new Date();
-  const hours = d.getHours();
-  const minutes = `${d.getMinutes()}`.padStart(2, '0');
-  return `${hours < 12 ? '오전' : '오후'} ${hours % 12 === 0 ? 12 : hours % 12}:${minutes}`;
 }
 
 const styles = StyleSheet.create({
