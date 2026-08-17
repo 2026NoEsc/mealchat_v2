@@ -152,6 +152,21 @@ max_indexes = 5
 # Vector Buckets is available to Supabase Pro plan.
 # [storage.vector.buckets.documents-openai]
 
+#
+# ⚠️ `supabase config push` 를 그냥 실행하지 말 것.
+#
+# 이 파일은 로컬 스택을 띄우는 용도로 쓰고 있고, 아래 [auth] 값들은 로컬 기준이다.
+# config push 는 설정 하나만 고르는 방법이 없어 [auth] 전체를 운영에 밀어 넣는다.
+# 그러면 최소한 다음이 운영에서 덮어써진다.
+#
+#   site_url          → http://127.0.0.1:3000  (운영 이메일 링크가 localhost 로 나간다)
+#   enable_confirmations = false                (운영 이메일 확인이 꺼진다)
+#   jwt_expiry, rate limit, MFA, 외부 provider, SMS 설정 전부
+#
+# 운영 인증 설정은 Dashboard 에서 바꾼다. 자세한 항목은 docs/WORKFLOW.md 참고.
+# 언젠가 config push 로 관리하려면, 먼저 운영의 현재 값을 그대로 옮겨 적고
+# 로컬과 달라야 하는 값은 env(...) 로 빼야 한다.
+#
 [auth]
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used

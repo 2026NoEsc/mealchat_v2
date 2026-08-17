@@ -106,6 +106,32 @@ baseline 은 원격에 이미 존재하던 스키마를 `db dump` 로 보존한 
 자동으로 참가자에 넣는다. 나가기는 자기 행 DELETE 정책으로 가능하고,
 남을 내보내는 기능은 아직 없다.
 
+#### Dashboard 에서만 되는 설정 ⚠️ 미완
+
+마이그레이션으로도, `supabase config push` 로도 안전하게 할 수 없다.
+`config push` 는 설정 하나만 고르는 방법이 없어 `[auth]` 전체를 밀어 넣는데,
+그러면 로컬 기준인 `site_url`(localhost)과 `enable_confirmations = false` 가
+운영을 덮어써 로그인 자체가 망가진다. 그래서 Dashboard 에서 직접 바꾼다.
+
+**1. Auth Redirect URLs** — Authentication → URL Configuration → Redirect URLs
+
+```
+mealchat://auth/callback
+mealchat://auth/reset
+```
+
+Expo Go 로 개발할 때는 `exp://<주소>:8081/--/auth/callback` 형태도 함께 넣는다.
+`npx expo start` 가 찍어 주는 주소를 쓰면 된다.
+
+**이게 없으면 신규 가입의 이메일 확인 링크와 비밀번호 재설정이 동작하지 않는다.**
+기존 계정 로그인은 영향이 없어서 증상이 늦게 드러난다.
+
+**2. 유출 비밀번호 차단** — Authentication → Policies → Password Protection 에서
+"Check against HaveIBeenPwned" 를 켠다. Security Advisor 가 지적한 항목이다.
+
+두 가지 모두 바꾼 뒤에는 실제로 신규 가입을 해서 확인 메일 링크가 앱으로 돌아오는지
+확인한다. 등록된 URL 과 앱이 만드는 URL 이 한 글자라도 다르면 조용히 실패한다.
+
 #### 운영 DB 현재 상태
 
 `anon` 의 테이블 권한은 0 이다 (baseline 에서는 10 개 테이블 전부에 `GRANT ALL`).
@@ -118,9 +144,7 @@ baseline 은 원격에 이미 존재하던 스키마를 `db dump` 로 보존한 
 
 #### 아직 남은 일
 
-- **Dashboard 설정 두 가지가 남았다.** Auth Redirect URLs 에 `mealchat://auth/callback`
-  과 `mealchat://auth/reset` 을 등록하고, leaked-password protection 을 켠다.
-  이건 마이그레이션으로 할 수 없다.
+- **Dashboard 설정 두 가지가 남았다.** 아래 "Dashboard 에서만 되는 설정" 참고.
 - **이메일 확인이 켜져 있으면 가입 시점에 계좌·생년월일이 저장되지 않는다.**
   `profile_private` 쓰기는 세션을 요구하는데 확인 대기 중에는 세션이 없다.
   사용자 메타데이터로 넘기면 JWT 에 실려 나가므로 그 방법은 쓰지 않는다.
