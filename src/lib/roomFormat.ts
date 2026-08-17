@@ -95,3 +95,32 @@ export function participantMeta(
   const people = `${participantCount}명`;
   return remaining ? `${people} · ${remaining}` : people;
 }
+
+/** `2026-08-13` 이 오늘로부터 며칠 뒤인지. 지난 날짜는 음수. */
+export function daysUntil(meetingDate: string, now: Date = new Date()): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(meetingDate.trim());
+  if (!match) return null;
+
+  // 시각을 떼고 날짜끼리만 비교해야 "오늘"이 시간대에 따라 흔들리지 않는다
+  const target = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+
+  return Math.round((target - today) / 86400000);
+}
+
+export type UpcomingBadge = { label: string; tone: 'today' | 'countdown' };
+
+/** 홈의 다가올 일정 배지 */
+export function upcomingBadge(meetingDate: string, now: Date = new Date()): UpcomingBadge | null {
+  const days = daysUntil(meetingDate, now);
+  if (days === null || days < 0) return null;
+  return days === 0 ? { label: '오늘', tone: 'today' } : { label: `D-${days}`, tone: 'countdown' };
+}
+
+/** `2026년 8월 13일 · 버거킹 하단점` — 장소가 없으면 날짜만 */
+export function meetingLine(meetingDate: string, locationName: string | null): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(meetingDate.trim());
+  const date = match ? `${match[1]}년 ${Number(match[2])}월 ${Number(match[3])}일` : meetingDate;
+  const place = locationName?.trim();
+  return place ? `${date} · ${place}` : date;
+}

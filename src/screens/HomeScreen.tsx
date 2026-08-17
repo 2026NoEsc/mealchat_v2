@@ -5,34 +5,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AdCarousel from '../components/AdCarousel';
 import AppHeader from '../components/AppHeader';
 import { CompleteButton } from '../components/ui/Button';
+import { meetingLine, roomStatus, upcomingBadge } from '../lib/roomFormat';
+import type { RoomSummary } from '../lib/rooms';
 import { useNavigation } from '../navigation/NavigationContext';
+import { useMyProfile } from '../profile/useMyProfile';
+import { useMyRooms, useMySettlements } from '../rooms/useMyRooms';
 import { fs, s } from '../theme/scale';
 import { colors, radii } from '../theme/tokens';
 import { fontFamily, weight } from '../theme/typography';
 
 const banner = require('../../assets/ad/banner-1.png');
-
-type UpcomingItem = {
-  title: string;
-  date: string;
-  badge: string;
-  badgeTone: 'today' | 'countdown';
-};
-
-const UPCOMING: UpcomingItem[] = [
-  {
-    title: '오늘 점심팟',
-    date: '2026년 8월 13일 · 버거킹 하단점',
-    badge: '오늘',
-    badgeTone: 'today',
-  },
-  {
-    title: '학회 회식',
-    date: '2026년 8월 21일 · 조선칼국수 하단점',
-    badge: 'D-8',
-    badgeTone: 'countdown',
-  },
-];
 
 /**
  * Figma 홈/메인 (309:1064) — 220 x 483
@@ -42,6 +24,15 @@ const UPCOMING: UpcomingItem[] = [
 export default function HomeScreen() {
   const { navigate } = useNavigation();
   const insets = useSafeAreaInsets();
+  const { bundle } = useMyProfile();
+  const { rooms } = useMyRooms();
+  const settlements = useMySettlements();
+
+  const name = bundle?.profile.name;
+  /* 아직 끝나지 않은 밥약만 센다 */
+  const activeRooms = rooms.filter((room) => roomStatus(room) !== 'expired');
+  const upcoming = selectUpcoming(rooms);
+  const settlementRoomId = settlements[0]?.roomId ?? null;
 
   return (
     <View style={styles.screen}>
@@ -49,8 +40,14 @@ export default function HomeScreen() {
       <AppHeader />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Text style={styles.greeting}>안녕하세요, 모아님!</Text>
-        <Text style={styles.greetingSub}>현재 밥약 1건, 정산 1건이 기다리고 있어요~</Text>
+        <Text style={styles.greeting}>
+          {name ? `안녕하세요, ${name}님!` : '안녕하세요!'}
+        </Text>
+        <Text style={styles.greetingSub}>
+          {activeRooms.length === 0 && settlements.length === 0
+            ? '아직 잡힌 밥약이 없어요. 하나 만들어 볼까요?'
+            : `현재 밥약 ${activeRooms.length}건, 정산 ${settlements.length}건이 기다리고 있어요~`}
+        </Text>
 
         <View style={styles.banner}>
           <AdCarousel images={[banner]} />
@@ -70,44 +67,63 @@ export default function HomeScreen() {
             </Pressable>
           </View>
 
-          {UPCOMING.map((item, i) => (
-            <View key={item.title} style={i > 0 ? styles.itemDivided : styles.item}>
-              <View style={styles.itemHeader}>
-                <Text style={styles.bullet}>•</Text>
-                <Text style={styles.itemTitle}>{item.title}</Text>
-                <View
-                  style={[
-                    styles.badge,
-                    item.badgeTone === 'today' ? styles.badgeToday : styles.badgeCountdown,
-                  ]}>
-                  <Text
-                    style={[
-                      styles.badgeText,
-                      item.badgeTone === 'today'
-                        ? styles.badgeTextToday
-                        : styles.badgeTextCountdown,
-                    ]}>
-                    {item.badge}
+          {upcoming.length === 0 ? (
+            <Text style={styles.emptyItem}>다가올 밥약이 없어요</Text>
+          ) : (
+            upcoming.map((room, i) => {
+              const badge = upcomingBadge(room.meetingDate);
+              return (
+                <Pressable
+                  key={room.id}
+                  style={i > 0 ? styles.itemDivided : styles.item}
+                  onPress={() => navigate('ChatRoom', { roomId: room.id, title: room.title, color: room.color })}>
+                  <View style={styles.itemHeader}>
+                    <Text style={styles.bullet}>•</Text>
+                    <Text style={styles.itemTitle}>{room.title}</Text>
+                    {badge ? (
+                      <View
+                        style={[
+                          styles.badge,
+                          badge.tone === 'today' ? styles.badgeToday : styles.badgeCountdown,
+                        ]}>
+                        <Text
+                          style={[
+                            styles.badgeText,
+                            badge.tone === 'today'
+                              ? styles.badgeTextToday
+                              : styles.badgeTextCountdown,
+                          ]}>
+                          {badge.label}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={styles.itemDate}>
+                    {meetingLine(room.meetingDate, room.locationName)}
                   </Text>
-                </View>
-              </View>
-              <Text style={styles.itemDate}>{item.date}</Text>
-            </View>
-          ))}
+                </Pressable>
+              );
+            })
+          )}
         </View>
 
         {/* 정산 UI 는 채팅방의 N빵 정산 시트뿐이라 해당 방을 열면서 시트를 펼친다 */}
-        <Pressable
-          style={styles.payNudge}
-          onPress={() =>
-            navigate('ChatRoom', { title: '오늘 점심팟', openSheet: 'settlement' })
-          }>
-          <View style={styles.flex}>
-            <Text style={styles.payTitle}>미완료 정산 1건</Text>
-            <Text style={styles.paySub}>방이 사라져도 정산 내역은 남아 있어요</Text>
-          </View>
-          <Text style={styles.payLink}>보기 →</Text>
-        </Pressable>
+        {settlements.length > 0 ? (
+          <Pressable
+            style={styles.payNudge}
+            disabled={!settlementRoomId}
+            onPress={() =>
+              settlementRoomId &&
+              navigate('ChatRoom', { roomId: settlementRoomId, openSheet: 'settlement' })
+            }>
+            <View style={styles.flex}>
+              {/* 완료 여부는 dutch_pay_members 가 잠겨 있어 아직 알 수 없다 */}
+              <Text style={styles.payTitle}>정산 {settlements.length}건</Text>
+              <Text style={styles.paySub}>방이 사라져도 정산 내역은 남아 있어요</Text>
+            </View>
+            <Text style={styles.payLink}>보기 →</Text>
+          </Pressable>
+        ) : null}
 
         <CompleteButton
           label="일정잡기"
@@ -117,6 +133,14 @@ export default function HomeScreen() {
       </ScrollView>
     </View>
   );
+}
+
+/** 오늘 이후 일정만, 가까운 순으로 두 건 */
+function selectUpcoming(rooms: RoomSummary[]): RoomSummary[] {
+  return rooms
+    .filter((room) => upcomingBadge(room.meetingDate) !== null)
+    .sort((a, b) => a.meetingDate.localeCompare(b.meetingDate))
+    .slice(0, 2);
 }
 
 const styles = StyleSheet.create({
@@ -279,6 +303,13 @@ const styles = StyleSheet.create({
     lineHeight: fs(9),
     fontWeight: weight.semibold,
     color: colors.primary,
+  },
+  emptyItem: {
+    marginTop: s(12),
+    textAlign: 'center',
+    fontFamily: fontFamily.body,
+    fontSize: fs(7),
+    color: colors.textMuted,
   },
   cta: {
     // y397, 정산 넛지 하단(y380) 에서 17

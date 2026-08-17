@@ -3,10 +3,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../auth/AuthProvider';
 import {
   fetchMyRooms,
+  fetchMySettlements,
   fetchRoom,
   fetchRoomMessages,
   type RoomMessage,
   type RoomSummary,
+  type SettlementSummary,
 } from '../lib/rooms';
 
 type Status = 'loading' | 'ready' | 'error';
@@ -127,4 +129,33 @@ export function useRoom(roomId: string | null) {
   }, [roomId]);
 
   return room;
+}
+
+/** 내가 만든 정산 목록. 홈의 정산 넛지가 쓴다. */
+export function useMySettlements() {
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
+  const [settlements, setSettlements] = useState<SettlementSummary[]>([]);
+
+  useEffect(() => {
+    if (!userId) {
+      setSettlements([]);
+      return;
+    }
+
+    let active = true;
+    void fetchMySettlements()
+      .then(({ data }) => {
+        if (active) setSettlements(data ?? []);
+      })
+      .catch(() => {
+        if (active) setSettlements([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [userId]);
+
+  return settlements;
 }

@@ -17,6 +17,7 @@ export type RoomSummary = {
   confirmedSlot: string | null;
   expiresAt: string;
   meetingDate: string;
+  locationName: string | null;
   participants: RoomParticipant[];
   lastMessage: { text: string; senderName: string; createdAt: string } | null;
 };
@@ -47,6 +48,7 @@ type RoomRow = {
   confirmed_slot: string | null;
   expires_at: string;
   meeting_date: string;
+  location_name: string | null;
   participants: ParticipantRow[] | null;
   messages: { message: string; sender_name: string; created_at: string }[] | null;
 };
@@ -82,7 +84,7 @@ export async function fetchMyRooms(): Promise<{
   const { data, error } = await supabase
     .from('rooms')
     .select(
-      'id, code, title, color, is_confirmed, confirmed_slot, expires_at, meeting_date, ' +
+      'id, code, title, color, is_confirmed, confirmed_slot, expires_at, meeting_date, location_name, ' +
         'participants(id, profile_id, name, avatar_color), ' +
         'messages(message, sender_name, created_at)',
     )
@@ -105,6 +107,7 @@ export async function fetchMyRooms(): Promise<{
       confirmedSlot: row.confirmed_slot,
       expiresAt: row.expires_at,
       meetingDate: row.meeting_date,
+      locationName: row.location_name,
       participants: (row.participants ?? []).map(toParticipant),
       lastMessage: last
         ? { text: last.message, senderName: last.sender_name, createdAt: last.created_at }
@@ -123,7 +126,7 @@ export async function fetchRoom(roomId: string): Promise<{
   const { data, error } = await supabase
     .from('rooms')
     .select(
-      'id, code, title, color, is_confirmed, confirmed_slot, expires_at, meeting_date, ' +
+      'id, code, title, color, is_confirmed, confirmed_slot, expires_at, meeting_date, location_name, ' +
         'participants(id, profile_id, name, avatar_color), ' +
         'messages(message, sender_name, created_at)',
     )
@@ -144,6 +147,7 @@ export async function fetchRoom(roomId: string): Promise<{
       confirmedSlot: data.confirmed_slot,
       expiresAt: data.expires_at,
       meetingDate: data.meeting_date,
+      locationName: data.location_name,
       participants: (data.participants ?? []).map(toParticipant),
       lastMessage: null,
     },
@@ -220,4 +224,41 @@ export async function leaveRoom(roomId: string, profileId: string): Promise<Erro
     .eq('room_id', roomId)
     .eq('profile_id', profileId);
   return error;
+}
+
+export type SettlementSummary = {
+  id: string;
+  roomId: string | null;
+  title: string;
+  totalAmount: number;
+};
+
+/**
+ * 내가 만든 정산만 돌아온다. dutch_pay_bills 의 정책이 creator 로 제한한다.
+ *
+ * "미완료" 여부는 아직 알 수 없다. 완료 표시는 dutch_pay_members.is_completed 에
+ * 있는데 그 테이블은 정책도 권한도 없이 잠겨 있다. 참가자별 정산을 열려면
+ * 누가 무엇을 볼 수 있는지부터 정하는 별도 작업이 필요하다.
+ */
+export async function fetchMySettlements(): Promise<{
+  data: SettlementSummary[] | null;
+  error: Error | null;
+}> {
+  const { data, error } = await supabase
+    .from('dutch_pay_bills')
+    .select('id, room_id, title, total_amount')
+    .order('created_at', { ascending: false })
+    .returns<{ id: string; room_id: string | null; title: string; total_amount: number }[]>();
+
+  if (error) return { data: null, error };
+
+  return {
+    data: (data ?? []).map((row) => ({
+      id: row.id,
+      roomId: row.room_id,
+      title: row.title,
+      totalAmount: row.total_amount,
+    })),
+    error: null,
+  };
 }

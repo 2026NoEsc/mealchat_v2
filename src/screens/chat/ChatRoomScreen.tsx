@@ -104,9 +104,14 @@ export default function ChatRoomScreen() {
     | undefined;
 
   const roomId = params?.roomId ?? null;
-  const title = params?.title ?? '밥약';
 
   const room = useRoom(roomId);
+  /*
+   * 목록에서 들어오면 파라미터에 제목이 실려 있어 곧바로 보여줄 수 있고,
+   * 홈의 정산 링크처럼 roomId 만 들고 들어오는 경로도 있어 불러온 값으로 채운다.
+   */
+  const title = params?.title ?? room?.title ?? '밥약';
+  const roomColor = params?.color ?? room?.color ?? colors.primary;
   const { messages: remoteMessages, status, reload } = useRoomMessages(roomId);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -163,7 +168,7 @@ export default function ChatRoomScreen() {
           <ChevronLeft size={s(14)} color={SYS_TEXT} strokeWidth={2.5} />
         </Pressable>
 
-        <View style={[styles.headerAvatar, { backgroundColor: params?.color ?? colors.primary }]} />
+        <View style={[styles.headerAvatar, { backgroundColor: roomColor }]} />
 
         <View style={styles.headerCenter}>
           <View style={styles.headerTitleRow}>

@@ -1,12 +1,15 @@
 import {
   dayKey,
   dayLabel,
+  daysUntil,
+  meetingLine,
   participantMeta,
   remainingLabel,
   ROOM_STATUS_LABEL,
   roomStatus,
   roomTimerLabel,
   timeLabel,
+  upcomingBadge,
 } from '../src/lib/roomFormat';
 
 /** 테스트가 시계에 흔들리지 않도록 기준 시각을 고정한다 */
@@ -118,5 +121,53 @@ describe('roomTimerLabel', () => {
 
   it('읽을 수 없으면 빈 문자열', () => {
     expect(roomTimerLabel('nope', NOW)).toBe('');
+  });
+});
+
+describe('daysUntil', () => {
+  it('오늘은 0', () => {
+    expect(daysUntil('2026-08-18', NOW)).toBe(0);
+  });
+
+  it('앞으로 남은 날을 센다', () => {
+    expect(daysUntil('2026-08-26', NOW)).toBe(8);
+  });
+
+  it('지난 날짜는 음수', () => {
+    expect(daysUntil('2026-08-13', NOW)).toBe(-5);
+  });
+
+  it('형식이 다르면 null', () => {
+    expect(daysUntil('2026/08/18', NOW)).toBeNull();
+  });
+
+  it('기준 시각이 늦은 밤이어도 날짜로만 센다', () => {
+    // 시각까지 빼면 23시에는 "내일"이 0.04 일 뒤가 되어 오늘로 보인다
+    expect(daysUntil('2026-08-19', new Date('2026-08-18T23:59:00'))).toBe(1);
+  });
+});
+
+describe('upcomingBadge', () => {
+  it('오늘이면 오늘 배지', () => {
+    expect(upcomingBadge('2026-08-18', NOW)).toEqual({ label: '오늘', tone: 'today' });
+  });
+
+  it('앞이면 D- 배지', () => {
+    expect(upcomingBadge('2026-08-26', NOW)).toEqual({ label: 'D-8', tone: 'countdown' });
+  });
+
+  it('지난 일정은 배지가 없다', () => {
+    expect(upcomingBadge('2026-08-13', NOW)).toBeNull();
+  });
+});
+
+describe('meetingLine', () => {
+  it('날짜와 장소를 합친다', () => {
+    expect(meetingLine('2026-08-13', '버거킹 하단점')).toBe('2026년 8월 13일 · 버거킹 하단점');
+  });
+
+  it('장소가 없으면 날짜만', () => {
+    expect(meetingLine('2026-08-13', null)).toBe('2026년 8월 13일');
+    expect(meetingLine('2026-08-13', '  ')).toBe('2026년 8월 13일');
   });
 });
