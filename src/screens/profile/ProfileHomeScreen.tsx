@@ -3,7 +3,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
-import { countLikedTastes, formatAccount, formatBirthDate } from '../../lib/format';
+import {
+  countLikedTastes,
+  formatAccount,
+  formatBirthDate,
+  formatGender,
+} from '../../lib/format';
 import { useNavigation } from '../../navigation/NavigationContext';
 import type { RouteName } from '../../navigation/routes';
 import { useMyProfile } from '../../profile/useMyProfile';
@@ -37,9 +42,7 @@ export default function ProfileHomeScreen() {
   const likedTastes = countLikedTastes(privateProfile?.tastes);
   const account = formatAccount(privateProfile?.bankName, privateProfile?.accountNumber);
   const birth = formatBirthDate(privateProfile?.birthDate);
-  const gender = typeof privateProfile?.personalData.gender === 'string'
-    ? privateProfile.personalData.gender
-    : null;
+  const gender = formatGender(privateProfile?.personalData.gender);
 
   /* 값이 없으면 채워야 할 곳으로 보이게 danger 로 표시한다 */
   const info: InfoRow[] = [

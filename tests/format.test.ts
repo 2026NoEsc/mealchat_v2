@@ -4,6 +4,7 @@ import {
   formatAccount,
   formatAmount,
   formatBirthDate,
+  formatGender,
   maskAccountNumber,
   relativeTime,
 } from '../src/lib/format';
@@ -128,5 +129,28 @@ describe('formatAmount', () => {
   it('천 단위로 끊는다', () => {
     expect(formatAmount(12000)).toBe('12,000원');
     expect(formatAmount(0)).toBe('0원');
+  });
+});
+
+describe('formatGender', () => {
+  it('영문 코드를 한국어로 옮긴다', () => {
+    expect(formatGender('male')).toBe('남성');
+    expect(formatGender('female')).toBe('여성');
+  });
+
+  it('약자와 대소문자·공백을 받아준다', () => {
+    expect(formatGender(' M ')).toBe('남성');
+    expect(formatGender('FEMALE')).toBe('여성');
+  });
+
+  it('모르는 값은 지어내지 않고 그대로 보여준다', () => {
+    expect(formatGender('논바이너리')).toBe('논바이너리');
+  });
+
+  it('값이 없거나 문자열이 아니면 null', () => {
+    expect(formatGender(null)).toBeNull();
+    expect(formatGender(undefined)).toBeNull();
+    expect(formatGender('')).toBeNull();
+    expect(formatGender(123)).toBeNull();
   });
 });
