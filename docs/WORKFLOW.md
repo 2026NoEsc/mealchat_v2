@@ -59,15 +59,38 @@ Figma 디자인(`xBf3b09D6Bj1dTiCixt25e`)을 React Native 앱으로 옮기는 �
   재설정 링크가 그냥 매직링크 로그인이 되어 버린다.
 - Dashboard 에서 leaked-password protection 을 켜야 한다.
 
+#### 마이그레이션 상태
+
+Docker Desktop 이 있으면 `npx supabase start` 로 로컬 스택을 띄우고
+`npx supabase db reset` 으로 마이그레이션 전체를 처음부터 재적용해 검증할 수 있다.
+`db reset` 에 **`--linked` 를 붙이면 운영 DB가 지워진다.** 로컬 검증에는 절대 붙이지 않는다.
+
+| 파일 | 원격 적용 |
+|---|---|
+| `20260817000000_remote_schema.sql` (baseline) | 적용됨 (repair 로 기록) |
+| `20260817131934_security_auth_foundation.sql` | **대기** |
+| `20260817144252_terms_consent_records.sql` | **대기** |
+
+baseline 은 원격에 이미 존재하던 스키마를 `db dump` 로 보존한 것이라
+`migration repair --status applied` 로 실행 없이 기록만 했다.
+**대기 중인 두 개는 같은 방식으로 repair 하면 안 된다** — 아직 적용되지 않았으므로
+적용됨으로 기록하면 영구히 push 할 수 없게 된다.
+
+`db pull` 은 Docker 가 필요하지만 `db push` 는 필요 없다.
+
 #### 아직 남은 일
 
-- **baseline 마이그레이션이 없다.** 위 마이그레이션은 테이블을 만들지 않고 `alter` 만 하므로,
-  `supabase link` + `supabase db pull` 로 현재 원격 스키마를 먼저 보존해야 한다.
-  `supabase/config.toml` 도 아직 없다.
-- 가입 화면이 모으는 계좌·생년월일·취향·**약관 동의 버전·시각**은 아직 어디에도 저장되지 않는다.
-  owner-only 테이블이 생긴 뒤 연결해야 한다.
+- **하드닝 2건이 운영에 적용되지 않았다.** 적용하면 `participants` INSERT 권한이 사라져
+  방 참가가 불가능해지므로, 초대 RPC 를 함께 준비하는 편이 좋다.
+- 개인정보는 별도 컬럼이 아니라 `profiles.personal_data` / `privacy_settings` JSONB 안에 있고,
+  그 밖에 `push_token`, `start_location_name`, `start_latitude`, `start_longitude` 가 컬럼이다.
+  owner-only 테이블로 분리하는 작업이 남아 있다.
+  단 하드닝 적용 후 `profiles` 는 이미 자기 행만 조회되므로 긴급도는 낮다.
+- 가입 화면이 모으는 계좌·생년월일·취향은 아직 저장되지 않는다 (동의 기록은 연결 완료).
 - `EXPO_PUBLIC_GEMINI_API_KEY`, `EXPO_PUBLIC_KAKAO_REST_API_KEY` 는 `.env` 에 있지만
   코드에서 아직 쓰지 않는다. 쓰는 순간 번들에 공개되므로 Edge Function 뒤로 옮긴다.
+- `.env` 의 변수명이 `EXPO_PUBLIC_SUPABASE_ANON_KEY` 인데 값은 `sb_publishable_…` 이다.
+  fallback 이 있어 동작하지만 `.env.example` 대로 `..._PUBLISHABLE_KEY` 로 바꾸는 편이 맞다.
 
 ---
 
