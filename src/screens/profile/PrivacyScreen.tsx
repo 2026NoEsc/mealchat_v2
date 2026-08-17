@@ -1,11 +1,13 @@
 import { Lock } from 'lucide-react-native';
-import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppHeader from '../../components/AppHeader';
 import { CompleteButton } from '../../components/ui/Button';
 import Toggle from '../../components/ui/Toggle';
+import { savePrivacySettings } from '../../lib/profile';
+import { useMyProfile } from '../../profile/useMyProfile';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
@@ -39,11 +41,42 @@ const INITIAL: Record<string, boolean> = {
  * 자물쇠 안내 y341 / 저장 버튼 y358
  */
 export default function PrivacyScreen() {
+  const { userId, bundle, reload } = useMyProfile();
   const insets = useSafeAreaInsets();
   const { resetTo } = useNavigation();
   const [shared, setShared] = useState(INITIAL);
+  const [loaded, setLoaded] = useState(false);
 
-  const toggle = (key: string) => setShared((prev) => ({ ...prev, [key]: !prev[key] }));
+  /* 저장된 값은 "public"/"private" 문자열이라 토글용 boolean 으로 바꾼다 */
+  useEffect(() => {
+    if (loaded || !bundle) return;
+    const saved = bundle.privateProfile.privacySettings;
+    setShared((prev) => {
+      const next = { ...prev };
+      for (const key of Object.keys(prev)) {
+        if (saved[key]) next[key] = saved[key] === 'public';
+      }
+      return next;
+    });
+    setLoaded(true);
+  }, [bundle, loaded]);
+
+  const toggle = async (key: string) => {
+    const next = { ...shared, [key]: !shared[key] };
+    setShared(next);
+    if (!userId) return;
+
+    const settings = Object.fromEntries(
+      Object.entries(next).map(([name, open]) => [name, open ? 'public' : 'private']),
+    );
+    const error = await savePrivacySettings(userId, settings);
+    if (error) {
+      Alert.alert('저장 실패', error.message);
+      setShared(shared);
+      return;
+    }
+    reload();
+  };
 
   return (
     <View style={styles.screen}>
@@ -62,7 +95,7 @@ export default function PrivacyScreen() {
               field={field}
               divided={i > 0}
               value={shared[field.key]}
-              onChange={() => toggle(field.key)}
+              onChange={() => void toggle(field.key)}
             />
           ))}
         </View>
@@ -75,7 +108,7 @@ export default function PrivacyScreen() {
               field={field}
               divided={i > 0}
               value={shared[field.key]}
-              onChange={() => toggle(field.key)}
+              onChange={() => void toggle(field.key)}
             />
           ))}
         </View>

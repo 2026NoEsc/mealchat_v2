@@ -17,6 +17,8 @@ export type MyPrivateProfile = {
   birthDate: string | null;
   tastes: Record<string, boolean>;
   personalData: Record<string, unknown>;
+  privacySettings: Record<string, string>;
+  startLocationName: string | null;
 };
 
 export type MyProfileBundle = {
@@ -38,6 +40,8 @@ type PrivateRow = {
   birth_date: string | null;
   tastes: Record<string, boolean> | null;
   personal_data: Record<string, unknown> | null;
+  privacy_settings: Record<string, string> | null;
+  start_location_name: string | null;
 };
 
 /**
@@ -58,7 +62,7 @@ export async function fetchMyProfile(userId: string): Promise<{
       .maybeSingle<ProfileRow>(),
     supabase
       .from('profile_private')
-      .select('bank_name, account_number, birth_date, tastes, personal_data')
+      .select('bank_name, account_number, birth_date, tastes, personal_data, privacy_settings, start_location_name')
       .eq('id', userId)
       .maybeSingle<PrivateRow>(),
   ]);
@@ -89,6 +93,8 @@ export async function fetchMyProfile(userId: string): Promise<{
         birthDate: privateRow?.birth_date ?? null,
         tastes: privateRow?.tastes ?? {},
         personalData: privateRow?.personal_data ?? {},
+        privacySettings: privateRow?.privacy_settings ?? {},
+        startLocationName: privateRow?.start_location_name ?? null,
       },
     },
     error: null,
@@ -135,3 +141,36 @@ export async function saveMyPrivateProfile(
 
 /** 가입 마지막 단계에서 쓰는 이름. 인자 형태가 같아 그대로 위임한다. */
 export const saveSignupPrivateProfile = saveMyPrivateProfile;
+
+/** 정보 공개 범위. privacy_settings JSONB 를 통째로 덮어쓴다. */
+export async function savePrivacySettings(
+  userId: string,
+  settings: Record<string, string>,
+): Promise<Error | null> {
+  const { error } = await supabase
+    .from('profile_private')
+    .update({ privacy_settings: settings })
+    .eq('id', userId);
+  return error;
+}
+
+/** 출발지. 좌표는 아직 검색 수단이 없어 이름만 저장한다. */
+export async function saveStartLocation(
+  userId: string,
+  locationName: string,
+): Promise<Error | null> {
+  const { error } = await supabase
+    .from('profile_private')
+    .update({ start_location_name: locationName.trim() || null })
+    .eq('id', userId);
+  return error;
+}
+
+/** 취향 게임 결과 */
+export async function saveTastes(
+  userId: string,
+  tastes: Record<string, boolean>,
+): Promise<Error | null> {
+  const { error } = await supabase.from('profile_private').update({ tastes }).eq('id', userId);
+  return error;
+}
