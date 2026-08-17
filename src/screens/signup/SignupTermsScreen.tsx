@@ -1,7 +1,9 @@
 import { ChevronRight, CheckSquare, Square } from 'lucide-react-native';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { useAuth } from '../../auth/AuthProvider';
+import { useSignupDraft } from '../../auth/SignupDraftProvider';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
@@ -24,18 +26,49 @@ type TermKey = (typeof TERMS)[number]['key'];
  */
 export default function SignupTermsScreen() {
   const { resetTo, goBack } = useNavigation();
-  const [agreed, setAgreed] = useState<Record<TermKey, boolean>>({
-    service: true,
-    privacy: true,
-    marketing: true,
-  });
+  const { signUpWithEmail } = useAuth();
+  const { draft, updateDraft, resetDraft } = useSignupDraft();
+  const [submitting, setSubmitting] = useState(false);
+  const agreed: Record<TermKey, boolean> = draft.consents;
 
   const allAgreed = TERMS.every((t) => agreed[t.key]);
   const canSubmit = TERMS.filter((t) => t.required).every((t) => agreed[t.key]);
 
   const toggleAll = () => {
     const next = !allAgreed;
-    setAgreed({ service: next, privacy: next, marketing: next });
+    updateDraft({ consents: { service: next, privacy: next, marketing: next } });
+  };
+
+  const completeSignup = async () => {
+    if (!canSubmit) {
+      Alert.alert('약관 동의', '필수 약관에 동의해 주세요.');
+      return;
+    }
+
+    if (!draft.nickname.trim() || !draft.email.trim() || !draft.password) {
+      Alert.alert('가입 정보 없음', '개인정보 입력 화면에서 가입 정보를 다시 입력해 주세요.');
+      return;
+    }
+
+    setSubmitting(true);
+    const result = await signUpWithEmail({
+      email: draft.email,
+      password: draft.password,
+      displayName: draft.nickname,
+      marketingOptIn: agreed.marketing,
+    });
+    setSubmitting(false);
+
+    if (result.error) {
+      Alert.alert('회원가입 실패', result.error.message);
+      return;
+    }
+
+    resetDraft();
+    if (result.confirmationRequired) {
+      Alert.alert('이메일 확인 필요', '이메일의 확인 링크를 연 뒤 로그인해 주세요.');
+      resetTo('Login');
+    }
   };
 
   return (
@@ -47,17 +80,20 @@ export default function SignupTermsScreen() {
       character={dudu}
       characterBox={{ left: 41, top: 47, width: 107, height: 78 }}
       description={['두두가 열심히 여러분들의', '의견을 두두두 알해줄거예요']}
-      ctaLabel="회원가입 끝내기"
-      onNext={() => {
-        if (canSubmit) resetTo('Home');
-      }}
-      onBack={goBack}>
+      ctaLabel={submitting ? '계정 만드는 중' : '회원가입 끝내기'}
+      onNext={() => void completeSignup()}
+      onBack={goBack}
+      submitting={submitting}>
       <View style={styles.terms}>
         {TERMS.map((term) => (
           <Pressable
             key={term.key}
             style={styles.row}
-            onPress={() => setAgreed((p) => ({ ...p, [term.key]: !p[term.key] }))}>
+            onPress={() =>
+              updateDraft({
+                consents: { ...agreed, [term.key]: !agreed[term.key] },
+              })
+            }>
             <Check checked={agreed[term.key]} />
             <Text style={styles.label}>{term.label}</Text>
             <ChevronRight size={s(8)} color={colors.textMuted} strokeWidth={2} />

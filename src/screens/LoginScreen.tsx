@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  Alert,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -12,6 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useAuth } from '../auth/AuthProvider';
 import ScreenHeader from '../components/ScreenHeader';
 import { AccentButton } from '../components/ui/Button';
 import { useNavigation } from '../navigation/NavigationContext';
@@ -27,13 +29,39 @@ const logo = require('../../assets/brand/logo-main.png');
  * 아이디 y218·입력 y229 / 비밀번호 y260·입력 y271 / 버튼 y302 / 안내 y337, y356
  */
 export default function LoginScreen() {
-  const { navigate, replace, goBack, canGoBack } = useNavigation();
+  const { navigate, goBack, canGoBack } = useNavigation();
   const insets = useSafeAreaInsets();
+  const { sendPasswordReset, signInWithEmail } = useAuth();
 
-  const [id, setId] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  const canSubmit = id.trim().length > 0 && password.length > 0;
+  const canSubmit = email.trim().length > 0 && password.length > 0;
+
+  const signIn = async () => {
+    if (!canSubmit) return;
+
+    setSubmitting(true);
+    const error = await signInWithEmail(email, password);
+    setSubmitting(false);
+
+    if (error) Alert.alert('로그인 실패', error.message);
+  };
+
+  const resetPassword = async () => {
+    if (!email.trim()) {
+      Alert.alert('이메일 입력', '비밀번호 재설정 메일을 받을 이메일을 입력해 주세요.');
+      return;
+    }
+
+    const error = await sendPasswordReset(email);
+    if (error) {
+      Alert.alert('재설정 메일 전송 실패', error.message);
+    } else {
+      Alert.alert('메일 전송 완료', '이메일의 재설정 링크를 열어 새 비밀번호를 설정해 주세요.');
+    }
+  };
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -52,13 +80,14 @@ export default function LoginScreen() {
             <Text style={styles.tagline}>다시 오셨네요, 반가워요!</Text>
           </View>
 
-          <Text style={styles.label}>아이디</Text>
+          <Text style={styles.label}>이메일</Text>
           <TextInput
             style={styles.input}
-            value={id}
-            onChangeText={setId}
-            placeholder="아이디를 입력하세요"
+            value={email}
+            onChangeText={setEmail}
+            placeholder="이메일을 입력하세요"
             placeholderTextColor={colors.textMuted}
+            keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
           />
@@ -74,11 +103,10 @@ export default function LoginScreen() {
           />
 
           <AccentButton
-            label="로그인"
+            label={submitting ? '로그인 중' : '로그인'}
             style={styles.submit}
-            onPress={() => {
-              if (canSubmit) replace('Home');
-            }}
+            onPress={() => void signIn()}
+            disabled={!canSubmit || submitting}
           />
 
           <View style={styles.signupRow}>
@@ -88,7 +116,7 @@ export default function LoginScreen() {
             </Pressable>
           </View>
 
-          <Pressable style={styles.findRow}>
+          <Pressable style={styles.findRow} onPress={() => void resetPassword()}>
             <Text style={styles.helper}>아이디 비밀번호 찾기</Text>
           </Pressable>
         </ScrollView>

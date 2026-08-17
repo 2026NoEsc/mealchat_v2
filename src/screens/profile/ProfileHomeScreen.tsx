@@ -1,6 +1,7 @@
 import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
 import { useNavigation } from '../../navigation/NavigationContext';
 import type { RouteName } from '../../navigation/routes';
@@ -39,13 +40,18 @@ const LINKS: { label: string; route: RouteName }[] = [
  */
 export default function ProfileHomeScreen() {
   const insets = useSafeAreaInsets();
-  const { navigate, resetTo } = useNavigation();
+  const { navigate } = useNavigation();
+  const { signOut } = useAuth();
 
   const confirmDelete = () =>
-    Alert.alert('계정을 삭제할까요?', '모든 밥약 기록과 정산 내역이 사라지고 되돌릴 수 없어요.', [
-      { text: '취소', style: 'cancel' },
-      { text: '삭제', style: 'destructive', onPress: () => resetTo('Login') },
+    Alert.alert('계정 삭제 준비 중', '본인 재인증과 기록 보존 정책이 준비된 뒤 제공됩니다.', [
+      { text: '확인' },
     ]);
+
+  const handleSignOut = async () => {
+    const error = await signOut();
+    if (error) Alert.alert('로그아웃 실패', error.message);
+  };
 
   return (
     <View style={styles.screen}>
@@ -117,7 +123,7 @@ export default function ProfileHomeScreen() {
         </View>
 
         <View style={styles.footer}>
-          <Pressable onPress={() => resetTo('Login')}>
+          <Pressable onPress={() => void handleSignOut()}>
             <Text style={styles.logout}>로그아웃</Text>
           </Pressable>
           <Pressable onPress={confirmDelete}>

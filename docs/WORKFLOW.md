@@ -17,10 +17,80 @@ Figma 디자인(`xBf3b09D6Bj1dTiCixt25e`)을 React Native 앱으로 옮기는 �
 | 언어 | TypeScript 5.9 (strict) |
 | 아이콘 | `lucide-react-native` + `react-native-svg` |
 | 네비게이션 | **라이브러리 없음** — 원본에 react-navigation 계열이 없어 Context 기반으로 직접 구현 |
-| 백엔드 | Supabase (아직 미연동) |
+| 백엔드 | Supabase Auth 기반 구현 완료, 데이터 CRUD 보안 마이그레이션 대기 |
 
 `.npmrc` 에 `legacy-peer-deps=true` 가 필요하다.
 `lucide-react-native@0.300.0` 이 React 19 를 peer 로 허용하지 않아서 없으면 설치가 실패한다.
+
+### Supabase 진행 상태 (2026-08-17)
+
+- `src/lib/supabase.ts` 는 publishable key, AsyncStorage 세션, AppState 토큰 갱신을 구성한다.
+- `src/auth/` 는 이메일 로그인·회원가입·비밀번호 재설정·딥링크 세션 교환과 가입 초안을 담당한다.
+- 원격 `public` 테이블은 권한 상승 문제가 확인되어 직접 CRUD를 연결하지 않는다.
+  `supabase/migrations/20260817131934_security_auth_foundation.sql` 에 RLS·권한·프로필
+  bootstrap 보정안을 준비했지만, 운영 DB에 적용하려면 별도 명시 승인이 필요하다.
+
+#### 환경 변수는 반드시 정적으로 읽는다 ⚠️
+
+`babel-preset-expo` 는 `process.env.EXPO_PUBLIC_X` **형태의 정적 접근만** 번들에 인라인한다.
+`@expo/metro-config` 는 런타임 `process.env` 를 **개발 모드에서만** 채운다.
+따라서 `process.env` 를 객체째 넘기거나 동적으로 읽으면 `expo start` 에서는 정상 동작하고
+릴리스 빌드에서만 `undefined` 가 되어 앱이 시작조차 못 한다.
+`tests/expoPublicEnv.test.ts` 가 이 형태를 소스 레벨에서 막는다.
+
+#### 딥링크와 Dashboard 설정
+
+- 클라이언트는 `flowType: 'pkce'` 여야 한다. auth-js 기본값 `implicit` 에서는
+  `signUp` / `resetPasswordForEmail` 이 `code_challenge` 를 보내지 않아
+  `exchangeCodeForSession` 이 절대 성공하지 않는다.
+- 가입 확인과 비밀번호 재설정은 경로로 구분한다. PKCE 교환 결과가 두 경우 모두
+  `SIGNED_IN` 이라 이벤트로는 구분할 수 없다.
+
+  | 흐름 | redirect URL |
+  |---|---|
+  | 가입 이메일 확인 | `mealchat://auth/callback` |
+  | 비밀번호 재설정 | `mealchat://auth/reset` |
+
+  둘 다 Dashboard 의 Auth Redirect URLs 에 등록해야 하고, Expo Go 개발용
+  `exp://…/--/auth/callback`·`exp://…/--/auth/reset` 도 함께 등록한다.
+- 재설정 링크로 들어오면 `App.tsx` 가 네비게이터 대신
+  [NewPasswordScreen](../src/screens/auth/NewPasswordScreen.tsx) 을 띄운다.
+  새 비밀번호를 정하기 전에는 본문으로 통과시키지 않는다 — 그러지 않으면
+  재설정 링크가 그냥 매직링크 로그인이 되어 버린다.
+- Dashboard 에서 leaked-password protection 을 켜야 한다.
+
+#### 마이그레이션 상태
+
+Docker Desktop 이 있으면 `npx supabase start` 로 로컬 스택을 띄우고
+`npx supabase db reset` 으로 마이그레이션 전체를 처음부터 재적용해 검증할 수 있다.
+`db reset` 에 **`--linked` 를 붙이면 운영 DB가 지워진다.** 로컬 검증에는 절대 붙이지 않는다.
+
+| 파일 | 원격 적용 |
+|---|---|
+| `20260817000000_remote_schema.sql` (baseline) | 적용됨 (repair 로 기록) |
+| `20260817131934_security_auth_foundation.sql` | **대기** |
+| `20260817144252_terms_consent_records.sql` | **대기** |
+
+baseline 은 원격에 이미 존재하던 스키마를 `db dump` 로 보존한 것이라
+`migration repair --status applied` 로 실행 없이 기록만 했다.
+**대기 중인 두 개는 같은 방식으로 repair 하면 안 된다** — 아직 적용되지 않았으므로
+적용됨으로 기록하면 영구히 push 할 수 없게 된다.
+
+`db pull` 은 Docker 가 필요하지만 `db push` 는 필요 없다.
+
+#### 아직 남은 일
+
+- **하드닝 2건이 운영에 적용되지 않았다.** 적용하면 `participants` INSERT 권한이 사라져
+  방 참가가 불가능해지므로, 초대 RPC 를 함께 준비하는 편이 좋다.
+- 개인정보는 별도 컬럼이 아니라 `profiles.personal_data` / `privacy_settings` JSONB 안에 있고,
+  그 밖에 `push_token`, `start_location_name`, `start_latitude`, `start_longitude` 가 컬럼이다.
+  owner-only 테이블로 분리하는 작업이 남아 있다.
+  단 하드닝 적용 후 `profiles` 는 이미 자기 행만 조회되므로 긴급도는 낮다.
+- 가입 화면이 모으는 계좌·생년월일·취향은 아직 저장되지 않는다 (동의 기록은 연결 완료).
+- `EXPO_PUBLIC_GEMINI_API_KEY`, `EXPO_PUBLIC_KAKAO_REST_API_KEY` 는 `.env` 에 있지만
+  코드에서 아직 쓰지 않는다. 쓰는 순간 번들에 공개되므로 Edge Function 뒤로 옮긴다.
+- `.env` 의 변수명이 `EXPO_PUBLIC_SUPABASE_ANON_KEY` 인데 값은 `sb_publishable_…` 이다.
+  fallback 이 있어 동작하지만 `.env.example` 대로 `..._PUBLISHABLE_KEY` 로 바꾸는 편이 맞다.
 
 ---
 
@@ -220,7 +290,7 @@ Figma 에 남아 있는 미구현 화면은 **프로필 수정 `309:1086`** 하�
 1. **프로필 수정 `309:1086`** — 회원가입 개인정보 입력(`150:121`)과 필드 구성이 거의 같아
    [SignupPersonalScreen](../src/screens/signup/SignupPersonalScreen.tsx) 을 참고하면 된다.
 2. **은행 드롭다운 `549:3366`** — 회원가입·프로필 수정이 공유하는 공용 오버레이.
-3. **Supabase 연동** — 지금은 모든 화면이 파일 안 상수 배열로 동작한다.
+3. **Supabase 데이터 연동** — RLS 하드닝 마이그레이션 승인·적용 후 프로필부터 연결한다.
 
 ### 아직 눌러도 아무 일 없는 버튼
 
@@ -233,5 +303,5 @@ Figma 에 남아 있는 미구현 화면은 **프로필 수정 `309:1086`** 하�
 ### 남아 있는 품질 이슈
 
 - `assets/ad/banner-1.png` 가 저해상도 (위 3절 참고)
-- Supabase 미연동 — 모든 화면이 파일 안의 상수 배열로 동작한다
+- Auth 외 Supabase 데이터 미연동 — 모든 도메인 화면은 파일 안 상수 배열로 동작한다
 - 일정 추가 STEP 1~3 에 뒤로가기가 없다

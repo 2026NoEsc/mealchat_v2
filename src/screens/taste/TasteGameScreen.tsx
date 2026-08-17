@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Image, ImageSourcePropType, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useSignupDraft } from '../../auth/SignupDraftProvider';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
@@ -31,9 +32,10 @@ const TRACK = 178;
 export default function TasteGameScreen() {
   const { navigate, goBack } = useNavigation();
   const insets = useSafeAreaInsets();
+  const { draft, updateDraft } = useSignupDraft();
 
   const [index, setIndex] = useState(0);
-  const [likes, setLikes] = useState<Record<string, boolean>>({});
+  const [likes, setLikes] = useState<Record<string, boolean>>(draft.tastes);
 
   const question = QUESTIONS[index];
 
@@ -43,7 +45,8 @@ export default function TasteGameScreen() {
     if (index < QUESTIONS.length - 1) {
       setIndex(index + 1);
     } else {
-      navigate('SignupTerms', { tastes: next });
+      updateDraft({ tastes: next });
+      navigate('SignupTerms');
     }
   };
 
@@ -61,7 +64,12 @@ export default function TasteGameScreen() {
         title="취향 분석"
         onBack={back}
         action={
-          <Pressable onPress={() => navigate('SignupTerms')} hitSlop={s(8)}>
+          <Pressable
+            onPress={() => {
+              updateDraft({ tastes: likes });
+              navigate('SignupTerms');
+            }}
+            hitSlop={s(8)}>
             <Text style={styles.skip}>건너뛰기</Text>
           </Pressable>
         }

@@ -14,6 +14,10 @@ expo-env.d.ts
 .metro-health-check*
 *.tsbuildinfo
 
+# Supabase CLI 로컬 상태 (project ref, pooler URL). 마이그레이션은 추적한다.
+supabase/.temp/
+supabase/.branches/
+
 # Expo CNG native projects. If native code is intentionally managed by hand,
 # remove these rules and commit the native projects as a deliberate migration.
 /android/
