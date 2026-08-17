@@ -32,6 +32,7 @@ type Props = {
   ctaLabel: string;
   onNext: () => void;
   onBack: () => void;
+  submitting?: boolean;
 };
 
 /**
@@ -52,6 +53,7 @@ export default function SignupIllustrationScreen({
   ctaLabel,
   onNext,
   onBack,
+  submitting = false,
 }: Props) {
   const insets = useSafeAreaInsets();
 
@@ -94,7 +96,13 @@ export default function SignupIllustrationScreen({
         {children}
       </View>
 
-      <AccentButton label={ctaLabel} showNext style={styles.cta} onPress={onNext} />
+      <AccentButton
+        label={ctaLabel}
+        showNext
+        style={styles.cta}
+        onPress={onNext}
+        disabled={submitting}
+      />
     </View>
   );
 }

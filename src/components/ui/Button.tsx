@@ -4,7 +4,6 @@ import {
   StyleProp,
   StyleSheet,
   Text,
-  View,
   ViewStyle,
 } from 'react-native';
 

@@ -49,11 +49,21 @@ export default function ScheduleHomeScreen() {
   const [eventsByDay, setEventsByDay] = useState(INITIAL_EVENTS);
   const [memosByDay, setMemosByDay] = useState<Record<number, string>>({});
 
-  const [eventSheet, setEventSheet] = useState<{ open: boolean; editing: PersonalEvent | null }>({
-    open: false,
-    editing: null,
-  });
-  const [memoSheet, setMemoSheet] = useState(false);
+  /*
+   * session 은 시트를 열 때만 증가한다. 시트 안의 입력 폼은 이 값으로 초기화되고,
+   * 닫을 때는 값이 그대로라 Modal 이 살아 있어 닫힘 애니메이션이 끊기지 않는다.
+   */
+  const [eventSheet, setEventSheet] = useState<{
+    open: boolean;
+    session: number;
+    editing: PersonalEvent | null;
+  }>({ open: false, session: 0, editing: null });
+  const [memoSheet, setMemoSheet] = useState({ open: false, session: 0 });
+
+  const openEventSheet = (editing: PersonalEvent | null) =>
+    setEventSheet((prev) => ({ open: true, session: prev.session + 1, editing }));
+  const openMemoSheet = () =>
+    setMemoSheet((prev) => ({ open: true, session: prev.session + 1 }));
 
   const events = isBaseMonth ? eventsByDay[selected] ?? [] : [];
   const memo = isBaseMonth ? memosByDay[selected] ?? '' : '';
@@ -151,7 +161,7 @@ export default function ScheduleHomeScreen() {
             {/* 캘린더 기본 기능 — 개인 일정을 이 날짜에 직접 추가한다 */}
             <Pressable
               style={styles.addButton}
-              onPress={() => setEventSheet({ open: true, editing: null })}>
+              onPress={() => openEventSheet(null)}>
               <Plus size={s(7)} color={colors.textOnAccent} strokeWidth={3} />
               <Text style={styles.addText}>일정 추가</Text>
             </Pressable>
@@ -179,7 +189,7 @@ export default function ScheduleHomeScreen() {
                 ) : (
                   <Pressable
                     style={styles.editButton}
-                    onPress={() => setEventSheet({ open: true, editing: event })}>
+                    onPress={() => openEventSheet(event)}>
                     <Pencil size={s(7.5)} color={colors.textMuted} strokeWidth={2} />
                   </Pressable>
                 )}
@@ -187,7 +197,7 @@ export default function ScheduleHomeScreen() {
             ))
           )}
 
-          <Pressable style={styles.memoBox} onPress={() => setMemoSheet(true)}>
+          <Pressable style={styles.memoBox} onPress={openMemoSheet}>
             <Text style={[styles.memoText, !!memo && styles.memoTextFilled]}>
               {memo || '＋ 이 날짜에 약속 메모 남기기'}
             </Text>
@@ -197,18 +207,21 @@ export default function ScheduleHomeScreen() {
 
       <EventSheet
         visible={eventSheet.open}
+        session={eventSheet.session}
         day={selected}
         editing={eventSheet.editing}
-        onClose={() => setEventSheet({ open: false, editing: null })}
+        // editing 을 남겨둬야 닫히는 동안 제목·버튼이 그대로 보인다
+        onClose={() => setEventSheet((prev) => ({ ...prev, open: false }))}
         onSave={saveEvent}
         onDelete={deleteEvent}
       />
 
       <MemoSheet
-        visible={memoSheet}
+        visible={memoSheet.open}
+        session={memoSheet.session}
         day={selected}
         memo={memo}
-        onClose={() => setMemoSheet(false)}
+        onClose={() => setMemoSheet((prev) => ({ ...prev, open: false }))}
         onSave={(next) => setMemosByDay((prev) => ({ ...prev, [selected]: next }))}
       />
     </View>

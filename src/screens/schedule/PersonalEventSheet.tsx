@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import BottomSheet from '../../components/BottomSheet';
@@ -22,6 +22,11 @@ export const EVENT_COLORS = ['#5B9BD5', '#B483C8', '#04CDA3', '#FF9900'];
 
 type EventSheetProps = {
   visible: boolean;
+  /**
+   * 열 때마다 증가하는 값. 입력 폼을 초기화하는 유일한 신호다.
+   * `visible` 로 초기화하면 닫는 순간 Modal 까지 언마운트돼 iOS 슬라이드 애니메이션이 끊긴다.
+   */
+  session: number;
   day: number;
   /** 값이 있으면 수정, 없으면 새로 추가 */
   editing?: PersonalEvent | null;
@@ -31,28 +36,40 @@ type EventSheetProps = {
 };
 
 /** 개인 일정 추가·수정 시트 — 캘린더 앱의 기본 일정 입력에 해당한다 */
-export function EventSheet({ visible, day, editing, onClose, onSave, onDelete }: EventSheetProps) {
-  const [title, setTitle] = useState('');
-  const [start, setStart] = useState('09:00');
-  const [end, setEnd] = useState('10:00');
-  const [color, setColor] = useState(EVENT_COLORS[0]);
+export function EventSheet({
+  visible,
+  session,
+  day,
+  editing,
+  onClose,
+  onSave,
+  onDelete,
+}: EventSheetProps) {
+  return (
+    <BottomSheet
+      visible={visible}
+      title={editing ? '일정 수정' : '일정 추가'}
+      subtitle={formatDate(day)}
+      onClose={onClose}>
+      <EventSheetFields
+        key={session}
+        editing={editing}
+        onClose={onClose}
+        onSave={onSave}
+        onDelete={onDelete}
+      />
+    </BottomSheet>
+  );
+}
 
-  // 시트가 열릴 때마다 대상 일정 기준으로 초기화한다
-  useEffect(() => {
-    if (!visible) return;
-    if (editing) {
-      const [from, to] = editing.time.split('~').map((t) => t.trim());
-      setTitle(editing.title);
-      setStart(from ?? '09:00');
-      setEnd(to ?? '10:00');
-      setColor(editing.color);
-    } else {
-      setTitle('');
-      setStart('09:00');
-      setEnd('10:00');
-      setColor(EVENT_COLORS[0]);
-    }
-  }, [visible, editing]);
+type EventSheetFieldsProps = Pick<EventSheetProps, 'editing' | 'onClose' | 'onSave' | 'onDelete'>;
+
+function EventSheetFields({ editing, onClose, onSave, onDelete }: EventSheetFieldsProps) {
+  const initial = initialEventDraft(editing);
+  const [title, setTitle] = useState(initial.title);
+  const [start, setStart] = useState(initial.start);
+  const [end, setEnd] = useState(initial.end);
+  const [color, setColor] = useState(initial.color);
 
   const save = () => {
     const trimmed = title.trim();
@@ -67,11 +84,7 @@ export function EventSheet({ visible, day, editing, onClose, onSave, onDelete }:
   };
 
   return (
-    <BottomSheet
-      visible={visible}
-      title={editing ? '일정 수정' : '일정 추가'}
-      subtitle={formatDate(day)}
-      onClose={onClose}>
+    <>
       <Text style={styles.label}>일정 이름</Text>
       <TextInput
         style={styles.input}
@@ -133,12 +146,28 @@ export function EventSheet({ visible, day, editing, onClose, onSave, onDelete }:
           }}
         />
       ) : null}
-    </BottomSheet>
+    </>
   );
+}
+
+function initialEventDraft(editing: PersonalEvent | null | undefined) {
+  if (!editing) {
+    return { title: '', start: '09:00', end: '10:00', color: EVENT_COLORS[0] };
+  }
+
+  const [start, end] = editing.time.split('~').map((time) => time.trim());
+  return {
+    title: editing.title,
+    start: start || '09:00',
+    end: end || '10:00',
+    color: editing.color,
+  };
 }
 
 type MemoSheetProps = {
   visible: boolean;
+  /** EventSheet 과 같은 이유로 열 때마다 증가한다 */
+  session: number;
   day: number;
   memo: string;
   onClose: () => void;
@@ -146,19 +175,25 @@ type MemoSheetProps = {
 };
 
 /** Figma "＋ 이 날짜에 약속 메모 남기기" 에 대응하는 메모 입력 시트 */
-export function MemoSheet({ visible, day, memo, onClose, onSave }: MemoSheetProps) {
-  const [draft, setDraft] = useState(memo);
-
-  useEffect(() => {
-    if (visible) setDraft(memo);
-  }, [visible, memo]);
-
+export function MemoSheet({ visible, session, day, memo, onClose, onSave }: MemoSheetProps) {
   return (
     <BottomSheet
       visible={visible}
       title="약속 메모"
       subtitle={`${formatDate(day)} 에 남길 메모`}
       onClose={onClose}>
+      <MemoSheetFields key={session} memo={memo} onClose={onClose} onSave={onSave} />
+    </BottomSheet>
+  );
+}
+
+type MemoSheetFieldsProps = Pick<MemoSheetProps, 'memo' | 'onClose' | 'onSave'>;
+
+function MemoSheetFields({ memo, onClose, onSave }: MemoSheetFieldsProps) {
+  const [draft, setDraft] = useState(memo);
+
+  return (
+    <>
       <TextInput
         style={[styles.input, styles.memoInput]}
         value={draft}
@@ -188,7 +223,7 @@ export function MemoSheet({ visible, day, memo, onClose, onSave }: MemoSheetProp
           }}
         />
       ) : null}
-    </BottomSheet>
+    </>
   );
 }
 

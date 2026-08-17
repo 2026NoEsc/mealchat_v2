@@ -1,8 +1,7 @@
-import { useState } from 'react';
 import {
+  Alert,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,6 +14,7 @@ import SignupHeader from '../../components/SignupHeader';
 import BankSelect from '../../components/ui/BankSelect';
 import { AccentButton } from '../../components/ui/Button';
 import TextField, { fieldStyles } from '../../components/ui/TextField';
+import { useSignupDraft } from '../../auth/SignupDraftProvider';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
@@ -28,14 +28,21 @@ import { fontFamily, weight } from '../../theme/typography';
 export default function SignupPersonalScreen() {
   const { navigate, goBack } = useNavigation();
   const insets = useSafeAreaInsets();
+  const { draft, updateDraft } = useSignupDraft();
 
-  const [nickname, setNickname] = useState('나야나');
-  const [email, setEmail] = useState('nayana@gmail.com');
-  const [password, setPassword] = useState('password');
-  const [passwordConfirm, setPasswordConfirm] = useState('password');
-  const [bank, setBank] = useState<string | null>('농협');
-  const [account, setAccount] = useState('2467332464666');
-  const [birth, setBirth] = useState({ year: '2002', month: '12', day: '20' });
+  const continueSignup = () => {
+    if (!draft.nickname.trim() || !draft.email.trim() || !draft.password) {
+      Alert.alert('입력 확인', '닉네임, 이메일, 비밀번호를 입력해 주세요.');
+      return;
+    }
+
+    if (draft.password !== draft.passwordConfirm) {
+      Alert.alert('입력 확인', '비밀번호가 서로 다릅니다.');
+      return;
+    }
+
+    navigate('SignupCalendar');
+  };
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -50,29 +57,29 @@ export default function SignupPersonalScreen() {
           showsVerticalScrollIndicator={false}>
           <TextField
             label="닉네임"
-            value={nickname}
-            onChangeText={setNickname}
+            value={draft.nickname}
+            onChangeText={(nickname) => updateDraft({ nickname })}
             containerStyle={styles.firstField}
           />
           <TextField
             label="이메일"
-            value={email}
-            onChangeText={setEmail}
+            value={draft.email}
+            onChangeText={(email) => updateDraft({ email })}
             keyboardType="email-address"
             autoCapitalize="none"
             containerStyle={styles.field}
           />
           <TextField
             label="비밀번호"
-            value={password}
-            onChangeText={setPassword}
+            value={draft.password}
+            onChangeText={(password) => updateDraft({ password })}
             secureTextEntry
             containerStyle={styles.field}
           />
           <TextField
             label="비밀번호 재확인"
-            value={passwordConfirm}
-            onChangeText={setPasswordConfirm}
+            value={draft.passwordConfirm}
+            onChangeText={(passwordConfirm) => updateDraft({ passwordConfirm })}
             secureTextEntry
             containerStyle={styles.field}
           />
@@ -80,12 +87,12 @@ export default function SignupPersonalScreen() {
           <Text style={[styles.label, styles.accountLabel]}>계좌번호</Text>
           <View style={styles.accountRow}>
             <View style={styles.bankChip}>
-              <BankSelect value={bank} onChange={setBank} />
+              <BankSelect value={draft.bank} onChange={(bank) => updateDraft({ bank })} />
             </View>
             <TextInput
               style={styles.accountInput}
-              value={account}
-              onChangeText={setAccount}
+              value={draft.account}
+              onChangeText={(account) => updateDraft({ account })}
               keyboardType="number-pad"
             />
           </View>
@@ -93,19 +100,19 @@ export default function SignupPersonalScreen() {
           <Text style={[styles.label, styles.birthLabel]}>생년월일</Text>
           <View style={styles.birthRow}>
             <BirthBox
-              value={birth.year}
+              value={draft.birth.year}
               unit="년"
-              onChange={(v) => setBirth((p) => ({ ...p, year: v }))}
+              onChange={(year) => updateDraft({ birth: { ...draft.birth, year } })}
             />
             <BirthBox
-              value={birth.month}
+              value={draft.birth.month}
               unit="월"
-              onChange={(v) => setBirth((p) => ({ ...p, month: v }))}
+              onChange={(month) => updateDraft({ birth: { ...draft.birth, month } })}
             />
             <BirthBox
-              value={birth.day}
+              value={draft.birth.day}
               unit="일"
-              onChange={(v) => setBirth((p) => ({ ...p, day: v }))}
+              onChange={(day) => updateDraft({ birth: { ...draft.birth, day } })}
             />
           </View>
 
@@ -113,7 +120,7 @@ export default function SignupPersonalScreen() {
             label="다음"
             showNext
             style={styles.cta}
-            onPress={() => navigate('SignupCalendar')}
+            onPress={continueSignup}
           />
         </ScrollView>
       </KeyboardAvoidingView>
