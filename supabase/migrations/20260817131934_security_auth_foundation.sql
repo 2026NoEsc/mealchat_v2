@@ -57,16 +57,11 @@ create unique index if not exists dutch_pay_members_bill_profile_unique_idx
   on public.dutch_pay_members (bill_id, profile_id)
   where profile_id is not null;
 
+-- follows 의 자기참조 금지는 baseline 의 follows_no_self CHECK 가 이미 담당한다.
+--
 -- `add constraint` 에는 if not exists 가 없어서 그대로 두면 재실행이 실패한다.
 do $$
 begin
-  if not exists (
-    select 1 from pg_constraint where conname = 'follows_no_self_reference'
-  ) then
-    alter table public.follows
-      add constraint follows_no_self_reference check (follower_id <> following_id);
-  end if;
-
   if not exists (
     select 1 from pg_constraint where conname = 'dutch_pay_bills_nonnegative_total'
   ) then
