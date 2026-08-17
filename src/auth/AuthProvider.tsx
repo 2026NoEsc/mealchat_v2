@@ -6,6 +6,8 @@ import { supabase } from '../lib/supabase';
 
 type SignUpResult = {
   confirmationRequired: boolean;
+  /** 세션이 바로 생긴 경우에만 비공개 프로필을 쓸 수 있어서 호출자에게 넘긴다 */
+  userId: string | null;
   error: Error | null;
 };
 
@@ -148,7 +150,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         },
       });
 
-      return { confirmationRequired: !data.session, error };
+      return {
+        confirmationRequired: !data.session,
+        userId: data.user?.id ?? null,
+        error,
+      };
     },
     [],
   );

@@ -70,23 +70,49 @@ Docker Desktop 이 있으면 `npx supabase start` 로 로컬 스택을 띄우고
 | `20260817000000_remote_schema.sql` (baseline) | 적용됨 (repair 로 기록) |
 | `20260817131934_security_auth_foundation.sql` | **대기** |
 | `20260817144252_terms_consent_records.sql` | **대기** |
+| `20260817172900_room_invitations.sql` | **대기** |
+| `20260817173500_private_profile_split.sql` | **대기** |
 
 baseline 은 원격에 이미 존재하던 스키마를 `db dump` 로 보존한 것이라
 `migration repair --status applied` 로 실행 없이 기록만 했다.
-**대기 중인 두 개는 같은 방식으로 repair 하면 안 된다** — 아직 적용되지 않았으므로
+**대기 중인 네 개는 같은 방식으로 repair 하면 안 된다** — 아직 적용되지 않았으므로
 적용됨으로 기록하면 영구히 push 할 수 없게 된다.
 
 `db pull` 은 Docker 가 필요하지만 `db push` 는 필요 없다.
 
+#### 프로필 테이블 세 개의 역할
+
+| 테이블 | 보이는 범위 | 담는 것 |
+|---|---|---|
+| `public_profiles` | 로그인한 모든 사용자 | `name`, `tag`, `avatar_color`, `avatar_url` |
+| `profiles` | 본인만 | 위의 원본 + `created_at`, `updated_at` |
+| `profile_private` | 본인만 | 계좌·생년월일·취향·`push_token`·위치·`personal_data` JSONB |
+
+`profile_private` 은 INSERT·DELETE 권한이 없다. 행은 가입 트리거가 만들고
+`profiles` 삭제 시 cascade 로 지워진다. UPDATE 도 컬럼 단위로만 열려 있어
+`id` 를 바꿔 남의 행을 가져오는 것이 막힌다.
+
+#### 방 참가는 RPC 로만
+
+`participants` 직접 INSERT 권한은 없다. `public.join_room_by_code(code)` 가 코드와
+`expires_at` 를 서버에서 검증하고, 호출자 `profiles` 에서 `name` 을 채워 넣는다
+(`participants.name` 은 기본값 없는 NOT NULL 이다). 방을 만들면 트리거가 방장을
+자동으로 참가자에 넣는다. 나가기는 자기 행 DELETE 정책으로 가능하고,
+남을 내보내는 기능은 아직 없다.
+
 #### 아직 남은 일
 
-- **하드닝 2건이 운영에 적용되지 않았다.** 적용하면 `participants` INSERT 권한이 사라져
-  방 참가가 불가능해지므로, 초대 RPC 를 함께 준비하는 편이 좋다.
-- 개인정보는 별도 컬럼이 아니라 `profiles.personal_data` / `privacy_settings` JSONB 안에 있고,
-  그 밖에 `push_token`, `start_location_name`, `start_latitude`, `start_longitude` 가 컬럼이다.
-  owner-only 테이블로 분리하는 작업이 남아 있다.
-  단 하드닝 적용 후 `profiles` 는 이미 자기 행만 조회되므로 긴급도는 낮다.
-- 가입 화면이 모으는 계좌·생년월일·취향은 아직 저장되지 않는다 (동의 기록은 연결 완료).
+- **마이그레이션 4건이 운영에 적용되지 않았다.** 이제 초대 RPC 가 함께 있으므로
+  방 참가가 끊기지 않고 한 번에 적용할 수 있다.
+- **이메일 확인이 켜져 있으면 가입 시점에 계좌·생년월일이 저장되지 않는다.**
+  `profile_private` 쓰기는 세션을 요구하는데 확인 대기 중에는 세션이 없다.
+  사용자 메타데이터로 넘기면 JWT 에 실려 나가므로 그 방법은 쓰지 않는다.
+  프로필 수정 화면에서 입력받는 경로를 붙여야 한다.
+- `participants` 는 방 참가 시점의 `personal_data` / `schedule` 사본을 갖고 있고
+  같은 방 멤버 전원에게 보인다. `dutch_pay_bills` 와 `notifications` 도 계좌번호를
+  각자 들고 있다. 무엇을 복사할지 정하는 별도 작업이 필요하다.
+- 초대 코드는 대소문자를 구분한다. 무시하게 하려면 `lower(code)` UNIQUE 인덱스가
+  먼저 필요한데 기존 코드끼리 충돌하면 생성이 실패하므로 별도 작업이다.
 - `EXPO_PUBLIC_GEMINI_API_KEY`, `EXPO_PUBLIC_KAKAO_REST_API_KEY` 는 `.env` 에 있지만
   코드에서 아직 쓰지 않는다. 쓰는 순간 번들에 공개되므로 Edge Function 뒤로 옮긴다.
 - `.env` 의 변수명이 `EXPO_PUBLIC_SUPABASE_ANON_KEY` 인데 값은 `sb_publishable_…` 이다.
