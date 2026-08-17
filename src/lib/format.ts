@@ -62,3 +62,21 @@ export function relativeTime(iso: string, now: Date = new Date()): string {
 export function formatAmount(amount: number): string {
   return `${amount.toLocaleString('ko-KR')}원`;
 }
+
+/**
+ * personal_data.gender 는 `male` / `female` 처럼 영문 코드로 들어 있다.
+ * 화면에 그대로 내보내면 한국어 UI 에 영어가 튀어나오므로 옮긴다.
+ * 모르는 값은 지어내지 말고 그대로 보여준다 — 잘못 옮기는 것보다 낫다.
+ */
+export function formatGender(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+
+  if (normalized === 'male' || normalized === 'm') return '남성';
+  if (normalized === 'female' || normalized === 'f') return '여성';
+  if (normalized === 'other' || normalized === 'none') return '밝히지 않음';
+
+  return value.trim();
+}
