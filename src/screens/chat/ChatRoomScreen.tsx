@@ -1,6 +1,7 @@
 import { CalendarDays, ChevronLeft, MoreVertical, Send, Smile, Users, Utensils, Wallet } from 'lucide-react-native';
 import { useRef, useState } from 'react';
 import {
+  Alert,
   Image,
   ImageSourcePropType,
   KeyboardAvoidingView,
@@ -14,17 +15,17 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { formatDate, MONTH, weekdayOf, YEAR } from '../../lib/calendar';
+import { useAuth } from '../../auth/AuthProvider';
+import { MONTH, weekdayOf } from '../../lib/calendar';
+import { dayKey, dayLabel, timeLabel } from '../../lib/roomFormat';
+import { sendRoomMessage, type RoomMessage } from '../../lib/rooms';
 import { useNavigation } from '../../navigation/NavigationContext';
+import { useRoomMessages } from '../../rooms/useMyRooms';
 import { fs, s } from '../../theme/scale';
 import { colors, shadows } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
 import { MembersSheet, MenuSheet, ScheduleSheet, SettlementSheet } from './ChatRoomSheets';
 import EmoticonPanel from './EmoticonPanel';
-
-const ddori = require('../../../assets/brand/ddori.png');
-const dudu = require('../../../assets/brand/dudu.png');
-const welling = require('../../../assets/brand/welling2.png');
 
 /** Figma 채팅방 색상 — 말풍선 시간 / 날짜 구분선 / 시스템 말풍선 글자 */
 const TIME_GRAY = '#B4B2A8';
@@ -34,7 +35,7 @@ const SYS_TEXT = '#696969';
 type Message =
   | { kind: 'date'; text: string }
   | { kind: 'sys'; text: string }
-  | { kind: 'msg'; mine: boolean; name?: string; avatar?: ImageSourcePropType; text: string; time: string }
+  | { kind: 'msg'; mine: boolean; name?: string; color?: string; text: string; time: string }
   | {
       kind: 'sticker';
       mine?: boolean;
@@ -45,15 +46,32 @@ type Message =
     }
   | { kind: 'confirm'; title: string; date: string };
 
-const INITIAL: Message[] = [
-  { kind: 'date', text: `${YEAR}년 ${formatDate(12)}` },
-  { kind: 'sys', text: '두두님이 초대 코드로 입장했어요' },
-  { kind: 'msg', mine: false, name: '또리', avatar: ddori, text: '다들 수요일 점심 괜찮아요?', time: '오전 11:02' },
-  { kind: 'msg', mine: true, text: '저는 좋아요! 면 종류면 더 좋고요', time: '오전 11:04' },
-  { kind: 'msg', mine: false, name: '두두', avatar: dudu, text: '국밥 어때요 국밥', time: '오전 11:05' },
-  { kind: 'sticker', name: '웰링', avatar: welling, sticker: welling, time: '오전 11:06' },
-  { kind: 'confirm', title: '일정이 확정됐어요', date: `${formatDate(15)} 18:30` },
-];
+/** 서버 메시지를 화면용 배열로 바꾼다. 날짜가 바뀌는 지점에 구분선을 넣는다. */
+function toDisplayMessages(rows: RoomMessage[], myId: string | null): Message[] {
+  const out: Message[] = [];
+  let lastDay = '';
+
+  for (const row of rows) {
+    const day = dayKey(row.createdAt);
+    if (day && day !== lastDay) {
+      out.push({ kind: 'date', text: dayLabel(row.createdAt) });
+      lastDay = day;
+    }
+
+    const mine = Boolean(myId) && row.senderId === myId;
+    out.push({
+      kind: 'msg',
+      mine,
+      // 내 말풍선에는 이름을 붙이지 않는다
+      name: mine ? undefined : row.senderName,
+      color: row.senderColor,
+      text: row.text,
+      time: timeLabel(row.createdAt),
+    });
+  }
+
+  return out;
+}
 
 type SheetKey = 'schedule' | 'menu' | 'settlement' | 'members' | null;
 
@@ -65,26 +83,47 @@ type SheetKey = 'schedule' | 'menu' | 'settlement' | 'members' | null;
 export default function ChatRoomScreen() {
   const insets = useSafeAreaInsets();
   const { goBack, navigate, current } = useNavigation();
+  const { user } = useAuth();
   const params = current.params as
-    | { title?: string; avatar?: ImageSourcePropType; openSheet?: SheetKey }
+    | { roomId?: string; title?: string; color?: string; openSheet?: SheetKey }
     | undefined;
 
-  const title = params?.title ?? '오늘 점심팟';
+  const roomId = params?.roomId ?? null;
+  const title = params?.title ?? '밥약';
 
-  const [messages, setMessages] = useState<Message[]>(INITIAL);
+  const { messages: remoteMessages, status, reload } = useRoomMessages(roomId);
   const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
   // 홈의 "미완료 정산 보기" 처럼 특정 시트를 펼친 채로 들어오는 경로가 있다
   const [sheet, setSheet] = useState<SheetKey>(params?.openSheet ?? null);
   const [emoticonOpen, setEmoticonOpen] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
-  const append = (message: Message) => setMessages((prev) => [...prev, message]);
+  /*
+   * 스티커와 시스템 안내는 messages 테이블이 담을 수 없다 (텍스트 컬럼 하나뿐).
+   * 스키마가 생기기 전까지는 화면에만 남는 임시 항목으로 두고, 서버 목록 뒤에 붙인다.
+   */
+  const [localMessages, setLocalMessages] = useState<Message[]>([]);
+  const append = (message: Message) => setLocalMessages((prev) => [...prev, message]);
 
-  const send = () => {
+  /* 서버가 준 목록에 날짜 구분선을 끼워 화면용 배열로 만든다 */
+  const messages = [...toDisplayMessages(remoteMessages, user?.id ?? null), ...localMessages];
+
+  const send = async () => {
     const text = draft.trim();
-    if (!text) return;
-    append({ kind: 'msg', mine: true, text, time: nowLabel() });
+    if (!text || !roomId) return;
+
+    setSending(true);
+    const error = await sendRoomMessage(roomId, text);
+    setSending(false);
+
+    if (error) {
+      Alert.alert('전송 실패', error.message);
+      return;
+    }
+
     setDraft('');
+    reload();
   };
 
   return (
@@ -98,9 +137,7 @@ export default function ChatRoomScreen() {
           <ChevronLeft size={s(14)} color={SYS_TEXT} strokeWidth={2.5} />
         </Pressable>
 
-        <View style={styles.headerAvatar}>
-          <Image source={params?.avatar ?? ddori} style={styles.headerAvatarImage} resizeMode="contain" />
-        </View>
+        <View style={[styles.headerAvatar, { backgroundColor: params?.color ?? colors.primary }]} />
 
         <View style={styles.headerCenter}>
           <View style={styles.headerTitleRow}>
@@ -130,6 +167,13 @@ export default function ChatRoomScreen() {
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
         onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}>
+        {status === 'loading' ? (
+          <Text style={styles.listNotice}>메시지를 불러오는 중...</Text>
+        ) : status === 'error' ? (
+          <Text style={styles.listNotice}>메시지를 불러오지 못했어요</Text>
+        ) : messages.length === 0 ? (
+          <Text style={styles.listNotice}>아직 대화가 없어요. 먼저 인사해 보세요!</Text>
+        ) : null}
         {messages.map((message, i) => (
           <Row key={i} message={message} />
         ))}
@@ -182,7 +226,10 @@ export default function ChatRoomScreen() {
           </Pressable>
         </View>
 
-        <Pressable style={styles.sendButton} onPress={send}>
+        <Pressable
+          style={[styles.sendButton, (sending || !roomId) && styles.sendButtonDisabled]}
+          disabled={sending || !roomId}
+          onPress={() => void send()}>
           <Send size={s(9)} color={colors.textOnAccent} strokeWidth={2.5} />
         </Pressable>
       </View>
@@ -256,8 +303,11 @@ function Row({ message }: { message: Message }) {
       }
       return (
         <View style={styles.otherRow}>
-          <View style={styles.avatar}>
-            <Image source={message.avatar} style={styles.avatarImage} resizeMode="contain" />
+          {/* 아바타 업로드 전까지는 sender_color 원에 이름 첫 글자를 넣는다 */}
+          <View style={[styles.avatar, { backgroundColor: message.color ?? colors.primary }]}>
+            <Text style={styles.avatarInitial}>
+              {[...(message.name ?? '?').trim()][0] ?? '?'}
+            </Text>
           </View>
           <View style={styles.otherCol}>
             <Text style={styles.name}>{message.name}</Text>
@@ -477,6 +527,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  avatarInitial: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(9),
+    fontWeight: weight.bold,
+    color: colors.textOnAccent,
+  },
   avatarImage: {
     width: s(14),
     height: s(15.2),
@@ -674,5 +730,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     ...shadows.button,
+  },
+  sendButtonDisabled: {
+    opacity: 0.5,
+  },
+  listNotice: {
+    marginVertical: s(16),
+    textAlign: 'center',
+    fontFamily: fontFamily.body,
+    fontSize: fs(7),
+    lineHeight: fs(10),
+    color: SYS_TEXT,
   },
 });

@@ -2,8 +2,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Plus } from 'lucide-react-native';
 import { useState } from 'react';
 import {
-  Image,
-  ImageSourcePropType,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,97 +13,48 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppHeader from '../../components/AppHeader';
+import {
+  ROOM_STATUS_LABEL,
+  participantMeta,
+  roomStatus,
+  timeLabel,
+  type RoomStatus,
+} from '../../lib/roomFormat';
+import { joinRoomByCode, type RoomSummary } from '../../lib/rooms';
 import { useNavigation } from '../../navigation/NavigationContext';
+import { useMyRooms } from '../../rooms/useMyRooms';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
 
-const moa = require('../../../assets/brand/moa.png');
-const ddori = require('../../../assets/brand/ddori.png');
-const dudu = require('../../../assets/brand/dudu.png');
-const welling = require('../../../assets/brand/welling2.png');
 
 type ChipTone = 'active' | 'done' | 'open';
 
-type Room = {
-  title: string;
-  chip: string;
-  chipTone: ChipTone;
-  preview: string;
-  meta: string;
-  time: string;
-  unread?: number;
-  /** 좌측 세로 테마 바 색 */
-  theme: string;
-  /** 아바타 박스 배경 틴트 */
-  tint: string;
-  avatar: ImageSourcePropType;
-  stack: ImageSourcePropType[];
-  highlight?: boolean;
-};
-
-const ROOMS: Room[] = [
-  {
-    title: '오늘 점심팟',
-    chip: '진행중',
-    chipTone: 'active',
-    preview: '아 언제 나옴',
-    meta: '+1 · 12시간 남음',
-    time: '오전 2:48',
-    unread: 3,
-    theme: '#FF9900',
-    tint: '#FFE7CA',
-    avatar: moa,
-    stack: [moa, ddori, dudu],
-    highlight: true,
-  },
-  {
-    title: '학회 회식',
-    chip: '확정',
-    chipTone: 'done',
-    preview: '양심껏 늦게 오는 사람 술 사라',
-    meta: '8월 21일',
-    time: '오전 3:04',
-    theme: '#04CDA3',
-    tint: '#DCF8F2',
-    avatar: ddori,
-    stack: [ddori, welling, dudu],
-  },
-  {
-    title: '동아리 뒤풀이',
-    chip: '모집중',
-    chipTone: 'open',
-    preview: '다들 어디야?',
-    meta: '장소 미정',
-    time: '어제',
-    unread: 1,
-    theme: '#75B6FF',
-    tint: '#EBF4FF',
-    avatar: welling,
-    stack: [welling, moa],
-  },
-  {
-    title: '과 사람들 저녁',
-    chip: '확정',
-    chipTone: 'done',
-    preview: '이번엔 진짜 갈게요',
-    meta: '8월 24일',
-    time: '2일 전',
-    theme: '#A100FF',
-    tint: '#F2DBFF',
-    avatar: dudu,
-    stack: [dudu, moa, ddori],
-  },
-];
-
-/**
- * Figma 채팅방/홈 (549:3507) — 220 x 486
- * 카드 x13 y89 197×344 / 구분선 y119 / 초대코드 y130 h22 / 방 목록 y160·220·280·340 (h54)
- */
 export default function ChatHomeScreen() {
   const insets = useSafeAreaInsets();
   const { navigate } = useNavigation();
   const [code, setCode] = useState('');
+  const [joining, setJoining] = useState(false);
+  const { rooms, status, reload } = useMyRooms();
+
+  const enterRoom = (room: RoomSummary) =>
+    navigate('ChatRoom', { roomId: room.id, title: room.title, color: room.color });
+
+  const joinByCode = async () => {
+    setJoining(true);
+    const { roomId, error } = await joinRoomByCode(code);
+    setJoining(false);
+
+    if (error) {
+      // RPC 가 잘못된 코드·만료를 구분해서 던진다
+      Alert.alert('입장할 수 없어요', error.message);
+      return;
+    }
+
+    setCode('');
+    reload();
+    if (roomId) navigate('ChatRoom', { roomId });
+  };
 
   return (
     <View style={styles.screen}>
@@ -136,27 +86,36 @@ export default function ChatHomeScreen() {
             <TextInput
               style={styles.inviteInput}
               value={code}
-              onChangeText={setCode}
+              /* 저장된 코드가 대문자라 입력도 맞춰 올린다 — RPC 는 정확히 일치해야 찾는다 */
+              onChangeText={(text) => setCode(text.toUpperCase())}
               placeholder="초대 코드 6자리 입력"
               placeholderTextColor={colors.textMuted}
               autoCapitalize="characters"
+              autoCorrect={false}
               maxLength={6}
             />
             <Pressable
-              style={[styles.enterButton, code.length < 6 && styles.enterButtonDisabled]}
-              disabled={code.length < 6}
-              onPress={() => navigate('ChatRoom', { title: '오늘 점심팟', avatar: moa })}>
-              <Text style={styles.enterText}>입장</Text>
+              style={[
+                styles.enterButton,
+                (code.length < 6 || joining) && styles.enterButtonDisabled,
+              ]}
+              disabled={code.length < 6 || joining}
+              onPress={() => void joinByCode()}>
+              <Text style={styles.enterText}>{joining ? '입장 중' : '입장'}</Text>
             </Pressable>
           </View>
 
-          {ROOMS.map((room) => (
-            <RoomRow
-              key={room.title}
-              room={room}
-              onPress={() => navigate('ChatRoom', { title: room.title, avatar: room.avatar })}
-            />
-          ))}
+          {status === 'loading' ? (
+            <Text style={styles.emptyText}>방 목록을 불러오는 중...</Text>
+          ) : status === 'error' ? (
+            <Text style={styles.emptyText}>방 목록을 불러오지 못했어요</Text>
+          ) : rooms.length === 0 ? (
+            <Text style={styles.emptyText}>아직 참여 중인 밥약이 없어요</Text>
+          ) : (
+            rooms.map((room) => (
+              <RoomRow key={room.id} room={room} onPress={() => enterRoom(room)} />
+            ))
+          )}
 
           <Text style={styles.footer}>밥약 방은 정산 후 자동으로 사라져요</Text>
         </View>
@@ -165,13 +124,20 @@ export default function ChatHomeScreen() {
   );
 }
 
-function RoomRow({ room, onPress }: { room: Room; onPress: () => void }) {
-  return (
-    <Pressable style={[styles.row, room.highlight && styles.rowHighlight]} onPress={onPress}>
-      <View style={[styles.themeBar, { backgroundColor: room.theme }]} />
+function RoomRow({ room, onPress }: { room: RoomSummary; onPress: () => void }) {
+  const status = roomStatus(room);
+  const tone = STATUS_TONE[status];
 
-      <View style={[styles.avatarBox, { backgroundColor: room.tint }]}>
-        <Image source={room.avatar} style={styles.avatar} resizeMode="contain" />
+  return (
+    <Pressable style={[styles.row, status === 'open' && styles.rowHighlight]} onPress={onPress}>
+      <View style={[styles.themeBar, { backgroundColor: room.color }]} />
+
+      {/*
+       * 아바타 이미지 업로드가 아직 없어서 (Storage 버킷 0개) 참가자의
+       * avatar_color 로 원을 그리고 이름 첫 글자를 넣는다.
+       */}
+      <View style={[styles.avatarBox, { backgroundColor: `${room.color}33` }]}>
+        <Text style={styles.avatarInitial}>{initialOf(room.participants[0]?.name ?? room.title)}</Text>
       </View>
 
       <View style={styles.rowContent}>
@@ -179,36 +145,52 @@ function RoomRow({ room, onPress }: { room: Room; onPress: () => void }) {
           <Text style={styles.roomTitle} numberOfLines={1}>
             {room.title}
           </Text>
-          <View style={[styles.chip, chipStyles[room.chipTone].box]}>
-            <Text style={[styles.chipText, chipStyles[room.chipTone].text]}>{room.chip}</Text>
+          <View style={[styles.chip, chipStyles[tone].box]}>
+            <Text style={[styles.chipText, chipStyles[tone].text]}>
+              {ROOM_STATUS_LABEL[status]}
+            </Text>
           </View>
         </View>
 
         <Text style={styles.preview} numberOfLines={1}>
-          {room.preview}
+          {room.lastMessage?.text ?? '아직 대화가 없어요'}
         </Text>
 
         <View style={styles.metaRow}>
           <View style={styles.stack}>
-            {room.stack.map((src, i) => (
-              <View key={i} style={[styles.stackItem, i > 0 && styles.stackOverlap]}>
-                <Image source={src} style={styles.stackImage} resizeMode="contain" />
+            {room.participants.slice(0, 3).map((participant, i) => (
+              <View
+                key={participant.id}
+                style={[
+                  styles.stackItem,
+                  i > 0 && styles.stackOverlap,
+                  { backgroundColor: participant.avatarColor },
+                ]}>
+                <Text style={styles.stackInitial}>{initialOf(participant.name)}</Text>
               </View>
             ))}
           </View>
-          <Text style={styles.meta}>{room.meta}</Text>
+          <Text style={styles.meta}>{participantMeta(room.participants.length, room.expiresAt)}</Text>
         </View>
       </View>
 
-      <Text style={styles.time}>{room.time}</Text>
-      {room.unread ? (
-        <View style={styles.unread}>
-          <Text style={styles.unreadText}>{room.unread}</Text>
-        </View>
-      ) : null}
+      <Text style={styles.time}>
+        {room.lastMessage ? timeLabel(room.lastMessage.createdAt) : ''}
+      </Text>
     </Pressable>
   );
 }
+
+/** 아바타 자리에 쓸 첫 글자. 이모지·한글 모두 한 글자로 잘리게 배열로 자른다. */
+function initialOf(name: string): string {
+  return [...name.trim()][0] ?? '?';
+}
+
+const STATUS_TONE: Record<RoomStatus, ChipTone> = {
+  open: 'active',
+  confirmed: 'done',
+  expired: 'open',
+};
 
 const chipStyles: Record<ChipTone, { box: object; text: object }> = {
   active: { box: { backgroundColor: '#FF8C3B' }, text: { color: colors.textOnAccent } },
@@ -441,5 +423,28 @@ const styles = StyleSheet.create({
     fontSize: fs(6.5),
     lineHeight: fs(8),
     color: colors.textMuted,
+  },
+  emptyText: {
+    marginTop: s(20),
+    marginBottom: s(6),
+    textAlign: 'center',
+    fontFamily: fontFamily.body,
+    fontSize: fs(7),
+    lineHeight: fs(10),
+    color: colors.textMuted,
+  },
+  /* 아바타 업로드 전까지 쓰는 이니셜 원 */
+  avatarInitial: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(11),
+    fontWeight: weight.bold,
+    color: colors.textPrimary,
+  },
+  stackInitial: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(5.5),
+    fontWeight: weight.bold,
+    color: colors.textOnAccent,
+    textAlign: 'center',
   },
 });
