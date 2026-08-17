@@ -26,6 +26,7 @@ type AuthValue = {
     marketingOptIn: boolean;
   }) => Promise<SignUpResult>;
   sendPasswordReset: (email: string) => Promise<Error | null>;
+  updatePassword: (password: string) => Promise<Error | null>;
   completePasswordReset: (password: string) => Promise<Error | null>;
   cancelPasswordReset: () => Promise<Error | null>;
   signOut: () => Promise<Error | null>;
@@ -166,11 +167,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return error;
   }, []);
 
-  const completePasswordReset = useCallback(async (password: string) => {
+  const updatePassword = useCallback(async (password: string) => {
     const { error } = await supabase.auth.updateUser({ password });
-    if (!error) setPasswordResetPending(false);
     return error;
   }, []);
+
+  const completePasswordReset = useCallback(
+    async (password: string) => {
+      const error = await updatePassword(password);
+      if (!error) setPasswordResetPending(false);
+      return error;
+    },
+    [updatePassword],
+  );
 
   const signOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
@@ -193,6 +202,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signInWithEmail,
       signUpWithEmail,
       sendPasswordReset,
+      updatePassword,
       completePasswordReset,
       cancelPasswordReset,
       signOut,
@@ -204,6 +214,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signInWithEmail,
       signUpWithEmail,
       sendPasswordReset,
+      updatePassword,
       completePasswordReset,
       cancelPasswordReset,
       signOut,

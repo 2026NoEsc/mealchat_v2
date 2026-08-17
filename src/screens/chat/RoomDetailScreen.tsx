@@ -1,49 +1,48 @@
 import { ChevronLeft } from 'lucide-react-native';
 import { useState } from 'react';
-import {
-  Image,
-  ImageSourcePropType,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useAuth } from '../../auth/AuthProvider';
 import { DangerButton } from '../../components/ui/Button';
+import { meetingLine } from '../../lib/roomFormat';
+import { leaveRoom } from '../../lib/rooms';
 import { useNavigation } from '../../navigation/NavigationContext';
+import { useRoom } from '../../rooms/useMyRooms';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
 
-const moa = require('../../../assets/brand/moa.png');
-const dudu = require('../../../assets/brand/dudu.png');
-const ddori = require('../../../assets/brand/ddori.png');
-const welling = require('../../../assets/brand/welling2.png');
-
-const INVITE_CODE = 'VF4HLD';
-
-type Member = { name: string; role: '방장' | '메이트'; avatar: ImageSourcePropType };
-
-const MEMBERS: Member[] = [
-  { name: '모아(나)', role: '방장', avatar: moa },
-  { name: '두두', role: '메이트', avatar: dudu },
-  { name: '또리', role: '메이트', avatar: ddori },
-  { name: '웰링', role: '메이트', avatar: welling },
-];
-
-/**
- * Figma 채팅방/방 상세정보 (159:604) — 220 x 486
- * body x12 y86 w197 / 초대코드 카드 y109 h43 / 약속 장소 카드 y159 h52 /
- * 멤버 카드 y218 h123 / 방 나가기 y348 h28
- */
 export default function RoomDetailScreen() {
   const insets = useSafeAreaInsets();
   const { goBack, navigate, resetTo, current } = useNavigation();
-  const title = (current.params as { title?: string } | undefined)?.title ?? '오늘 점심팟';
+  const { user } = useAuth();
+  const params = current.params as { roomId?: string; title?: string } | undefined;
+  const roomId = params?.roomId ?? null;
+
+  const room = useRoom(roomId);
+  const title = params?.title ?? room?.title ?? '밥약';
 
   const [copied, setCopied] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+
+  const members = room?.participants ?? [];
+
+  /* expo-clipboard 를 아직 넣지 않아 실제 복사는 못 한다. 코드를 그대로 보여준다. */
+  const copyCode = () => setCopied(true);
+
+  const leave = async () => {
+    if (!roomId || !user?.id) return;
+    setLeaving(true);
+    const error = await leaveRoom(roomId, user.id);
+    setLeaving(false);
+
+    if (error) {
+      Alert.alert('나가기 실패', error.message);
+      return;
+    }
+    resetTo('Chat');
+  };
 
   return (
     <View style={styles.screen}>
@@ -64,10 +63,10 @@ export default function RoomDetailScreen() {
         <View style={styles.card}>
           <Text style={styles.cardLabel}>초대 코드</Text>
           <View style={styles.codeRow}>
-            <Text style={styles.code}>{INVITE_CODE}</Text>
+            <Text style={styles.code}>{room?.code ?? '••••••'}</Text>
             <Pressable
               style={styles.copyButton}
-              onPress={() => setCopied(true)}
+              onPress={copyCode}
               hitSlop={s(6)}>
               <Text style={styles.copyText}>{copied ? '복사됨' : '복사'}</Text>
             </Pressable>
@@ -81,36 +80,45 @@ export default function RoomDetailScreen() {
               <Text style={styles.changeText}>변경</Text>
             </Pressable>
           </View>
-          <Text style={styles.placeName}>조선칼국수 하단점</Text>
-          <Text style={styles.placeDetail}>부산 사하구 하단동 • 도보 8분</Text>
+          <Text style={styles.placeName}>{room?.locationName ?? '아직 정하지 않았어요'}</Text>
+          <Text style={styles.placeDetail}>
+            {room ? meetingLine(room.meetingDate, null) : ' '}
+          </Text>
         </View>
 
         <View style={[styles.card, styles.cardSpacing]}>
           <View style={styles.placeHeader}>
-            <Text style={styles.placeTitle}>멤버 {MEMBERS.length}명</Text>
-            <Pressable hitSlop={s(6)} onPress={() => setCopied(true)}>
+            <Text style={styles.placeTitle}>멤버 {members.length}명</Text>
+            <Pressable hitSlop={s(6)} onPress={copyCode}>
               <Text style={styles.changeText}>＋ 초대</Text>
             </Pressable>
           </View>
 
-          {MEMBERS.map((member) => (
-            <View key={member.name} style={styles.memberRow}>
-              <View style={styles.avatarBox}>
-                <Image source={member.avatar} style={styles.avatar} resizeMode="contain" />
+          {members.map((member) => {
+            const mine = member.profileId === user?.id;
+            return (
+              <View key={member.id} style={styles.memberRow}>
+                <View style={[styles.avatarBox, { backgroundColor: member.avatarColor }]}>
+                  <Text style={styles.avatarInitial}>
+                    {[...member.name.trim()][0] ?? '?'}
+                  </Text>
+                </View>
+                <Text style={styles.memberName}>{member.name}</Text>
+                {/* 방장 여부는 rooms.owner_id 가 알려주는데 목록에는 싣지 않는다 */}
+                <Text style={[styles.memberRole, mine && styles.memberRoleOwner]}>
+                  {mine ? '나' : '메이트'}
+                </Text>
               </View>
-              <Text style={styles.memberName}>{member.name}</Text>
-              <Text
-                style={[
-                  styles.memberRole,
-                  member.role === '방장' && styles.memberRoleOwner,
-                ]}>
-                {member.role}
-              </Text>
-            </View>
-          ))}
+            );
+          })}
         </View>
 
-        <DangerButton label="방 나가기" style={styles.leave} onPress={() => resetTo('Chat')} />
+        <DangerButton
+          label={leaving ? '나가는 중' : '방 나가기'}
+          style={styles.leave}
+          disabled={leaving}
+          onPress={() => void leave()}
+        />
       </ScrollView>
     </View>
   );
@@ -230,6 +238,12 @@ const styles = StyleSheet.create({
     marginTop: s(7),
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  avatarInitial: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(9),
+    fontWeight: weight.bold,
+    color: colors.textOnAccent,
   },
   avatarBox: {
     width: s(16),

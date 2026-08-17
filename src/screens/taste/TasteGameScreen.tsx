@@ -1,10 +1,13 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { Heart, X } from 'lucide-react-native';
 import { useState } from 'react';
-import { Image, ImageSourcePropType, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, ImageSourcePropType, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useAuth } from '../../auth/AuthProvider';
 import { useSignupDraft } from '../../auth/SignupDraftProvider';
+import { saveTastes } from '../../lib/profile';
+import { useMyProfile } from '../../profile/useMyProfile';
 import ScreenHeader from '../../components/ScreenHeader';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
@@ -30,12 +33,37 @@ const FILL_WIDTHS = [29.7, 59.3, 89, 118.7, 148.3, 178];
 const TRACK = 178;
 
 export default function TasteGameScreen() {
-  const { navigate, goBack } = useNavigation();
+  const { navigate, goBack, resetTo } = useNavigation();
   const insets = useSafeAreaInsets();
   const { draft, updateDraft } = useSignupDraft();
+  const { user } = useAuth();
+  const { bundle } = useMyProfile();
+
+  /*
+   * 가입 도중이면 초안에, 로그인한 뒤 프로필에서 다시 하면 서버에 저장한다.
+   * 지금까지는 어느 쪽이든 초안에만 담겨서, 프로필에서 다시 해도 사라졌다.
+   */
+  const signedIn = Boolean(user?.id);
 
   const [index, setIndex] = useState(0);
-  const [likes, setLikes] = useState<Record<string, boolean>>(draft.tastes);
+  const [likes, setLikes] = useState<Record<string, boolean>>(
+    signedIn ? (bundle?.privateProfile.tastes ?? {}) : draft.tastes,
+  );
+
+  const finish = async (next: Record<string, boolean>) => {
+    if (signedIn && user?.id) {
+      const error = await saveTastes(user.id, next);
+      if (error) {
+        Alert.alert('저장 실패', error.message);
+        return;
+      }
+      resetTo('Profile');
+      return;
+    }
+
+    updateDraft({ tastes: next });
+    navigate('SignupTerms');
+  };
 
   const question = QUESTIONS[index];
 
@@ -45,8 +73,7 @@ export default function TasteGameScreen() {
     if (index < QUESTIONS.length - 1) {
       setIndex(index + 1);
     } else {
-      updateDraft({ tastes: next });
-      navigate('SignupTerms');
+      void finish(next);
     }
   };
 
@@ -64,12 +91,7 @@ export default function TasteGameScreen() {
         title="취향 분석"
         onBack={back}
         action={
-          <Pressable
-            onPress={() => {
-              updateDraft({ tastes: likes });
-              navigate('SignupTerms');
-            }}
-            hitSlop={s(8)}>
+          <Pressable onPress={() => void finish(likes)} hitSlop={s(8)}>
             <Text style={styles.skip}>건너뛰기</Text>
           </Pressable>
         }

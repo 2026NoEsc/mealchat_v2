@@ -18,6 +18,14 @@ expo-env.d.ts
 supabase/.temp/
 supabase/.branches/
 
+# 운영 DB 덤프. 실제 사용자 개인정보가 들어가므로 절대 커밋하지 않는다.
+# `*.sql` 을 통째로 막으면 supabase/migrations 까지 사라지므로 덤프만 겨냥한다.
+# 덤프는 되도록 backups/ 안에 만든다.
+/backups/
+*-backup.sql
+*.dump.sql
+prod-*.sql
+
 # Expo CNG native projects. If native code is intentionally managed by hand,
 # remove these rules and commit the native projects as a deliberate migration.
 /android/

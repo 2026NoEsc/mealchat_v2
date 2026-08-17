@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  Alert,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -11,10 +12,14 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
 import BankSelect from '../../components/ui/BankSelect';
 import { CompleteButton } from '../../components/ui/Button';
+import { fromBirthDate } from '../../lib/birthDate';
+import { saveMyPrivateProfile, updateMyName } from '../../lib/profile';
 import { useNavigation } from '../../navigation/NavigationContext';
+import { useMyProfile } from '../../profile/useMyProfile';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
@@ -28,16 +33,66 @@ const logo = require('../../../assets/brand/logo-main.png');
  * 재확인 y285·y296 / 계좌번호 y328·행 y339 h19 / 생년월일 y368·행 y380 h23
  */
 export default function ProfileEditScreen() {
+  const { status, bundle, userId } = useMyProfile();
+
+  if (status !== 'ready' || !bundle || !userId) {
+    return <ProfileEditFallback failed={status === 'error'} />;
+  }
+
+  /*
+   * 폼은 불러온 값에서 시작한다. 로딩이 끝난 뒤에야 마운트되도록 분리해서,
+   * 초기값을 effect 로 나중에 밀어 넣지 않아도 되게 했다.
+   */
+  return <ProfileEditForm userId={userId} bundle={bundle} />;
+}
+
+function ProfileEditForm({
+  userId,
+  bundle,
+}: {
+  userId: string;
+  bundle: NonNullable<ReturnType<typeof useMyProfile>['bundle']>;
+}) {
   const insets = useSafeAreaInsets();
   const { resetTo } = useNavigation();
+  const { user, updatePassword } = useAuth();
 
-  const [nickname, setNickname] = useState('나야나');
-  const [email, setEmail] = useState('nayana@gmail.com');
+  const [nickname, setNickname] = useState(bundle.profile.name);
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
-  const [bank, setBank] = useState<string | null>(null);
-  const [account, setAccount] = useState('');
-  const [birth, setBirth] = useState({ year: '2002', month: '12', day: '20' });
+  const [bank, setBank] = useState<string | null>(bundle.privateProfile.bankName);
+  const [account, setAccount] = useState(bundle.privateProfile.accountNumber ?? '');
+  const [birth, setBirth] = useState(fromBirthDate(bundle.privateProfile.birthDate));
+  const [saving, setSaving] = useState(false);
+
+  const email = user?.email ?? '';
+
+  const save = async () => {
+    if (password && password !== passwordConfirm) {
+      Alert.alert('입력 확인', '새 비밀번호가 서로 다릅니다.');
+      return;
+    }
+
+    setSaving(true);
+
+    const nameError = await updateMyName(userId, nickname);
+    const privateError = nameError
+      ? null
+      : await saveMyPrivateProfile(userId, { bank, account, birth });
+    const passwordError = nameError || privateError || !password
+      ? null
+      : await updatePassword(password);
+
+    setSaving(false);
+
+    const failure = nameError ?? privateError ?? passwordError;
+    if (failure) {
+      Alert.alert('저장 실패', failure.message);
+      return;
+    }
+
+    resetTo('Profile');
+  };
 
   return (
     <View style={styles.screen}>
@@ -56,13 +111,8 @@ export default function ProfileEditScreen() {
             <Text style={styles.title}>프로필 수정</Text>
 
             <Field label="닉네임" value={nickname} onChangeText={setNickname} />
-            <Field
-              label="이메일"
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
+            {/* 이메일 변경은 재확인 메일이 필요한 별도 흐름이라 여기서는 보여주기만 한다 */}
+            <Field label="이메일" value={email} editable={false} />
             <Field
               label="비밀번호 변경"
               value={password}
@@ -114,12 +164,30 @@ export default function ProfileEditScreen() {
           </View>
 
           <CompleteButton
-            label="저장하기"
+            label={saving ? '저장 중' : '저장하기'}
             style={styles.cta}
-            onPress={() => resetTo('Profile')}
+            disabled={saving}
+            onPress={() => void save()}
           />
         </ScrollView>
       </KeyboardAvoidingView>
+    </View>
+  );
+}
+
+/** 불러오는 동안과 실패했을 때의 화면 */
+function ProfileEditFallback({ failed }: { failed: boolean }) {
+  const insets = useSafeAreaInsets();
+
+  return (
+    <View style={styles.screen}>
+      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
+      <AppHeader />
+      <View style={styles.fallback}>
+        <Text style={styles.fallbackText}>
+          {failed ? '프로필을 불러오지 못했어요.' : '불러오는 중...'}
+        </Text>
+      </View>
     </View>
   );
 }
@@ -264,5 +332,15 @@ const styles = StyleSheet.create({
   },
   cta: {
     marginTop: s(10),
+  },
+  fallback: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fallbackText: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(8),
+    color: colors.textMuted,
   },
 });

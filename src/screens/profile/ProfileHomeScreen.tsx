@@ -3,8 +3,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
+import { countLikedTastes, formatAccount, formatBirthDate } from '../../lib/format';
 import { useNavigation } from '../../navigation/NavigationContext';
 import type { RouteName } from '../../navigation/routes';
+import { useMyProfile } from '../../profile/useMyProfile';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
@@ -13,20 +15,7 @@ const avatar = require('../../../assets/brand/moa.png');
 
 type InfoRow = { label: string; value: string; danger?: boolean };
 
-const INFO: InfoRow[] = [
-  { label: '생년월일', value: '2002년 12월 20일' },
-  { label: '성별', value: '남성' },
-  { label: '송금 계좌', value: '카카오뱅크 1111' },
-  { label: '음식 취향', value: '아직 설정 안됨', danger: true },
-];
-
 type Step = { done: boolean; label: string; action: string; route?: RouteName };
-
-const STEPS: Step[] = [
-  { done: true, label: '프로필 이모지 수정', action: '완료됨', route: 'ProfileEdit' },
-  { done: false, label: '사는 곳 설정', action: '설정하기', route: 'Origin' },
-  { done: false, label: '음식 취향 매칭', action: '게임 시작', route: 'TasteGame' },
-];
 
 const LINKS: { label: string; route: RouteName }[] = [
   { label: '일정 입력하기', route: 'Schedule' },
@@ -42,6 +31,34 @@ export default function ProfileHomeScreen() {
   const insets = useSafeAreaInsets();
   const { navigate } = useNavigation();
   const { signOut } = useAuth();
+  const { status, bundle } = useMyProfile();
+
+  const privateProfile = bundle?.privateProfile;
+  const likedTastes = countLikedTastes(privateProfile?.tastes);
+  const account = formatAccount(privateProfile?.bankName, privateProfile?.accountNumber);
+  const birth = formatBirthDate(privateProfile?.birthDate);
+  const gender = typeof privateProfile?.personalData.gender === 'string'
+    ? privateProfile.personalData.gender
+    : null;
+
+  /* 값이 없으면 채워야 할 곳으로 보이게 danger 로 표시한다 */
+  const info: InfoRow[] = [
+    { label: '생년월일', value: birth ?? '아직 설정 안됨', danger: !birth },
+    { label: '성별', value: gender ?? '아직 설정 안됨', danger: !gender },
+    { label: '송금 계좌', value: account ?? '아직 설정 안됨', danger: !account },
+    {
+      label: '음식 취향',
+      value: likedTastes > 0 ? `${likedTastes}개 선택함` : '아직 설정 안됨',
+      danger: likedTastes === 0,
+    },
+  ];
+
+  const steps: Step[] = [
+    { done: Boolean(account), label: '송금 계좌 등록', action: '설정하기', route: 'ProfileEdit' },
+    { done: false, label: '사는 곳 설정', action: '설정하기', route: 'Origin' },
+    { done: likedTastes > 0, label: '음식 취향 매칭', action: '게임 시작', route: 'TasteGame' },
+  ];
+  const doneCount = steps.filter((step) => step.done).length;
 
   const confirmDelete = () =>
     Alert.alert('계정 삭제 준비 중', '본인 재인증과 기록 보존 정책이 준비된 뒤 제공됩니다.', [
@@ -65,12 +82,16 @@ export default function ProfileHomeScreen() {
             <View style={styles.avatarBox}>
               <Image source={avatar} style={styles.avatar} resizeMode="contain" />
             </View>
-            <Text style={styles.name}>나야나#433</Text>
-            <Text style={styles.bio}>&ldquo;오늘도 맛있는 하루&rdquo;</Text>
+            <Text style={styles.name}>
+              {status === 'ready' && bundle ? bundle.profile.name : '불러오는 중'}
+            </Text>
+            <Text style={styles.bio}>
+              {status === 'ready' && bundle ? `@${bundle.profile.tag}` : ' '}
+            </Text>
           </Pressable>
 
           <View style={styles.infoList}>
-            {INFO.map((row) => (
+            {info.map((row) => (
               <View key={row.label} style={styles.infoRow}>
                 <Text style={styles.infoLabel}>{row.label}</Text>
                 <Text style={[styles.infoValue, row.danger && styles.infoValueDanger]}>
@@ -84,15 +105,18 @@ export default function ProfileHomeScreen() {
         <View style={[styles.card, styles.cardSpacing]}>
           <View style={styles.completeHeader}>
             <Text style={styles.completeTitle}>🎉 계정 완성하기</Text>
-            <Text style={styles.completeCount}>1 / 3 단계</Text>
+            <Text style={styles.completeCount}>
+              {doneCount} / {steps.length} 단계
+            </Text>
           </View>
 
           <View style={styles.track}>
-            {/* fill 60 / track 179 */}
-            <View style={styles.fill} />
+            {/* 진행 막대는 실제 완료 개수를 따른다 */}
+            <View style={[styles.fill, { flex: doneCount, minWidth: 0 }]} />
+            <View style={{ flex: steps.length - doneCount }} />
           </View>
 
-          {STEPS.map((step) => (
+          {steps.map((step) => (
             <View key={step.label} style={styles.stepRow}>
               <Text style={[styles.stepMark, step.done && styles.stepMarkDone]}>
                 {step.done ? '✓' : '○'}
@@ -103,7 +127,7 @@ export default function ProfileHomeScreen() {
                 disabled={!step.route}
                 onPress={() => step.route && navigate(step.route)}>
                 <Text style={[styles.badgeText, step.done ? styles.badgeTextDone : styles.badgeTextAction]}>
-                  {step.action}
+                  {step.done ? '완료됨' : step.action}
                 </Text>
               </Pressable>
             </View>

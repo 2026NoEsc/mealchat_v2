@@ -1,62 +1,93 @@
 import { ChevronDown, UserMinus } from 'lucide-react-native';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
-  Image,
-  ImageSourcePropType,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
+import {
+  addFriend,
+  fetchMyFriends,
+  removeFriend,
+  searchProfilesByTag,
+  type Friend,
+} from '../../lib/friends';
 import Toggle from '../../components/ui/Toggle';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
 
-const moa = require('../../../assets/brand/moa.png');
-const dudu = require('../../../assets/brand/dudu.png');
-const ddori = require('../../../assets/brand/ddori.png');
-const welling = require('../../../assets/brand/welling2.png');
+/** friends.ts 의 검색 결과 행 */
+type SearchedProfile = { id: string; name: string; tag: string; avatar_color: string };
 
-type Person = {
-  id: string;
-  name: string;
-  status: string;
-  avatar: ImageSourcePropType;
-  tint: string;
-  friend: boolean;
-};
-
-const PEOPLE: Person[] = [
-  { id: 'dudu', name: '두두', status: '온라인', avatar: dudu, tint: '#FFE7CA', friend: true },
-  { id: 'ddori', name: '또리', status: '3시간 전', avatar: ddori, tint: '#EBF4FF', friend: true },
-  { id: 'welling', name: '웰링', status: '온라인', avatar: welling, tint: '#DCF8F2', friend: true },
-  { id: 'moa', name: '모아', status: '어제', avatar: moa, tint: '#F2DBFF', friend: true },
-  { id: 'nabi', name: '나비', status: '같은 학과', avatar: ddori, tint: '#FFE7CA', friend: false },
-  { id: 'kkomi', name: '꼬미', status: '같은 동아리', avatar: welling, tint: '#EBF4FF', friend: false },
-  { id: 'bami', name: '바미', status: '2번 함께 먹음', avatar: dudu, tint: '#DCF8F2', friend: false },
-];
-
-/**
- * 내 친구 관리.
- *
- * ⚠️ Figma 에 대응 화면이 없어 앱의 기존 표현(프로필 카드 · 채팅방 멤버 행)을
- * 조합해 구성한 화면이다. 디자인이 나오면 좌표 기준으로 다시 맞춰야 한다.
- */
 export default function FriendsScreen() {
   const insets = useSafeAreaInsets();
-  const [people, setPeople] = useState(PEOPLE);
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
+
+  const [friends, setFriends] = useState<Friend[]>([]);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [keyword, setKeyword] = useState('');
+  const [candidates, setCandidates] = useState<SearchedProfile[]>([]);
+  const [busy, setBusy] = useState(false);
 
-  const friends = people.filter((p) => p.friend);
-  const candidates = people.filter((p) => !p.friend);
+  const load = useCallback(async () => {
+    if (!userId) return;
+    const { data } = await fetchMyFriends(userId);
+    setFriends(data ?? []);
+  }, [userId]);
 
-  const setFriend = (id: string, friend: boolean) =>
-    setPeople((prev) => prev.map((p) => (p.id === id ? { ...p, friend } : p)));
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  /*
+   * 추천 목록을 만들 근거가 없다 — "같은 학과", "2번 함께 먹음" 같은 데이터가
+   * 스키마에 없다. 대신 태그나 이름으로 직접 찾게 한다.
+   */
+  const search = async () => {
+    if (!userId) return;
+    setBusy(true);
+    const { data } = await searchProfilesByTag(keyword, userId);
+    setBusy(false);
+
+    const already = new Set(friends.map((friend) => friend.profileId));
+    setCandidates((data ?? []).filter((profile) => !already.has(profile.id)));
+  };
+
+  const add = async (targetId: string) => {
+    if (!userId) return;
+    setBusy(true);
+    const error = await addFriend(userId, targetId);
+    setBusy(false);
+
+    if (error) {
+      Alert.alert('추가 실패', error.message);
+      return;
+    }
+    setCandidates((prev) => prev.filter((profile) => profile.id !== targetId));
+    void load();
+  };
+
+  const remove = async (followId: string) => {
+    setBusy(true);
+    const error = await removeFriend(followId);
+    setBusy(false);
+
+    if (error) {
+      Alert.alert('삭제 실패', error.message);
+      return;
+    }
+    void load();
+  };
 
   return (
     <View style={styles.screen}>
@@ -73,15 +104,16 @@ export default function FriendsScreen() {
           ) : (
             friends.map((friend, i) => (
               <View key={friend.id} style={[styles.row, i > 0 && styles.rowDivided]}>
-                <Avatar person={friend} />
+                <Avatar name={friend.name} color={friend.avatarColor} />
                 <View style={styles.rowBody}>
                   <Text style={styles.name}>{friend.name}</Text>
-                  <Text style={styles.status}>{friend.status}</Text>
+                  <Text style={styles.status}>@{friend.tag}</Text>
                 </View>
                 <Pressable
                   style={styles.removeButton}
                   hitSlop={s(6)}
-                  onPress={() => setFriend(friend.id, false)}>
+                  disabled={busy}
+                  onPress={() => void remove(friend.id)}>
                   <UserMinus size={s(9)} color={colors.danger} strokeWidth={2} />
                 </Pressable>
               </View>
@@ -101,26 +133,39 @@ export default function FriendsScreen() {
 
         {inviteOpen ? (
           <View style={styles.card}>
-            <Text style={styles.inviteHint}>
-              {candidates.length > 0
-                ? '토글을 켜면 바로 메이트로 추가돼요'
-                : '초대할 수 있는 사람을 모두 추가했어요'}
-            </Text>
+            <Text style={styles.inviteHint}>닉네임이나 태그로 찾아서 추가하세요</Text>
 
-            {candidates.map((person, i) => (
-              <View key={person.id} style={[styles.row, i > 0 && styles.rowDivided]}>
-                <Avatar person={person} />
-                <View style={styles.rowBody}>
-                  <Text style={styles.name}>{person.name}</Text>
-                  <Text style={styles.status}>{person.status}</Text>
+            <View style={styles.searchRow}>
+              <TextInput
+                style={styles.searchInput}
+                value={keyword}
+                onChangeText={setKeyword}
+                placeholder="닉네임 또는 태그"
+                placeholderTextColor={colors.textMuted}
+                autoCapitalize="none"
+                onSubmitEditing={() => void search()}
+              />
+              <Pressable style={styles.searchButton} disabled={busy} onPress={() => void search()}>
+                <Text style={styles.searchButtonText}>찾기</Text>
+              </Pressable>
+            </View>
+
+            {candidates.length === 0 ? (
+              <Text style={styles.inviteHint}>
+                {keyword.trim() ? '찾은 사람이 없어요' : ' '}
+              </Text>
+            ) : (
+              candidates.map((person, i) => (
+                <View key={person.id} style={[styles.row, i > 0 && styles.rowDivided]}>
+                  <Avatar name={person.name} color={person.avatar_color} />
+                  <View style={styles.rowBody}>
+                    <Text style={styles.name}>{person.name}</Text>
+                    <Text style={styles.status}>@{person.tag}</Text>
+                  </View>
+                  <Toggle value={false} onChange={() => void add(person.id)} size="sm" />
                 </View>
-                <Toggle
-                  value={person.friend}
-                  onChange={(next) => setFriend(person.id, next)}
-                  size="sm"
-                />
-              </View>
-            ))}
+              ))
+            )}
           </View>
         ) : null}
       </ScrollView>
@@ -128,10 +173,11 @@ export default function FriendsScreen() {
   );
 }
 
-function Avatar({ person }: { person: Person }) {
+/** 아바타 업로드가 없어 avatar_color 원에 이름 첫 글자를 넣는다 */
+function Avatar({ name, color }: { name: string; color: string }) {
   return (
-    <View style={[styles.avatarBox, { backgroundColor: person.tint }]}>
-      <Image source={person.avatar} style={styles.avatar} resizeMode="contain" />
+    <View style={[styles.avatarBox, { backgroundColor: color }]}>
+      <Text style={styles.avatarInitial}>{[...name.trim()][0] ?? '?'}</Text>
     </View>
   );
 }
@@ -140,6 +186,43 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.surfaceSunken,
+  },
+  avatarInitial: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(11),
+    fontWeight: weight.bold,
+    color: colors.textOnAccent,
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: s(6),
+    marginBottom: s(8),
+  },
+  searchInput: {
+    flex: 1,
+    height: s(22),
+    borderRadius: s(8),
+    backgroundColor: colors.surfaceSunken,
+    paddingHorizontal: s(8),
+    paddingVertical: 0,
+    fontFamily: fontFamily.body,
+    fontSize: fs(7),
+    color: colors.textPrimary,
+  },
+  searchButton: {
+    paddingHorizontal: s(10),
+    height: s(22),
+    borderRadius: s(8),
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchButtonText: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(7),
+    fontWeight: weight.bold,
+    color: colors.textOnAccent,
   },
   body: {
     paddingHorizontal: s(11.5),
