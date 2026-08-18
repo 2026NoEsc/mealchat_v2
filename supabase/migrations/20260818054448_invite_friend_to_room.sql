@@ -19,6 +19,7 @@ as $$
 declare
   caller uuid := (select auth.uid());
   friend public.profiles%rowtype;
+  inserted integer;
 begin
   if caller is null then
     raise exception 'Authentication is required' using errcode = '42501';
@@ -51,7 +52,12 @@ begin
   values (target_room, friend.id, friend.name, friend.avatar_color, friend.avatar_url)
   on conflict do nothing;
 
-  return true;
+  /*
+   * 이미 참가 중이면 아무 행도 안 들어간다. 그때 true 를 돌려주면 화면이
+   * "초대했어요" 라고 잘못 알린다. 실제로 넣었을 때만 true 다.
+   */
+  get diagnostics inserted = row_count;
+  return inserted > 0;
 end;
 $$;
 

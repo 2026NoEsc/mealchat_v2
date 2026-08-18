@@ -7,7 +7,7 @@ import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
 import { CompleteButton } from '../../components/ui/Button';
 import { formatDate, MONTH, YEAR } from '../../lib/calendar';
-import { createRoom } from '../../lib/rooms';
+import { createRoom, inviteFriendToRoom } from '../../lib/rooms';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors, shadows } from '../../theme/tokens';
@@ -31,7 +31,7 @@ export default function ScheduleConfirmedScreen() {
   const { navigate, current } = useNavigation();
   const { user } = useAuth();
   const params = current.params as
-    | { pick?: Pick; name?: string; day?: number }
+    | { pick?: Pick; name?: string; day?: number; invitees?: string[] }
     | undefined;
   const pick = params?.pick;
   const title = params?.name || '새 밥약';
@@ -60,6 +60,28 @@ export default function ScheduleConfirmedScreen() {
     if (error || !roomId) {
       Alert.alert('방 만들기 실패', error?.message ?? '잠시 후 다시 시도해 주세요.');
       return;
+    }
+
+    /*
+     * 1 단계에서 고른 메이트를 이제 넣는다. 방이 마지막에야 만들어져서
+     * 그 전에는 참가자를 넣을 곳이 없었다.
+     *
+     * 한 명이 실패해도 방은 이미 만들어졌으므로 되돌리지 않는다. 실패한 사람만
+     * 알려 주고 나머지는 그대로 둔다 — 초대 코드로도 들어올 수 있다.
+     */
+    const invitees = params?.invitees ?? [];
+    const failed: string[] = [];
+
+    for (const friendId of invitees) {
+      const result = await inviteFriendToRoom(roomId, friendId);
+      if (result.error) failed.push(friendId);
+    }
+
+    if (failed.length > 0) {
+      Alert.alert(
+        '일부 초대 실패',
+        `${failed.length}명을 넣지 못했어요. 방에서 초대 코드를 공유해 주세요.`,
+      );
     }
 
     navigate('ChatRoom', { roomId, title });

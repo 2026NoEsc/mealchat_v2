@@ -1,12 +1,12 @@
 import { Check, MapPin, Plus, Search } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
-import { fetchMyFriends, type Friend } from '../../lib/friends';
 import { CompleteButton } from '../../components/ui/Button';
+import { fetchMyFriends, type Friend } from '../../lib/friends';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors, shadows } from '../../theme/tokens';
@@ -131,7 +131,11 @@ export default function ScheduleDetailScreen() {
             </View>
           </View>
 
-          <Text style={styles.note}>메이트 4명의 중간 지점으로 추천했어요</Text>
+          <Text style={styles.note}>
+            {picked.length > 0
+              ? `메이트 ${picked.length}명의 중간 지점으로 추천했어요`
+              : '메이트를 고르면 중간 지점을 추천해 드려요'}
+          </Text>
         </View>
 
         <CompleteButton
@@ -204,16 +208,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  mateImage: {
-    width: s(20),
-    height: s(24),
+  /* 고른 메이트는 테두리로 표시한다 — 아바타 이미지가 아직 없어 색 원에 첫 글자다 */
+  mateBoxOn: {
+    borderWidth: s(2),
+    borderColor: colors.primary,
+  },
+  mateInitial: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(13),
+    fontWeight: weight.bold,
+    color: colors.textOnAccent,
   },
   mateName: {
     marginTop: s(3),
+    maxWidth: s(34),
+    textAlign: 'center',
     fontFamily: fontFamily.body,
     fontSize: fs(6),
     lineHeight: fs(8),
     color: colors.textPrimary,
+  },
+  mateNameOn: {
+    fontWeight: weight.bold,
+    color: colors.primary,
+  },
+  mateEmpty: {
+    marginTop: s(10),
+    fontFamily: fontFamily.body,
+    fontSize: fs(6.5),
+    lineHeight: fs(10),
+    color: colors.textMuted,
   },
   mapChip: {
     paddingHorizontal: s(6),

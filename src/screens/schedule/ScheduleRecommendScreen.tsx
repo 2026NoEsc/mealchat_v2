@@ -53,7 +53,9 @@ const PICKS: Pick[] = [
 export default function ScheduleRecommendScreen() {
   const insets = useSafeAreaInsets();
   const { navigate, current } = useNavigation();
-  const name = (current.params as { name?: string } | undefined)?.name;
+  const params = current.params as { name?: string; invitees?: string[] } | undefined;
+  const name = params?.name;
+  const invitees = params?.invitees;
   const [selected, setSelected] = useState(0);
 
   return (
@@ -99,7 +101,7 @@ export default function ScheduleRecommendScreen() {
           label={`${PICKS[selected].rank}로 확정하기`}
           showNext
           style={styles.cta}
-          onPress={() => navigate('ScheduleConfirmed', { pick: PICKS[selected], name })}
+          onPress={() => navigate('ScheduleConfirmed', { pick: PICKS[selected], name, invitees })}
         />
       </ScrollView>
     </View>
