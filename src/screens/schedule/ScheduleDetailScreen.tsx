@@ -1,36 +1,47 @@
 import { Check, MapPin, Plus, Search } from 'lucide-react-native';
-import { useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
 import { CompleteButton } from '../../components/ui/Button';
+import { fetchMyFriends, type Friend } from '../../lib/friends';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors, shadows } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
 import ScheduleStepHeader from './ScheduleStepHeader';
 
-const moa = require('../../../assets/brand/moa.png');
-const ddori = require('../../../assets/brand/ddori.png');
-const dudu = require('../../../assets/brand/dudu.png');
-const welling = require('../../../assets/brand/welling2.png');
 
-const MATES = [
-  { name: '모아(나)', avatar: moa, tint: '#FFE7CA' },
-  { name: '두두', avatar: dudu, tint: '#FFD9C2' },
-  { name: '또리', avatar: ddori, tint: '#EBF4FF' },
-  { name: '웰링', avatar: welling, tint: '#DCF8F2' },
-];
-
-/**
- * Figma 일정 조율/일정 추가/디테일 선택 (309:1065) — STEP 1
- * 약속 이름 → 밥약 메이트 선택 → 약속 장소
- */
 export default function ScheduleDetailScreen() {
   const insets = useSafeAreaInsets();
   const { navigate } = useNavigation();
+  const { user } = useAuth();
   const [name, setName] = useState('');
+
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [picked, setPicked] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let active = true;
+    void fetchMyFriends(user.id)
+      .then(({ data }) => {
+        if (active) setFriends(data ?? []);
+      })
+      .catch(() => {
+        if (active) setFriends([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  const toggle = (profileId: string) =>
+    setPicked((prev) =>
+      prev.includes(profileId) ? prev.filter((id) => id !== profileId) : [...prev, profileId],
+    );
 
   return (
     <View style={styles.screen}>
@@ -61,16 +72,37 @@ export default function ScheduleDetailScreen() {
             <Plus size={s(10)} color={colors.primary} strokeWidth={3} />
           </View>
 
-          <View style={styles.mateRow}>
-            {MATES.map((mate) => (
-              <View key={mate.name} style={styles.mate}>
-                <View style={[styles.mateBox, { backgroundColor: mate.tint }]}>
-                  <Image source={mate.avatar} style={styles.mateImage} resizeMode="contain" />
-                </View>
-                <Text style={styles.mateName}>{mate.name}</Text>
-              </View>
-            ))}
-          </View>
+          {friends.length === 0 ? (
+            <Text style={styles.mateEmpty}>
+              아직 메이트가 없어요. 프로필 → 내 친구 관리에서 추가할 수 있어요.
+            </Text>
+          ) : (
+            <View style={styles.mateRow}>
+              {friends.map((friend) => {
+                const on = picked.includes(friend.profileId);
+                return (
+                  <Pressable
+                    key={friend.id}
+                    style={styles.mate}
+                    onPress={() => toggle(friend.profileId)}>
+                    <View
+                      style={[
+                        styles.mateBox,
+                        { backgroundColor: friend.avatarColor },
+                        on && styles.mateBoxOn,
+                      ]}>
+                      <Text style={styles.mateInitial}>
+                        {[...friend.name.trim()][0] ?? '?'}
+                      </Text>
+                    </View>
+                    <Text style={[styles.mateName, on && styles.mateNameOn]} numberOfLines={1}>
+                      {friend.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
         </View>
 
         <View style={styles.card}>
@@ -99,14 +131,18 @@ export default function ScheduleDetailScreen() {
             </View>
           </View>
 
-          <Text style={styles.note}>메이트 4명의 중간 지점으로 추천했어요</Text>
+          <Text style={styles.note}>
+            {picked.length > 0
+              ? `메이트 ${picked.length}명의 중간 지점으로 추천했어요`
+              : '메이트를 고르면 중간 지점을 추천해 드려요'}
+          </Text>
         </View>
 
         <CompleteButton
           label="다음"
           showNext
           style={styles.cta}
-          onPress={() => navigate('ScheduleTime', { name: name.trim() })}
+          onPress={() => navigate('ScheduleTime', { name: name.trim(), invitees: picked })}
         />
       </ScrollView>
     </View>
@@ -172,16 +208,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  mateImage: {
-    width: s(20),
-    height: s(24),
+  /* 고른 메이트는 테두리로 표시한다 — 아바타 이미지가 아직 없어 색 원에 첫 글자다 */
+  mateBoxOn: {
+    borderWidth: s(2),
+    borderColor: colors.primary,
+  },
+  mateInitial: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(13),
+    fontWeight: weight.bold,
+    color: colors.textOnAccent,
   },
   mateName: {
     marginTop: s(3),
+    maxWidth: s(34),
+    textAlign: 'center',
     fontFamily: fontFamily.body,
     fontSize: fs(6),
     lineHeight: fs(8),
     color: colors.textPrimary,
+  },
+  mateNameOn: {
+    fontWeight: weight.bold,
+    color: colors.primary,
+  },
+  mateEmpty: {
+    marginTop: s(10),
+    fontFamily: fontFamily.body,
+    fontSize: fs(6.5),
+    lineHeight: fs(10),
+    color: colors.textMuted,
   },
   mapChip: {
     paddingHorizontal: s(6),

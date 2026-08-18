@@ -330,3 +330,22 @@ export async function createRoom(input: {
 
   return { roomId: null, code: null, error: new Error('초대 코드를 만들지 못했어요. 다시 시도해 주세요.') };
 }
+
+/**
+ * 방장이 메이트를 방에 넣는다. 서버가 부른 사람의 방 참가 여부와
+ * 메이트 관계를 확인하므로 모르는 사람은 넣을 수 없다.
+ *
+ * added 가 false 면 이미 참가 중이라 아무것도 하지 않은 것이다.
+ * 화면이 "초대했어요" 와 "이미 있어요" 를 구분할 수 있어야 한다.
+ */
+export async function inviteFriendToRoom(
+  roomId: string,
+  friendId: string,
+): Promise<{ added: boolean; error: Error | null }> {
+  const { data, error } = await supabase.rpc('invite_friend_to_room', {
+    target_room: roomId,
+    friend_id: friendId,
+  });
+
+  return { added: data === true, error };
+}

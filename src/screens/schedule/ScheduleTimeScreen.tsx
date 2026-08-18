@@ -35,7 +35,9 @@ const INITIAL = new Set([
 export default function ScheduleTimeScreen() {
   const insets = useSafeAreaInsets();
   const { navigate, current } = useNavigation();
-  const name = (current.params as { name?: string } | undefined)?.name;
+  const params = current.params as { name?: string; invitees?: string[] } | undefined;
+  const name = params?.name;
+  const invitees = params?.invitees;
   const [picked, setPicked] = useState<Set<string>>(INITIAL);
 
   const toggle = (dayIndex: number, hour: number) =>
@@ -106,7 +108,7 @@ export default function ScheduleTimeScreen() {
           showNext
           disabled={chips.length === 0}
           style={styles.cta}
-          onPress={() => navigate('ScheduleRecommend', { name })}
+          onPress={() => navigate('ScheduleRecommend', { name, invitees })}
         />
       </ScrollView>
     </View>
