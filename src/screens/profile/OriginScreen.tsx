@@ -1,4 +1,4 @@
-import { Search } from 'lucide-react-native';
+import { ChevronDown, Search } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -28,9 +28,8 @@ import { fontFamily, weight } from '../../theme/typography';
  * body x11.5 y82 w197 / 검색창 y118 h26 / 지도 y154 h186 / 선택 카드 y347 h51 /
  * 저장 버튼 y405 h28
  *
- * 지도 렌더링은 아직 없다. Figma 원본도 회색 격자 플레이스홀더이고,
- * 지도 SDK 는 플랫폼 분기가 필요해 다음 단계로 미뤘다. 대신 Tmap POI 검색으로
- * 좌표를 확보해 `start_latitude/longitude` 까지 저장한다.
+ * Figma 원본의 지도 자리는 회색 격자 플레이스홀더였지만, Tmap 지도를 실제로 띄운다.
+ * 검색으로 고른 장소의 좌표를 `start_latitude/longitude` 까지 저장한다.
  */
 export default function OriginScreen() {
   const insets = useSafeAreaInsets();
@@ -42,6 +41,7 @@ export default function OriginScreen() {
   const [picked, setPicked] = useState<Place | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [resultsOpen, setResultsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
@@ -76,10 +76,12 @@ export default function OriginScreen() {
       const found = await searchPlaces(keyword);
       if (id !== requestId.current) return;
       setResults(found);
+      setResultsOpen(found.length > 0);
       if (found.length === 0) setSearchError('검색 결과가 없어요.');
     } catch (error) {
       if (id !== requestId.current) return;
       setResults([]);
+      setResultsOpen(false);
       setSearchError(error instanceof Error ? error.message : '검색에 실패했어요.');
     } finally {
       if (id === requestId.current) setSearching(false);
@@ -146,25 +148,36 @@ export default function OriginScreen() {
 
         {results.length > 0 ? (
           <View style={styles.results}>
-            {results.map((place) => {
-              const selected = picked?.lat === place.lat && picked?.lng === place.lng;
-              return (
-                <Pressable
-                  key={place.id}
-                  style={[styles.result, selected && styles.resultSelected]}
-                  onPress={() => {
-                    setPicked(place);
-                    setQuery(place.name);
-                  }}>
-                  <Text style={styles.resultName} numberOfLines={1}>
-                    {place.name}
-                  </Text>
-                  <Text style={styles.resultAddress} numberOfLines={1}>
-                    {place.address}
-                  </Text>
-                </Pressable>
-              );
-            })}
+            <Pressable
+              style={styles.resultsHeader}
+              onPress={() => setResultsOpen((open) => !open)}>
+              <Text style={styles.resultsTitle}>검색 결과 {results.length}건</Text>
+              <View style={resultsOpen ? styles.chevronOpen : undefined}>
+                <ChevronDown size={s(9)} color={colors.primary} strokeWidth={2.5} />
+              </View>
+            </Pressable>
+
+            {resultsOpen
+              ? results.map((place) => {
+                  const selected = picked?.lat === place.lat && picked?.lng === place.lng;
+                  return (
+                    <Pressable
+                      key={place.id}
+                      style={[styles.result, selected && styles.resultSelected]}
+                      onPress={() => {
+                        setPicked(place);
+                        setQuery(place.name);
+                      }}>
+                      <Text style={styles.resultName} numberOfLines={1}>
+                        {place.name}
+                      </Text>
+                      <Text style={styles.resultAddress} numberOfLines={1}>
+                        {place.address}
+                      </Text>
+                    </Pressable>
+                  );
+                })
+              : null}
           </View>
         ) : null}
 
@@ -264,19 +277,35 @@ const styles = StyleSheet.create({
     borderRadius: s(8),
     backgroundColor: colors.card,
     paddingHorizontal: s(9),
-    paddingVertical: s(4),
+    paddingBottom: s(4),
+  },
+  resultsHeader: {
+    height: s(24),
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  resultsTitle: {
+    flex: 1,
+    fontFamily: fontFamily.body,
+    fontSize: fs(7),
+    lineHeight: fs(10),
+    fontWeight: weight.bold,
+    color: colors.primary,
+  },
+  chevronOpen: {
+    transform: [{ rotate: '180deg' }],
   },
   result: {
     paddingVertical: s(7),
-    borderBottomWidth: s(0.6),
-    borderBottomColor: colors.border,
+    borderTopWidth: s(0.6),
+    borderTopColor: colors.border,
   },
   resultSelected: {
     backgroundColor: '#FFF5EB',
     borderRadius: s(6),
     paddingHorizontal: s(6),
     marginHorizontal: s(-6),
-    borderBottomColor: 'transparent',
+    borderTopColor: 'transparent',
   },
   resultName: {
     fontFamily: fontFamily.body,
@@ -297,6 +326,9 @@ const styles = StyleSheet.create({
     marginTop: s(10),
     height: s(186),
     borderRadius: s(8),
+    // 지도 타일이 카드 배경과 붙어 보여 경계를 얇게 그어 준다
+    borderWidth: s(0.8),
+    borderColor: colors.primary,
     backgroundColor: '#E8EBE6',
     overflow: 'hidden',
   },
