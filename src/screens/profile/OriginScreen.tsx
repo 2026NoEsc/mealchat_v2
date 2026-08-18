@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppHeader from '../../components/AppHeader';
+import TmapMap from '../../components/TmapMap';
 import { CompleteButton } from '../../components/ui/Button';
 import { saveStartLocation } from '../../lib/profile';
 import { searchPlaces, type Place } from '../../lib/tmap';
@@ -137,6 +138,12 @@ export default function OriginScreen() {
 
         {searchError ? <Text style={styles.searchError}>{searchError}</Text> : null}
 
+        <View style={styles.map}>
+          <TmapMap
+            marker={picked ? { lat: picked.lat, lng: picked.lng, label: picked.name } : null}
+          />
+        </View>
+
         {results.length > 0 ? (
           <View style={styles.results}>
             {results.map((place) => {
@@ -159,19 +166,7 @@ export default function OriginScreen() {
               );
             })}
           </View>
-        ) : (
-          /* Figma 원본과 동일한 격자 플레이스홀더 */
-          <View style={styles.map}>
-            <View style={[styles.gridLine, styles.gridV]} />
-            <View style={[styles.gridLine, styles.gridH]} />
-            <View style={styles.pin}>
-              <Text style={styles.pinIcon}>📍</Text>
-              <View style={styles.pinPill}>
-                <Text style={styles.pinText}>지도는 준비 중이에요</Text>
-              </View>
-            </View>
-          </View>
-        )}
+        ) : null}
 
         <View style={styles.card}>
           <Text style={styles.cardLabel}>선택한 위치</Text>
@@ -264,9 +259,8 @@ const styles = StyleSheet.create({
     color: colors.danger,
   },
   results: {
-    // 지도 자리를 그대로 쓴다 (y154 h186)
-    marginTop: s(10),
-    minHeight: s(186),
+    // 지도 아래에 붙는 목록 — 높이는 항목 수에 맡긴다
+    marginTop: s(7),
     borderRadius: s(8),
     backgroundColor: colors.card,
     paddingHorizontal: s(9),
@@ -305,51 +299,6 @@ const styles = StyleSheet.create({
     borderRadius: s(8),
     backgroundColor: '#E8EBE6',
     overflow: 'hidden',
-  },
-  gridLine: {
-    position: 'absolute',
-    backgroundColor: '#DADDD7',
-  },
-  gridV: {
-    left: '49.5%',
-    top: 0,
-    bottom: 0,
-    width: s(1.5),
-  },
-  gridH: {
-    top: '49.5%',
-    left: 0,
-    right: 0,
-    height: s(1.5),
-  },
-  pin: {
-    position: 'absolute',
-    left: '50%',
-    top: '50%',
-    marginLeft: s(-22),
-    marginTop: s(-18.5),
-    width: s(44),
-    alignItems: 'center',
-  },
-  pinIcon: {
-    fontSize: fs(14),
-    lineHeight: fs(20),
-  },
-  pinPill: {
-    marginTop: s(2),
-    height: s(15),
-    paddingHorizontal: s(6),
-    borderRadius: s(8),
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pinText: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(9),
-    fontWeight: weight.bold,
-    color: colors.textOnAccent,
   },
   card: {
     // y347 h51
