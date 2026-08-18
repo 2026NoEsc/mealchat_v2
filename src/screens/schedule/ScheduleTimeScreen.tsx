@@ -1,62 +1,118 @@
-import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppHeader from '../../components/AppHeader';
 import { CompleteButton } from '../../components/ui/Button';
-import { weekdayOf } from '../../lib/calendar';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
 import ScheduleStepHeader from './ScheduleStepHeader';
+import type {
+  CandidateSlot,
+  SchedulePlace,
+} from './scheduleTypes';
 
-/** 요일은 실제 달력에서 파생한다 ([lib/calendar](../../lib/calendar.ts)) */
-const DAYS = [13, 14, 15, 16, 17].map((day) => ({ day, label: weekdayOf(day) }));
+const HOURS = [
+  11,
+  12,
+  13,
+  14,
+  15,
+  16,
+  17,
+  18,
+  19,
+  20,
+];
 
-const HOURS = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
-
-/** 마지막 구간을 닫기 위한 경계값 — 칩 라벨의 끝 시각으로도 쓰인다 */
 const END_HOUR = HOURS[HOURS.length - 1] + 1;
 
-const key = (dayIndex: number, hour: number) => `${dayIndex}-${hour}`;
+type DayItem = {
+  date: string;
+  day: number;
+  month: number;
+  label: string;
+};
 
-/** Figma 기본 선택 상태 — 15일 18~20, 16일 12~14, 17일 19~21 */
-const INITIAL = new Set([
-  key(2, 18), key(2, 19),
-  key(3, 12), key(3, 13),
-  key(4, 19), key(4, 20),
-]);
+type Params = {
+  name?: string;
+  invitees?: string[];
+  place?: SchedulePlace;
+};
 
-/**
- * Figma 일정 조율/일정 추가/시간 선택 (160:733) — STEP 2
- * 요일 × 시간 그리드를 탭해 가능한 시간을 표시하고 AI 추천으로 넘어간다.
- */
 export default function ScheduleTimeScreen() {
   const insets = useSafeAreaInsets();
   const { navigate, current } = useNavigation();
-  const params = current.params as { name?: string; invitees?: string[] } | undefined;
-  const name = params?.name;
-  const invitees = params?.invitees;
-  const [picked, setPicked] = useState<Set<string>>(INITIAL);
 
-  const toggle = (dayIndex: number, hour: number) =>
+  const params = current.params as Params | undefined;
+
+  const name = params?.name ?? '';
+  const invitees = params?.invitees ?? [];
+  const place = params?.place;
+
+  const days = useMemo(() => buildNextDays(5), []);
+
+  const [picked, setPicked] = useState<Set<string>>(
+    () => new Set(),
+  );
+
+  const toggle = (date: string, hour: number) => {
+    if (isPastCell(date, hour)) {
+      return;
+    }
+
     setPicked((prev) => {
       const next = new Set(prev);
-      const k = key(dayIndex, hour);
-      if (next.has(k)) next.delete(k);
-      else next.add(k);
+      const k = cellKey(date, hour);
+
+      if (next.has(k)) {
+        next.delete(k);
+      } else {
+        next.add(k);
+      }
+
       return next;
     });
+  };
 
-  const chips = toChips(picked);
+  const slots = toSlots(picked, days);
+
+  const goRecommend = () => {
+    if (!place || slots.length === 0) {
+      return;
+    }
+
+    navigate('ScheduleRecommend', {
+      name,
+      invitees,
+      place,
+      slots,
+    });
+  };
 
   return (
     <View style={styles.screen}>
-      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
+      <View
+        style={{
+          height: insets.top,
+          backgroundColor: colors.surface,
+        }}
+      />
+
       <AppHeader />
 
-      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.body}
+        showsVerticalScrollIndicator={false}
+      >
         <ScheduleStepHeader
           step={2}
           title="언제 만날까요?"
@@ -66,10 +122,17 @@ export default function ScheduleTimeScreen() {
         <View style={styles.card}>
           <View style={styles.headRow}>
             <View style={styles.hourLabel} />
-            {DAYS.map((d) => (
-              <View key={d.day} style={styles.col}>
-                <Text style={[styles.headText, d.label === '일' && styles.sunday]}>
-                  {d.day}·{d.label}
+
+            {days.map((day) => (
+              <View key={day.date} style={styles.col}>
+                <Text
+                  style={[
+                    styles.headText,
+                    day.label === '일' &&
+                      styles.sunday,
+                  ]}
+                >
+                  {day.month}/{day.day}·{day.label}
                 </Text>
               </View>
             ))}
@@ -77,14 +140,38 @@ export default function ScheduleTimeScreen() {
 
           {HOURS.map((hour) => (
             <View key={hour} style={styles.gridRow}>
-              <Text style={styles.hourLabel}>{hour}</Text>
-              {DAYS.map((d, i) => {
-                const on = picked.has(key(i, hour));
+              <Text style={styles.hourLabel}>
+                {hour}
+              </Text>
+
+              {days.map((day) => {
+                const k = cellKey(
+                  day.date,
+                  hour,
+                );
+
+                const on = picked.has(k);
+                const disabled = isPastCell(
+                  day.date,
+                  hour,
+                );
+
                 return (
-                  <View key={d.day} style={styles.col}>
+                  <View
+                    key={day.date}
+                    style={styles.col}
+                  >
                     <Pressable
-                      style={[styles.cell, on && styles.cellOn]}
-                      onPress={() => toggle(i, hour)}
+                      disabled={disabled}
+                      style={[
+                        styles.cell,
+                        on && styles.cellOn,
+                        disabled &&
+                          styles.cellDisabled,
+                      ]}
+                      onPress={() =>
+                        toggle(day.date, hour)
+                      }
                     />
                   </View>
                 );
@@ -93,46 +180,165 @@ export default function ScheduleTimeScreen() {
           ))}
         </View>
 
-        <Text style={styles.pickedTitle}>선택한 시간 {chips.length}개</Text>
+        <Text style={styles.pickedTitle}>
+          선택한 시간 {slots.length}개
+        </Text>
 
         <View style={styles.chipRow}>
-          {chips.map((chip) => (
-            <View key={chip} style={styles.chip}>
-              <Text style={styles.chipText}>{chip}</Text>
-            </View>
-          ))}
+          {slots.length === 0 ? (
+            <Text style={styles.emptyText}>
+              아직 선택한 시간이 없어요.
+            </Text>
+          ) : (
+            slots.map((slot) => (
+              <View
+                key={slot.id}
+                style={styles.chip}
+              >
+                <Text style={styles.chipText}>
+                  {slot.label}
+                </Text>
+              </View>
+            ))
+          )}
         </View>
 
         <CompleteButton
           label="AI 추천 받기"
           showNext
-          disabled={chips.length === 0}
+          disabled={
+            slots.length === 0 || !place
+          }
           style={styles.cta}
-          onPress={() => navigate('ScheduleRecommend', { name, invitees })}
+          onPress={goRecommend}
         />
       </ScrollView>
     </View>
   );
 }
 
-/** 선택된 셀을 요일별 연속 구간으로 묶어 "15(금)18~20" 형태의 칩으로 만든다 */
-function toChips(picked: Set<string>) {
-  const chips: string[] = [];
+function cellKey(
+  date: string,
+  hour: number,
+) {
+  return `${date}-${hour}`;
+}
 
-  DAYS.forEach((d, dayIndex) => {
+function buildNextDays(
+  count: number,
+): DayItem[] {
+  const result: DayItem[] = [];
+  const base = new Date();
+
+  base.setHours(0, 0, 0, 0);
+
+  for (let i = 0; i < count; i += 1) {
+    const date = new Date(base);
+    date.setDate(base.getDate() + i);
+
+    result.push({
+      date: toLocalDateKey(date),
+      day: date.getDate(),
+      month: date.getMonth() + 1,
+      label: weekdayLabel(date.getDay()),
+    });
+  }
+
+  return result;
+}
+
+function weekdayLabel(
+  day: number,
+) {
+  return [
+    '일',
+    '월',
+    '화',
+    '수',
+    '목',
+    '금',
+    '토',
+  ][day];
+}
+
+function toLocalDateKey(
+  date: Date,
+) {
+  const year = date.getFullYear();
+
+  const month = String(
+    date.getMonth() + 1,
+  ).padStart(2, '0');
+
+  const day = String(
+    date.getDate(),
+  ).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+}
+
+function hourText(
+  hour: number,
+) {
+  return `${String(hour).padStart(2, '0')}:00`;
+}
+
+function isPastCell(
+  date: string,
+  hour: number,
+) {
+  const start = new Date(
+    `${date}T${hourText(hour)}:00`,
+  );
+
+  return start.getTime() <= Date.now();
+}
+
+function toSlots(
+  picked: Set<string>,
+  days: DayItem[],
+): CandidateSlot[] {
+  const slots: CandidateSlot[] = [];
+
+  days.forEach((day) => {
     let start: number | null = null;
 
-    HOURS.concat(END_HOUR).forEach((hour) => {
-      const on = picked.has(key(dayIndex, hour));
-      if (on && start === null) start = hour;
-      if (!on && start !== null) {
-        chips.push(`${d.day}(${d.label})${start}~${hour}`);
-        start = null;
-      }
-    });
+    HOURS.concat(END_HOUR).forEach(
+      (hour) => {
+        const on =
+          hour !== END_HOUR &&
+          picked.has(
+            cellKey(day.date, hour),
+          );
+
+        if (on && start === null) {
+          start = hour;
+        }
+
+        if (!on && start !== null) {
+          const end = hour;
+
+          const startTime =
+            hourText(start);
+
+          const endTime =
+            hourText(end);
+
+          slots.push({
+            id: `${day.date}-${startTime}-${endTime}`,
+            date: day.date,
+            startTime,
+            endTime,
+            label: `${day.month}/${day.day}(${day.label}) ${startTime}~${endTime}`,
+          });
+
+          start = null;
+        }
+      },
+    );
   });
 
-  return chips;
+  return slots;
 }
 
 const styles = StyleSheet.create({
@@ -140,9 +346,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.surfaceSunken,
   },
+
   body: {
     paddingBottom: s(16),
   },
+
   card: {
     marginTop: s(10),
     marginHorizontal: s(11.5),
@@ -151,16 +359,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: s(8),
     paddingVertical: s(8),
   },
+
   headRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: s(4),
   },
+
   gridRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: s(2),
   },
+
   hourLabel: {
     width: s(14),
     fontFamily: fontFamily.body,
@@ -168,29 +379,39 @@ const styles = StyleSheet.create({
     lineHeight: fs(8),
     color: colors.textMuted,
   },
+
   col: {
     flex: 1,
     paddingHorizontal: s(1.5),
   },
+
   headText: {
     textAlign: 'center',
     fontFamily: fontFamily.body,
-    fontSize: fs(6),
+    fontSize: fs(5.5),
     lineHeight: fs(8),
     fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
+
   sunday: {
     color: colors.primary,
   },
+
   cell: {
     height: s(13),
     borderRadius: s(4),
     backgroundColor: colors.surface,
   },
+
   cellOn: {
     backgroundColor: colors.primary,
   },
+
+  cellDisabled: {
+    opacity: 0.25,
+  },
+
   pickedTitle: {
     marginTop: s(10),
     marginLeft: s(11.5),
@@ -200,6 +421,7 @@ const styles = StyleSheet.create({
     fontWeight: weight.bold,
     color: colors.textPrimary,
   },
+
   chipRow: {
     marginTop: s(5),
     marginHorizontal: s(11.5),
@@ -207,12 +429,14 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: s(4),
   },
+
   chip: {
     paddingHorizontal: s(6),
     paddingVertical: s(3),
     borderRadius: s(5),
     backgroundColor: colors.primarySoft,
   },
+
   chipText: {
     fontFamily: fontFamily.body,
     fontSize: fs(6),
@@ -220,6 +444,14 @@ const styles = StyleSheet.create({
     fontWeight: weight.semibold,
     color: colors.primary,
   },
+
+  emptyText: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(6.5),
+    lineHeight: fs(9),
+    color: colors.textMuted,
+  },
+
   cta: {
     marginTop: s(14),
     marginHorizontal: s(11.5),
