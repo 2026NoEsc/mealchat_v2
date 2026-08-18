@@ -26,6 +26,74 @@ import type {
   ScheduleRecommendResponse,
 } from './scheduleTypes';
 
+/*
+ * Edge Function 은 최악의 경우 20 초짜리 시도를 세 번 하고 사이에 백오프가 붙어
+ * 약 61 초까지 간다. 그보다 짧게 끊으면 서버는 아직 답을 만드는 중인데 앱만
+ * 포기하는 꼴이라 여유를 두고 70 초로 잡는다. 이 값을 주지 않으면 안드로이드는
+ * OkHttp 타임아웃이 0(무제한)이라 스피너가 영영 돌 수 있다.
+ */
+const INVOKE_TIMEOUT_MS = 70_000;
+
+const GENERIC_FAILURE =
+  "AI 추천을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.";
+
+/*
+ * functions-js 는 함수가 2xx 가 아니면 FunctionsHttpError 를 돌려주는데 message 가
+ * 'Edge Function returned a non-2xx status code' 로 고정이라, 그대로 쓰면 한국어
+ * 화면에 영어 내부 문구가 그대로 뜬다. 실제 사유는 응답 본문의 error 에 있다.
+ * Response 인지 instanceof 로 보지 않는 것은 RN 과 웹의 전역 구현이 달라서다.
+ */
+async function describeInvokeError(
+  error: unknown,
+): Promise<string> {
+  const context = (
+    error as { context?: unknown } | null
+  )?.context;
+
+  if (
+    context &&
+    typeof (context as Response).json ===
+      "function"
+  ) {
+    try {
+      const body = await (
+        context as Response
+      ).json();
+
+      const message = (
+        body as { error?: unknown }
+      )?.error;
+
+      if (
+        typeof message === "string" &&
+        message.trim()
+      ) {
+        return message;
+      }
+    } catch {
+      // 본문이 JSON 이 아니면 아래 기본 문구로 넘어간다
+    }
+
+    return GENERIC_FAILURE;
+  }
+
+  // 타임아웃은 AbortController 로 끊기므로 fetch 실패로 감싸여 들어온다
+  const aborted =
+    context instanceof Error &&
+    (context.name === "AbortError" ||
+      context.name === "TimeoutError");
+
+  if (aborted) {
+    return "응답이 너무 오래 걸려 중단했어요. 잠시 후 다시 시도해 주세요.";
+  }
+
+  if (error instanceof Error) {
+    return error.message || GENERIC_FAILURE;
+  }
+
+  return GENERIC_FAILURE;
+}
+
 type Params = {
   name?: string;
   invitees?: string[];
@@ -68,6 +136,9 @@ export default function ScheduleRecommendScreen() {
   const [errorMessage, setErrorMessage] =
     useState<string | null>(null);
 
+  const [elapsed, setElapsed] =
+    useState(0);
+
   const participantCount =
     invitees.length + 1;
 
@@ -106,6 +177,8 @@ export default function ScheduleRecommendScreen() {
                 place,
                 candidateSlots: slots,
               },
+
+              timeout: INVOKE_TIMEOUT_MS,
             },
           );
 
@@ -184,14 +257,29 @@ export default function ScheduleRecommendScreen() {
         setPicks([]);
 
         setErrorMessage(
-          error instanceof Error
-            ? error.message
-            : 'AI 추천을 불러오지 못했습니다.',
+          await describeInvokeError(error),
         );
       } finally {
         setLoading(false);
       }
     };
+
+  /*
+   * 추천 한 번에 20 초가 걸린 적이 있다. 그동안 스피너만 돌면 멈춘 것과 구분되지
+   * 않아 사용자가 화면을 벗어난다. 초를 세어 살아 있다는 것을 보여 준다.
+   */
+  useEffect(() => {
+    if (!loading) return;
+
+    setElapsed(0);
+
+    const timer = setInterval(
+      () => setElapsed((prev) => prev + 1),
+      1000,
+    );
+
+    return () => clearInterval(timer);
+  }, [loading]);
 
   useEffect(() => {
     void loadRecommendations();
@@ -247,6 +335,13 @@ export default function ScheduleRecommendScreen() {
             <Text style={styles.stateText}>
               가능한 시간을 분석하고 있어요.
             </Text>
+
+            {elapsed >= 5 ? (
+              <Text style={styles.stateHint}>
+                {elapsed}초째 기다리는 중이에요.
+                최대 1분까지 걸릴 수 있어요.
+              </Text>
+            ) : null}
           </View>
         ) : errorMessage ? (
           <View style={styles.stateBox}>
@@ -444,6 +539,14 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.body,
     fontSize: fs(7),
     lineHeight: fs(10),
+    color: colors.textMuted,
+  },
+  stateHint: {
+    marginTop: s(4),
+    textAlign: "center",
+    fontFamily: fontFamily.body,
+    fontSize: fs(6),
+    lineHeight: fs(9),
     color: colors.textMuted,
   },
 

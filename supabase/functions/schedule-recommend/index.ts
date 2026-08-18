@@ -63,6 +63,9 @@ type ModelRecommendation = {
  */
 const RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
 const MAX_ATTEMPTS = 3;
+// 응답 없이 매달린 호출은 실패로 치지 않아 재시도조차 못 하고 그대로 멈춘다.
+// 성공한 호출이 20 초를 넘긴 적은 없어 그 선에서 끊고 다음 시도로 넘긴다.
+const ATTEMPT_TIMEOUT_MS = 20_000;
 
 async function callGeminiWithRetry(
   url: string,
@@ -73,7 +76,10 @@ async function callGeminiWithRetry(
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
-      const response = await fetch(url, init);
+      const response = await fetch(url, {
+        ...init,
+        signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS),
+      });
       const data = await response.json();
 
       if (response.ok || !RETRY_STATUSES.has(response.status)) {
