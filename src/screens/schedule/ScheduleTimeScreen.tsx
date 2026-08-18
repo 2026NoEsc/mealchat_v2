@@ -11,36 +11,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppHeader from '../../components/AppHeader';
 import { CompleteButton } from '../../components/ui/Button';
 import { useNavigation } from '../../navigation/NavigationContext';
+import {
+  buildNextDays,
+  cellKey,
+  HOURS,
+  isPastCell,
+  toSlots,
+} from '../../lib/scheduleSlots';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
 import ScheduleStepHeader from './ScheduleStepHeader';
-import type {
-  CandidateSlot,
-  SchedulePlace,
-} from './scheduleTypes';
-
-const HOURS = [
-  11,
-  12,
-  13,
-  14,
-  15,
-  16,
-  17,
-  18,
-  19,
-  20,
-];
-
-const END_HOUR = HOURS[HOURS.length - 1] + 1;
-
-type DayItem = {
-  date: string;
-  day: number;
-  month: number;
-  label: string;
-};
+import type { SchedulePlace } from './scheduleTypes';
 
 type Params = {
   name?: string;
@@ -215,130 +197,6 @@ export default function ScheduleTimeScreen() {
       </ScrollView>
     </View>
   );
-}
-
-function cellKey(
-  date: string,
-  hour: number,
-) {
-  return `${date}-${hour}`;
-}
-
-function buildNextDays(
-  count: number,
-): DayItem[] {
-  const result: DayItem[] = [];
-  const base = new Date();
-
-  base.setHours(0, 0, 0, 0);
-
-  for (let i = 0; i < count; i += 1) {
-    const date = new Date(base);
-    date.setDate(base.getDate() + i);
-
-    result.push({
-      date: toLocalDateKey(date),
-      day: date.getDate(),
-      month: date.getMonth() + 1,
-      label: weekdayLabel(date.getDay()),
-    });
-  }
-
-  return result;
-}
-
-function weekdayLabel(
-  day: number,
-) {
-  return [
-    '일',
-    '월',
-    '화',
-    '수',
-    '목',
-    '금',
-    '토',
-  ][day];
-}
-
-function toLocalDateKey(
-  date: Date,
-) {
-  const year = date.getFullYear();
-
-  const month = String(
-    date.getMonth() + 1,
-  ).padStart(2, '0');
-
-  const day = String(
-    date.getDate(),
-  ).padStart(2, '0');
-
-  return `${year}-${month}-${day}`;
-}
-
-function hourText(
-  hour: number,
-) {
-  return `${String(hour).padStart(2, '0')}:00`;
-}
-
-function isPastCell(
-  date: string,
-  hour: number,
-) {
-  const start = new Date(
-    `${date}T${hourText(hour)}:00`,
-  );
-
-  return start.getTime() <= Date.now();
-}
-
-function toSlots(
-  picked: Set<string>,
-  days: DayItem[],
-): CandidateSlot[] {
-  const slots: CandidateSlot[] = [];
-
-  days.forEach((day) => {
-    let start: number | null = null;
-
-    HOURS.concat(END_HOUR).forEach(
-      (hour) => {
-        const on =
-          hour !== END_HOUR &&
-          picked.has(
-            cellKey(day.date, hour),
-          );
-
-        if (on && start === null) {
-          start = hour;
-        }
-
-        if (!on && start !== null) {
-          const end = hour;
-
-          const startTime =
-            hourText(start);
-
-          const endTime =
-            hourText(end);
-
-          slots.push({
-            id: `${day.date}-${startTime}-${endTime}`,
-            date: day.date,
-            startTime,
-            endTime,
-            label: `${day.month}/${day.day}(${day.label}) ${startTime}~${endTime}`,
-          });
-
-          start = null;
-        }
-      },
-    );
-  });
-
-  return slots;
 }
 
 const styles = StyleSheet.create({

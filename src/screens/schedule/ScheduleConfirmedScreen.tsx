@@ -23,6 +23,7 @@ import {
   inviteFriendToRoom,
 } from '../../lib/rooms';
 import { useNavigation } from '../../navigation/NavigationContext';
+import { formatSlotDate } from '../../lib/scheduleSlots';
 import { fs, s } from '../../theme/scale';
 import { colors, shadows } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
@@ -204,7 +205,7 @@ export default function ScheduleConfirmedScreen() {
                   strokeWidth={2}
                 />
               }
-              text={formatSlot(pick)}
+              text={formatSlotDate(pick.slot)}
             />
 
             <InfoRow
@@ -280,23 +281,6 @@ export default function ScheduleConfirmedScreen() {
         />
       </ScrollView>
     </View>
-  );
-}
-
-function formatSlot(
-  pick: RecommendationPick,
-) {
-  const [
-    year,
-    month,
-    day,
-  ] = pick.slot.date
-    .split('-')
-    .map(Number);
-
-  return (
-    `${year}년 ${month}월 ${day}일 ` +
-    `${pick.slot.startTime}~${pick.slot.endTime}`
   );
 }
 

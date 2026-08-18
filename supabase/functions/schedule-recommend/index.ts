@@ -53,6 +53,51 @@ type ModelRecommendation = {
   reason: string;
 };
 
+/**
+ * Gemini 호출. 일시적 실패만 다시 시도한다.
+ *
+ * 503(과부하)과 429(속도 제한), 그리고 네트워크 오류는 잠시 뒤 대개 성공한다.
+ * 그대로 502 로 돌려주면 사용자는 아무 잘못 없이 "추천 실패"를 보게 된다.
+ *
+ * 400 같은 요청 자체의 문제는 다시 보내도 같은 답이라 즉시 포기한다.
+ */
+const RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = 3;
+
+async function callGeminiWithRetry(
+  url: string,
+  init: RequestInit,
+  // deno 의 json() 은 any 라, 호출부가 기존처럼 옵셔널 체이닝으로 읽게 그대로 흘린다
+): Promise<{ response: Response; data: any }> {
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(url, init);
+      const data = await response.json();
+
+      if (response.ok || !RETRY_STATUSES.has(response.status)) {
+        return { response, data };
+      }
+
+      if (attempt === MAX_ATTEMPTS) return { response, data };
+
+      console.warn(
+        `Gemini ${response.status}, retrying (${attempt}/${MAX_ATTEMPTS})`,
+      );
+    } catch (error) {
+      lastError = error;
+      if (attempt === MAX_ATTEMPTS) throw error;
+      console.warn(`Gemini fetch failed, retrying (${attempt}/${MAX_ATTEMPTS})`);
+    }
+
+    // 400ms, 800ms — 사용자가 기다리는 요청이라 길게 끌지 않는다
+    await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+  }
+
+  throw lastError ?? new Error("Gemini request failed");
+}
+
 export default {
   fetch: withSupabase(
     { auth: "user" },
@@ -314,8 +359,8 @@ export default {
          * Gemini에는 개인 일정 세부 데이터가 아니라
          * 이미 집계된 후보별 숫자만 전송한다.
          */
-        const geminiResponse =
-          await fetch(
+        const { response: geminiResponse, data: geminiData } =
+          await callGeminiWithRetry(
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent",
             {
               method: "POST",
@@ -448,9 +493,6 @@ export default {
               }),
             },
           );
-
-        const geminiData =
-          await geminiResponse.json();
 
         if (
           !geminiResponse.ok
