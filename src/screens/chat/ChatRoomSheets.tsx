@@ -14,7 +14,7 @@ import {
 import { useAuth } from '../../auth/AuthProvider';
 import BottomSheet from '../../components/BottomSheet';
 import { CompleteButton } from '../../components/ui/Button';
-import { MONTH, weekdayOf } from '../../lib/calendar';
+
 import { formatAmount } from '../../lib/format';
 import {
   createRoomSettlement,
@@ -46,120 +46,6 @@ type SheetProps = {
 /* ------------------------------------------------------------------ 일정 조율 */
 
 /** 요일은 실제 달력에서 파생한다 ([lib/calendar](../../lib/calendar.ts)) */
-const DAYS = [14, 15, 16, 17].map((day) => ({
-  day: String(day),
-  label: `${weekdayOf(day)}요일`,
-}));
-
-const SLOTS = [
-  { time: '11:30 – 12:30', count: 2 },
-  { time: '12:30 – 13:30', count: 4 },
-  { time: '13:30 – 14:30', count: 2 },
-];
-
-/** Figma 채팅/일정 패널 (553:408) */
-export function ScheduleSheet({ visible, onClose, onConfirm }: SheetProps) {
-  const [day, setDay] = useState(1);
-  const [slot, setSlot] = useState(1);
-
-  return (
-    <BottomSheet
-      visible={visible}
-      title="일정 조율"
-      subtitle="가능한 날짜와 시간을 선택해 주세요"
-      onClose={onClose}>
-      <View style={styles.dayRow}>
-        {DAYS.map((d, i) => (
-          <Pressable
-            key={d.day}
-            style={[styles.dayChip, i === day && styles.dayChipOn]}
-            onPress={() => setDay(i)}>
-            <Text style={[styles.dayNum, i === day && styles.accentText]}>{d.day}</Text>
-            <Text style={[styles.dayLabel, i === day && styles.accentText]}>{d.label}</Text>
-          </Pressable>
-        ))}
-      </View>
-
-      {SLOTS.map((s2, i) => (
-        <Pressable
-          key={s2.time}
-          style={[styles.slotRow, i === slot && styles.rowOn]}
-          onPress={() => setSlot(i)}>
-          <Text style={[styles.slotTime, i === slot && styles.accentText]}>{s2.time}</Text>
-          <Text style={[styles.slotCount, i === slot && styles.accentText]}>
-            {s2.count}명 가능
-          </Text>
-        </Pressable>
-      ))}
-
-      <CompleteButton
-        label="선택 완료"
-        showNext
-        style={styles.cta}
-        onPress={() => {
-          onConfirm(
-            `${MONTH}월 ${DAYS[day].day}일 (${DAYS[day].label[0]}) ${SLOTS[slot].time} 로 일정을 제안했어요`,
-          );
-          onClose();
-        }}
-      />
-    </BottomSheet>
-  );
-}
-
-/* ------------------------------------------------------------------ 메뉴 정하기 */
-
-const MENUS = [
-  { name: '칼국수', votes: [moa, ddori] },
-  { name: '국밥', votes: [dudu] },
-  { name: '버거', votes: [welling] },
-];
-
-/** Figma 채팅/메뉴 패널 (553:698) */
-export function MenuSheet({ visible, onClose, onConfirm }: SheetProps) {
-  const [picked, setPicked] = useState(0);
-
-  return (
-    <BottomSheet
-      visible={visible}
-      title="메뉴 정하기"
-      subtitle="먹고 싶은 메뉴에 투표해 주세요"
-      onClose={onClose}>
-      {MENUS.map((menu, i) => (
-        <Pressable
-          key={menu.name}
-          style={[styles.menuRow, i === picked && styles.rowOn]}
-          onPress={() => setPicked(i)}>
-          <Text style={[styles.menuName, i === picked && styles.accentText]}>{menu.name}</Text>
-
-          <View style={styles.voteStack}>
-            {menu.votes.map((src, vi) => (
-              <View key={vi} style={[styles.voteAvatar, vi > 0 && styles.voteOverlap]}>
-                <Image source={src} style={styles.voteImage} resizeMode="contain" />
-              </View>
-            ))}
-          </View>
-
-          <Text style={styles.voteCount}>{menu.votes.length}표</Text>
-        </Pressable>
-      ))}
-
-      <View style={styles.addRow}>
-        <Text style={styles.addText}>＋ 메뉴 직접 추가</Text>
-      </View>
-
-      <CompleteButton
-        label="선택하기"
-        style={styles.cta}
-        onPress={() => {
-          onConfirm(`오늘 메뉴는 '${MENUS[picked].name}' 로 정해졌어요`);
-          onClose();
-        }}
-      />
-    </BottomSheet>
-  );
-}
-
 /* ------------------------------------------------------------------ N빵 정산 */
 
 /** Figma 채팅/정산 패널 (553:727) */

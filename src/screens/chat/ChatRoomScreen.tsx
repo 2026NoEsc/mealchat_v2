@@ -24,8 +24,9 @@ import { useRoom, useRoomMessages } from '../../rooms/useMyRooms';
 import { fs, s } from '../../theme/scale';
 import { colors, shadows } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
-import { MembersSheet, MenuSheet, ScheduleSheet, SettlementSheet } from './ChatRoomSheets';
+import { MembersSheet, SettlementSheet } from './ChatRoomSheets';
 import EmoticonPanel, { findSticker } from './EmoticonPanel';
+import VotingSheet from './VotingSheet';
 
 /** Figma 채팅방 색상 — 말풍선 시간 / 날짜 구분선 / 시스템 말풍선 글자 */
 const TIME_GRAY = '#B4B2A8';
@@ -274,13 +275,25 @@ export default function ChatRoomScreen() {
         />
       ) : null}
 
-      <ScheduleSheet
+      <VotingSheet
         visible={sheet === 'schedule'}
+        roomId={roomId}
+        kind="time"
+        title="일정 조율"
+        subtitle="가능한 시간대에 투표해 주세요"
+        placeholder="예: 12:30 – 13:30"
+        confirmMessage={(label) => `${label} 로 일정을 제안했어요`}
         onClose={() => setSheet(null)}
         onConfirm={(text) => append({ kind: 'sys', text })}
       />
-      <MenuSheet
+      <VotingSheet
         visible={sheet === 'menu'}
+        roomId={roomId}
+        kind="menu"
+        title="메뉴 정하기"
+        subtitle="먹고 싶은 메뉴에 투표해 주세요"
+        placeholder="예: 칼국수"
+        confirmMessage={(label) => `오늘 메뉴는 '${label}' 로 정해졌어요`}
         onClose={() => setSheet(null)}
         onConfirm={(text) => append({ kind: 'sys', text })}
       />
