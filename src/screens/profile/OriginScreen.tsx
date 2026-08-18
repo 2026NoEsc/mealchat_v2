@@ -48,6 +48,8 @@ export default function OriginScreen() {
   /** 응답이 순서를 뒤바꿔 도착해도 마지막 입력의 결과만 반영한다 */
   const requestId = useRef(0);
 
+  const dropdownOpen = resultsOpen && results.length > 0;
+
   useEffect(() => {
     if (loaded || !bundle) return;
     const saved = bundle.privateProfile;
@@ -115,27 +117,68 @@ export default function OriginScreen() {
         <Text style={styles.title}>출발지 설정</Text>
         <Text style={styles.sub}>중간 지점 계산에 사용됩니다</Text>
 
-        <View style={styles.searchBox}>
-          <Search size={s(8)} color={colors.textMuted} strokeWidth={2.5} />
-          <TextInput
-            style={styles.searchInput}
-            value={query}
-            onChangeText={setQuery}
-            placeholder="주소 또는 장소 검색"
-            placeholderTextColor={colors.textMuted}
-            returnKeyType="search"
-            onSubmitEditing={() => void runSearch()}
-          />
-          <Pressable
-            style={styles.searchButton}
-            disabled={searching || !query.trim()}
-            onPress={() => void runSearch()}>
-            {searching ? (
-              <ActivityIndicator size="small" color={colors.textOnAccent} />
-            ) : (
-              <Text style={styles.searchButtonText}>검색</Text>
-            )}
-          </Pressable>
+        {/* 검색창과 그 아래로 펼쳐지는 결과를 한 덩어리로 묶는다 */}
+        <View style={styles.searchWrap}>
+          <View style={[styles.searchBox, dropdownOpen && styles.searchBoxOpen]}>
+            <Search size={s(8)} color={colors.textMuted} strokeWidth={2.5} />
+            <TextInput
+              style={styles.searchInput}
+              value={query}
+              onChangeText={setQuery}
+              placeholder="주소 또는 장소 검색"
+              placeholderTextColor={colors.textMuted}
+              returnKeyType="search"
+              onSubmitEditing={() => void runSearch()}
+            />
+            {results.length > 0 ? (
+              <Pressable
+                style={styles.toggleButton}
+                hitSlop={s(6)}
+                onPress={() => setResultsOpen((open) => !open)}>
+                <View style={resultsOpen ? styles.chevronOpen : undefined}>
+                  <ChevronDown size={s(9)} color={colors.textMuted} strokeWidth={2.5} />
+                </View>
+              </Pressable>
+            ) : null}
+            <Pressable
+              style={styles.searchButton}
+              disabled={searching || !query.trim()}
+              onPress={() => void runSearch()}>
+              {searching ? (
+                <ActivityIndicator size="small" color={colors.textOnAccent} />
+              ) : (
+                <Text style={styles.searchButtonText}>검색</Text>
+              )}
+            </Pressable>
+          </View>
+
+          {dropdownOpen ? (
+            <ScrollView
+              style={styles.dropdown}
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled">
+              {results.map((place) => {
+                const selected = picked?.lat === place.lat && picked?.lng === place.lng;
+                return (
+                  <Pressable
+                    key={place.id}
+                    style={[styles.result, selected && styles.resultSelected]}
+                    onPress={() => {
+                      setPicked(place);
+                      setQuery(place.name);
+                      setResultsOpen(false);
+                    }}>
+                    <Text style={styles.resultName} numberOfLines={1}>
+                      {place.name}
+                    </Text>
+                    <Text style={styles.resultAddress} numberOfLines={1}>
+                      {place.address}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          ) : null}
         </View>
 
         {searchError ? <Text style={styles.searchError}>{searchError}</Text> : null}
@@ -145,41 +188,6 @@ export default function OriginScreen() {
             marker={picked ? { lat: picked.lat, lng: picked.lng, label: picked.name } : null}
           />
         </View>
-
-        {results.length > 0 ? (
-          <View style={styles.results}>
-            <Pressable
-              style={styles.resultsHeader}
-              onPress={() => setResultsOpen((open) => !open)}>
-              <Text style={styles.resultsTitle}>검색 결과 {results.length}건</Text>
-              <View style={resultsOpen ? styles.chevronOpen : undefined}>
-                <ChevronDown size={s(9)} color={colors.primary} strokeWidth={2.5} />
-              </View>
-            </Pressable>
-
-            {resultsOpen
-              ? results.map((place) => {
-                  const selected = picked?.lat === place.lat && picked?.lng === place.lng;
-                  return (
-                    <Pressable
-                      key={place.id}
-                      style={[styles.result, selected && styles.resultSelected]}
-                      onPress={() => {
-                        setPicked(place);
-                        setQuery(place.name);
-                      }}>
-                      <Text style={styles.resultName} numberOfLines={1}>
-                        {place.name}
-                      </Text>
-                      <Text style={styles.resultAddress} numberOfLines={1}>
-                        {place.address}
-                      </Text>
-                    </Pressable>
-                  );
-                })
-              : null}
-          </View>
-        ) : null}
 
         <View style={styles.card}>
           <Text style={styles.cardLabel}>선택한 위치</Text>
@@ -228,9 +236,13 @@ const styles = StyleSheet.create({
     lineHeight: fs(9),
     color: colors.textMuted,
   },
+  searchWrap: {
+    // 드롭다운이 지도 위로 겹쳐야 해서 이 덩어리를 위로 띄운다
+    marginTop: s(7),
+    zIndex: 10,
+  },
   searchBox: {
     // y118 h26
-    marginTop: s(7),
     height: s(26),
     borderRadius: s(13),
     backgroundColor: colors.card,
@@ -239,6 +251,37 @@ const styles = StyleSheet.create({
     gap: s(6),
     paddingLeft: s(11),
     paddingRight: s(3),
+  },
+  searchBoxOpen: {
+    // 펼쳐지면 아래쪽 모서리를 펴서 드롭다운과 한 덩어리로 보이게 한다
+    borderBottomLeftRadius: s(4),
+    borderBottomRightRadius: s(4),
+  },
+  toggleButton: {
+    width: s(12),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dropdown: {
+    // 검색창 바로 아래에 붙어 지도 위를 덮는다
+    position: 'absolute',
+    top: s(26),
+    left: 0,
+    right: 0,
+    maxHeight: s(150),
+    marginTop: s(2),
+    borderRadius: s(10),
+    borderTopLeftRadius: s(4),
+    borderTopRightRadius: s(4),
+    backgroundColor: colors.card,
+    paddingHorizontal: s(9),
+    borderWidth: s(0.8),
+    borderColor: colors.primary,
+    shadowColor: '#A9A9A9',
+    shadowOffset: { width: 0, height: s(2) },
+    shadowOpacity: 0.3,
+    shadowRadius: s(4),
+    elevation: 8,
   },
   searchInput: {
     flex: 1,
@@ -270,27 +313,6 @@ const styles = StyleSheet.create({
     fontSize: fs(6.5),
     lineHeight: fs(9),
     color: colors.danger,
-  },
-  results: {
-    // 지도 아래에 붙는 목록 — 높이는 항목 수에 맡긴다
-    marginTop: s(7),
-    borderRadius: s(8),
-    backgroundColor: colors.card,
-    paddingHorizontal: s(9),
-    paddingBottom: s(4),
-  },
-  resultsHeader: {
-    height: s(24),
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  resultsTitle: {
-    flex: 1,
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    lineHeight: fs(10),
-    fontWeight: weight.bold,
-    color: colors.primary,
   },
   chevronOpen: {
     transform: [{ rotate: '180deg' }],
