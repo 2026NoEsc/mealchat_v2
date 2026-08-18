@@ -19,6 +19,9 @@ export type MyPrivateProfile = {
   personalData: Record<string, unknown>;
   privacySettings: Record<string, string>;
   startLocationName: string | null;
+  /** Tmap 검색으로 고른 장소에만 있다. 직접 입력한 주소는 좌표가 없다. */
+  startLat: number | null;
+  startLng: number | null;
 };
 
 export type MyProfileBundle = {
@@ -42,6 +45,8 @@ type PrivateRow = {
   personal_data: Record<string, unknown> | null;
   privacy_settings: Record<string, string> | null;
   start_location_name: string | null;
+  start_latitude: number | null;
+  start_longitude: number | null;
 };
 
 /**
@@ -62,7 +67,7 @@ export async function fetchMyProfile(userId: string): Promise<{
       .maybeSingle<ProfileRow>(),
     supabase
       .from('profile_private')
-      .select('bank_name, account_number, birth_date, tastes, personal_data, privacy_settings, start_location_name')
+      .select('bank_name, account_number, birth_date, tastes, personal_data, privacy_settings, start_location_name, start_latitude, start_longitude')
       .eq('id', userId)
       .maybeSingle<PrivateRow>(),
   ]);
@@ -95,6 +100,8 @@ export async function fetchMyProfile(userId: string): Promise<{
         personalData: privateRow?.personal_data ?? {},
         privacySettings: privateRow?.privacy_settings ?? {},
         startLocationName: privateRow?.start_location_name ?? null,
+        startLat: privateRow?.start_latitude ?? null,
+        startLng: privateRow?.start_longitude ?? null,
       },
     },
     error: null,
@@ -154,14 +161,25 @@ export async function savePrivacySettings(
   return error;
 }
 
-/** 출발지. 좌표는 아직 검색 수단이 없어 이름만 저장한다. */
+/**
+ * 출발지.
+ *
+ * 좌표는 Tmap 검색에서 고른 장소에만 있다. 직접 입력한 문자열은 좌표를 만들 수
+ * 없으므로 null 로 지운다 — 이름만 바뀌었는데 예전 좌표가 남아 있으면 중간 지점
+ * 계산이 엉뚱한 곳을 가리킨다.
+ */
 export async function saveStartLocation(
   userId: string,
   locationName: string,
+  coords?: { lat: number; lng: number } | null,
 ): Promise<Error | null> {
   const { error } = await supabase
     .from('profile_private')
-    .update({ start_location_name: locationName.trim() || null })
+    .update({
+      start_location_name: locationName.trim() || null,
+      start_latitude: coords?.lat ?? null,
+      start_longitude: coords?.lng ?? null,
+    })
     .eq('id', userId);
   return error;
 }

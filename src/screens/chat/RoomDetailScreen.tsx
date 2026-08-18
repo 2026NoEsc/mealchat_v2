@@ -34,7 +34,7 @@ export default function RoomDetailScreen() {
   const leave = async () => {
     if (!roomId || !user?.id) return;
     setLeaving(true);
-    const error = await leaveRoom(roomId, user.id);
+    const error = await leaveRoom(roomId);
     setLeaving(false);
 
     if (error) {
@@ -104,7 +104,7 @@ export default function RoomDetailScreen() {
                   </Text>
                 </View>
                 <Text style={styles.memberName}>{member.name}</Text>
-                {/* 방장 여부는 rooms.owner_id 가 알려주는데 목록에는 싣지 않는다 */}
+                {/* 방장 개념이 없다 — 나와 남만 구분한다 */}
                 <Text style={[styles.memberRole, mine && styles.memberRoleOwner]}>
                   {mine ? '나' : '메이트'}
                 </Text>

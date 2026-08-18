@@ -74,7 +74,7 @@ function toParticipant(row: ParticipantRow): RoomParticipant {
 
 /**
  * 내가 속한 방만 돌아온다. 필터를 쓰지 않는 이유는 rooms 의 select 정책이
- * 이미 owner 이거나 참가자인 방으로 제한하기 때문이다. 참가자·메시지 임베드도
+ * 이미 참가자인 방으로 제한하기 때문이다. 참가자·메시지 임베드도
  * 각자의 정책을 통과한 것만 실린다.
  */
 export async function fetchMyRooms(): Promise<{
@@ -216,13 +216,14 @@ export async function joinRoomByCode(code: string): Promise<{
   return { roomId: typeof data === 'string' ? data : null, error: null };
 }
 
-/** 방을 나간다. 자기 참가행만 지울 수 있다. */
-export async function leaveRoom(roomId: string, profileId: string): Promise<Error | null> {
-  const { error } = await supabase
-    .from('participants')
-    .delete()
-    .eq('room_id', roomId)
-    .eq('profile_id', profileId);
+/**
+ * 방 나가기.
+ *
+ * 참가행만 지우면 방이 목록에 남을 수 있어 RPC 로 옮겼다. 참가자에서 빼고,
+ * 마지막 사람이었으면 방까지 한 트랜잭션으로 지운다.
+ */
+export async function leaveRoom(roomId: string): Promise<Error | null> {
+  const { error } = await supabase.rpc('leave_room', { target_room: roomId });
   return error;
 }
 
@@ -282,6 +283,7 @@ function randomCode(): string {
  * 방 생성 전체를 맡아야 해서 별도 작업이다.
  */
 export async function createRoom(input: {
+  /** 누가 만들었는지 기록만 한다 — 방 안에서 권한 차이는 없다 */
   ownerId: string;
   title: string;
   meetingDate: string;
@@ -292,23 +294,36 @@ export async function createRoom(input: {
 }): Promise<{ roomId: string | null; code: string | null; error: Error | null }> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const code = randomCode();
-    const { data, error } = await supabase
-      .from('rooms')
-      .insert({
-        code,
-        title: input.title,
-        meeting_date: input.meetingDate,
-        expires_at: input.expiresAt,
-        owner_id: input.ownerId,
-        location_name: input.locationName ?? null,
-        confirmed_slot: input.confirmedSlot ?? null,
-        is_confirmed: Boolean(input.confirmedSlot),
-        color: input.color ?? '#FF9900',
-      })
-      .select('id')
-      .maybeSingle<{ id: string }>();
+    /*
+     * 일부러 RETURNING 을 쓰지 않는다.
+     *
+     * rooms 의 select 정책은 참가자만 통과시키는데, 나를 참가자로 넣어 주는 것은
+     * AFTER INSERT 트리거다. `insert().select()` 로 한 번에 받으려 하면 반환 시점에
+     * 아직 참가행이 없어 정책에 걸린다. 삽입한 뒤 코드로 다시 찾는다 — 그때는
+     * 트리거가 끝나 있어 정상적으로 보인다.
+     */
+    const { error } = await supabase.from('rooms').insert({
+      code,
+      title: input.title,
+      meeting_date: input.meetingDate,
+      expires_at: input.expiresAt,
+      owner_id: input.ownerId,
+      location_name: input.locationName ?? null,
+      confirmed_slot: input.confirmedSlot ?? null,
+      is_confirmed: Boolean(input.confirmedSlot),
+      color: input.color ?? '#FF9900',
+    });
 
-    if (!error) return { roomId: data?.id ?? null, code, error: null };
+    if (!error) {
+      const { data, error: findError } = await supabase
+        .from('rooms')
+        .select('id')
+        .eq('code', code)
+        .maybeSingle<{ id: string }>();
+
+      if (findError) return { roomId: null, code: null, error: findError };
+      return { roomId: data?.id ?? null, code, error: null };
+    }
     // 23505 = unique_violation. 코드가 겹친 경우에만 다시 만든다.
     if (error.code !== '23505') return { roomId: null, code: null, error };
   }

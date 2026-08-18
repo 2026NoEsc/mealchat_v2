@@ -1,49 +1,100 @@
-import { Search } from 'lucide-react-native';
-import { useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ChevronDown, Search } from 'lucide-react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppHeader from '../../components/AppHeader';
+import TmapMap from '../../components/TmapMap';
 import { CompleteButton } from '../../components/ui/Button';
 import { saveStartLocation } from '../../lib/profile';
+import { searchPlaces, type Place } from '../../lib/tmap';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useMyProfile } from '../../profile/useMyProfile';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
 
-/** 검색어에 따라 보여줄 후보 — 실제 지오코딩 대신 쓰는 목업 데이터 */
 /**
  * Figma 프로필/지도 위치 지정 (256:2333) — 220 x 486
  * body x11.5 y82 w197 / 검색창 y118 h26 / 지도 y154 h186 / 선택 카드 y347 h51 /
  * 저장 버튼 y405 h28
  *
- * ⚠️ Figma 의 지도 영역은 회색 격자 플레이스홀더다. 실제 지도 SDK 는 아직 미정이라
- * 원본 그대로 격자로 두고, 핀을 눌러 후보 위치를 바꾸도록 했다.
+ * Figma 원본의 지도 자리는 회색 격자 플레이스홀더였지만, Tmap 지도를 실제로 띄운다.
+ * 검색으로 고른 장소의 좌표를 `start_latitude/longitude` 까지 저장한다.
  */
 export default function OriginScreen() {
   const insets = useSafeAreaInsets();
   const { resetTo } = useNavigation();
-
   const { userId, bundle, reload } = useMyProfile();
+
   const [query, setQuery] = useState('');
+  const [results, setResults] = useState<Place[]>([]);
+  const [picked, setPicked] = useState<Place | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [resultsOpen, setResultsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
+  /** 응답이 순서를 뒤바꿔 도착해도 마지막 입력의 결과만 반영한다 */
+  const requestId = useRef(0);
+
+  const dropdownOpen = resultsOpen && results.length > 0;
+
   useEffect(() => {
     if (loaded || !bundle) return;
-    setQuery(bundle.privateProfile.startLocationName ?? '');
+    const saved = bundle.privateProfile;
+    setQuery(saved.startLocationName ?? '');
+    if (saved.startLocationName && saved.startLat !== null && saved.startLng !== null) {
+      setPicked({
+        id: 'saved',
+        name: saved.startLocationName,
+        address: saved.startLocationName,
+        lat: saved.startLat,
+        lng: saved.startLng,
+      });
+    }
     setLoaded(true);
   }, [bundle, loaded]);
 
-  /*
-   * 지도와 좌표 검색이 아직 없다. 주소 문자열만 저장하고, 위·경도는 지오코딩을
-   * 붙일 때 채운다. 없는 좌표를 임의로 찍어 두면 중간 지점 계산이 틀어진다.
-   */
+  const runSearch = async () => {
+    const keyword = query.trim();
+    if (!keyword) return;
+
+    const id = ++requestId.current;
+    setSearching(true);
+    setSearchError(null);
+
+    try {
+      const found = await searchPlaces(keyword);
+      if (id !== requestId.current) return;
+      setResults(found);
+      setResultsOpen(found.length > 0);
+      if (found.length === 0) setSearchError('검색 결과가 없어요.');
+    } catch (error) {
+      if (id !== requestId.current) return;
+      setResults([]);
+      setResultsOpen(false);
+      setSearchError(error instanceof Error ? error.message : '검색에 실패했어요.');
+    } finally {
+      if (id === requestId.current) setSearching(false);
+    }
+  };
+
   const save = async () => {
     if (!userId) return;
     setSaving(true);
-    const error = await saveStartLocation(userId, query);
+    // 검색으로 고른 장소여야 좌표가 있다. 직접 입력한 글자는 이름만 저장된다.
+    const error = await saveStartLocation(userId, picked?.name ?? query, picked);
     setSaving(false);
 
     if (error) {
@@ -59,44 +110,101 @@ export default function OriginScreen() {
       <View style={{ height: insets.top, backgroundColor: colors.surface }} />
       <AppHeader />
 
-      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.body}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}>
         <Text style={styles.title}>출발지 설정</Text>
         <Text style={styles.sub}>중간 지점 계산에 사용됩니다</Text>
 
-        <View style={styles.searchBox}>
-          <Search size={s(8)} color={colors.textMuted} strokeWidth={2.5} />
-          <TextInput
-            style={styles.searchInput}
-            value={query}
-            onChangeText={setQuery}
-            placeholder="주소 또는 장소 검색"
-            placeholderTextColor={colors.textMuted}
-          />
+        {/* 검색창과 그 아래로 펼쳐지는 결과를 한 덩어리로 묶는다 */}
+        <View style={styles.searchWrap}>
+          <View style={[styles.searchBox, dropdownOpen && styles.searchBoxOpen]}>
+            <Search size={s(8)} color={colors.textMuted} strokeWidth={2.5} />
+            <TextInput
+              style={styles.searchInput}
+              value={query}
+              onChangeText={setQuery}
+              placeholder="주소 또는 장소 검색"
+              placeholderTextColor={colors.textMuted}
+              returnKeyType="search"
+              onSubmitEditing={() => void runSearch()}
+            />
+            {results.length > 0 ? (
+              <Pressable
+                style={styles.toggleButton}
+                hitSlop={s(6)}
+                onPress={() => setResultsOpen((open) => !open)}>
+                <View style={resultsOpen ? styles.chevronOpen : undefined}>
+                  <ChevronDown size={s(9)} color={colors.textMuted} strokeWidth={2.5} />
+                </View>
+              </Pressable>
+            ) : null}
+            <Pressable
+              style={styles.searchButton}
+              disabled={searching || !query.trim()}
+              onPress={() => void runSearch()}>
+              {searching ? (
+                <ActivityIndicator size="small" color={colors.textOnAccent} />
+              ) : (
+                <Text style={styles.searchButtonText}>검색</Text>
+              )}
+            </Pressable>
+          </View>
+
+          {dropdownOpen ? (
+            <ScrollView
+              style={styles.dropdown}
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled">
+              {results.map((place) => {
+                const selected = picked?.lat === place.lat && picked?.lng === place.lng;
+                return (
+                  <Pressable
+                    key={place.id}
+                    style={[styles.result, selected && styles.resultSelected]}
+                    onPress={() => {
+                      setPicked(place);
+                      setQuery(place.name);
+                      setResultsOpen(false);
+                    }}>
+                    <Text style={styles.resultName} numberOfLines={1}>
+                      {place.name}
+                    </Text>
+                    <Text style={styles.resultAddress} numberOfLines={1}>
+                      {place.address}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          ) : null}
         </View>
 
-        {/* Figma 원본과 동일한 격자 플레이스홀더 */}
-        <View style={styles.map}>
-          <View style={[styles.gridLine, styles.gridV]} />
-          <View style={[styles.gridLine, styles.gridH]} />
+        {searchError ? <Text style={styles.searchError}>{searchError}</Text> : null}
 
-          <View style={styles.pin}>
-            <Text style={styles.pinIcon}>📍</Text>
-            <View style={styles.pinPill}>
-              <Text style={styles.pinText}>지도는 준비 중이에요</Text>
-            </View>
-          </View>
+        <View style={styles.map}>
+          <TmapMap
+            marker={picked ? { lat: picked.lat, lng: picked.lng, label: picked.name } : null}
+          />
         </View>
 
         <View style={styles.card}>
           <Text style={styles.cardLabel}>선택한 위치</Text>
-          <Text style={styles.cardAddress}>{query.trim() || '아직 설정하지 않았어요'}</Text>
-          <Text style={styles.cardDetail}>중간 지점 계산에만 사용돼요</Text>
+          <Text style={styles.cardAddress}>
+            {picked?.name ?? query.trim() ?? '아직 설정하지 않았어요'}
+          </Text>
+          <Text style={styles.cardDetail}>
+            {picked
+              ? picked.address
+              : '검색해서 고르면 좌표까지 저장돼요 — 중간 지점 계산에 필요해요'}
+          </Text>
         </View>
 
         <CompleteButton
           label={saving ? '저장 중' : '이 위치로 저장'}
           style={styles.cta}
-          disabled={saving}
+          disabled={saving || (!picked && !query.trim())}
           onPress={() => void save()}
         />
       </ScrollView>
@@ -128,16 +236,52 @@ const styles = StyleSheet.create({
     lineHeight: fs(9),
     color: colors.textMuted,
   },
+  searchWrap: {
+    // 드롭다운이 지도 위로 겹쳐야 해서 이 덩어리를 위로 띄운다
+    marginTop: s(7),
+    zIndex: 10,
+  },
   searchBox: {
     // y118 h26
-    marginTop: s(7),
     height: s(26),
     borderRadius: s(13),
     backgroundColor: colors.card,
     flexDirection: 'row',
     alignItems: 'center',
     gap: s(6),
-    paddingHorizontal: s(11),
+    paddingLeft: s(11),
+    paddingRight: s(3),
+  },
+  searchBoxOpen: {
+    // 펼쳐지면 아래쪽 모서리를 펴서 드롭다운과 한 덩어리로 보이게 한다
+    borderBottomLeftRadius: s(4),
+    borderBottomRightRadius: s(4),
+  },
+  toggleButton: {
+    width: s(12),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dropdown: {
+    // 검색창 바로 아래에 붙어 지도 위를 덮는다
+    position: 'absolute',
+    top: s(26),
+    left: 0,
+    right: 0,
+    maxHeight: s(150),
+    marginTop: s(2),
+    borderRadius: s(10),
+    borderTopLeftRadius: s(4),
+    borderTopRightRadius: s(4),
+    backgroundColor: colors.card,
+    paddingHorizontal: s(9),
+    borderWidth: s(0.8),
+    borderColor: colors.primary,
+    shadowColor: '#A9A9A9',
+    shadowOffset: { width: 0, height: s(2) },
+    shadowOpacity: 0.3,
+    shadowRadius: s(4),
+    elevation: 8,
   },
   searchInput: {
     flex: 1,
@@ -147,58 +291,68 @@ const styles = StyleSheet.create({
     fontSize: fs(7),
     color: colors.textPrimary,
   },
+  searchButton: {
+    width: s(34),
+    height: s(20),
+    borderRadius: s(10),
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchButtonText: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(7),
+    lineHeight: fs(9),
+    fontWeight: weight.bold,
+    color: colors.textOnAccent,
+  },
+  searchError: {
+    marginTop: s(6),
+    marginLeft: s(4),
+    fontFamily: fontFamily.body,
+    fontSize: fs(6.5),
+    lineHeight: fs(9),
+    color: colors.danger,
+  },
+  chevronOpen: {
+    transform: [{ rotate: '180deg' }],
+  },
+  result: {
+    paddingVertical: s(7),
+    borderTopWidth: s(0.6),
+    borderTopColor: colors.border,
+  },
+  resultSelected: {
+    backgroundColor: '#FFF5EB',
+    borderRadius: s(6),
+    paddingHorizontal: s(6),
+    marginHorizontal: s(-6),
+    borderTopColor: 'transparent',
+  },
+  resultName: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(7.5),
+    lineHeight: fs(10),
+    fontWeight: weight.semibold,
+    color: colors.textPrimary,
+  },
+  resultAddress: {
+    marginTop: s(2),
+    fontFamily: fontFamily.body,
+    fontSize: fs(6),
+    lineHeight: fs(8),
+    color: colors.textMuted,
+  },
   map: {
     // y154 h186
     marginTop: s(10),
     height: s(186),
     borderRadius: s(8),
+    // 지도 타일이 카드 배경과 붙어 보여 경계를 얇게 그어 준다
+    borderWidth: s(0.8),
+    borderColor: colors.primary,
     backgroundColor: '#E8EBE6',
     overflow: 'hidden',
-  },
-  gridLine: {
-    position: 'absolute',
-    backgroundColor: '#DADDD7',
-  },
-  gridV: {
-    left: '49.5%',
-    top: 0,
-    bottom: 0,
-    width: s(1.5),
-  },
-  gridH: {
-    top: '49.5%',
-    left: 0,
-    right: 0,
-    height: s(1.5),
-  },
-  pin: {
-    position: 'absolute',
-    left: '50%',
-    top: '50%',
-    marginLeft: s(-22),
-    marginTop: s(-18.5),
-    width: s(44),
-    alignItems: 'center',
-  },
-  pinIcon: {
-    fontSize: fs(14),
-    lineHeight: fs(20),
-  },
-  pinPill: {
-    marginTop: s(2),
-    height: s(15),
-    paddingHorizontal: s(6),
-    borderRadius: s(8),
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pinText: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(9),
-    fontWeight: weight.bold,
-    color: colors.textOnAccent,
   },
   card: {
     // y347 h51
