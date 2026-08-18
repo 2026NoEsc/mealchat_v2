@@ -43,6 +43,7 @@ export default function ProfileHomeScreen() {
   const account = formatAccount(privateProfile?.bankName, privateProfile?.accountNumber);
   const birth = formatBirthDate(privateProfile?.birthDate);
   const gender = formatGender(privateProfile?.personalData.gender);
+  const startLocation = privateProfile?.startLocationName?.trim() || null;
 
   /* 값이 없으면 채워야 할 곳으로 보이게 danger 로 표시한다 */
   const info: InfoRow[] = [
@@ -58,7 +59,7 @@ export default function ProfileHomeScreen() {
 
   const steps: Step[] = [
     { done: Boolean(account), label: '송금 계좌 등록', action: '설정하기', route: 'ProfileEdit' },
-    { done: false, label: '사는 곳 설정', action: '설정하기', route: 'Origin' },
+    { done: Boolean(startLocation), label: '사는 곳 설정', action: '설정하기', route: 'Origin' },
     { done: likedTastes > 0, label: '음식 취향 매칭', action: '게임 시작', route: 'TasteGame' },
   ];
   const doneCount = steps.filter((step) => step.done).length;

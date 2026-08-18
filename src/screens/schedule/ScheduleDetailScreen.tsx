@@ -1,18 +1,35 @@
 import { Check, MapPin, Plus, Search } from 'lucide-react-native';
-import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
 import { CompleteButton } from '../../components/ui/Button';
 import { fetchMyFriends, type Friend } from '../../lib/friends';
+import { searchPlaces, type Place } from '../../lib/tmap';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors, shadows } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
+import type { SchedulePlace } from './scheduleTypes';
 import ScheduleStepHeader from './ScheduleStepHeader';
 
+/** Tmap 검색 결과를 다음 단계로 넘길 형태로 옮긴다 */
+const toSchedulePlace = (place: Place): SchedulePlace => ({
+  name: place.name,
+  address: place.address,
+  latitude: place.lat,
+  longitude: place.lng,
+});
 
 export default function ScheduleDetailScreen() {
   const insets = useSafeAreaInsets();
@@ -22,6 +39,37 @@ export default function ScheduleDetailScreen() {
 
   const [friends, setFriends] = useState<Friend[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
+
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<Place[]>([]);
+  const [place, setPlace] = useState<Place | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+
+  /** 늦게 도착한 응답이 최신 결과를 덮지 않게 한다 */
+  const requestId = useRef(0);
+
+  const runSearch = async () => {
+    const keyword = query.trim();
+    if (!keyword) return;
+
+    const id = ++requestId.current;
+    setSearching(true);
+    setSearchError(null);
+
+    try {
+      const found = await searchPlaces(keyword);
+      if (id !== requestId.current) return;
+      setResults(found);
+      if (found.length === 0) setSearchError('검색 결과가 없어요.');
+    } catch (error) {
+      if (id !== requestId.current) return;
+      setResults([]);
+      setSearchError(error instanceof Error ? error.message : '검색에 실패했어요.');
+    } finally {
+      if (id === requestId.current) setSearching(false);
+    }
+  };
 
   useEffect(() => {
     if (!user?.id) return;
@@ -115,34 +163,93 @@ export default function ScheduleDetailScreen() {
 
           <View style={styles.searchBox}>
             <Search size={s(8)} color={colors.textMuted} strokeWidth={2} />
-            <Text style={styles.searchText}>식당 이름 또는 주소 검색</Text>
+            <TextInput
+              style={styles.searchInput}
+              value={query}
+              onChangeText={setQuery}
+              placeholder="식당 이름 또는 주소 검색"
+              placeholderTextColor={colors.textMuted}
+              returnKeyType="search"
+              onSubmitEditing={() => void runSearch()}
+            />
+            <Pressable
+              style={styles.searchButton}
+              disabled={searching || !query.trim()}
+              onPress={() => void runSearch()}>
+              {searching ? (
+                <ActivityIndicator size="small" color={colors.textOnAccent} />
+              ) : (
+                <Text style={styles.searchButtonText}>검색</Text>
+              )}
+            </Pressable>
           </View>
 
-          <View style={styles.placeRow}>
-            <View style={styles.placeIcon}>
-              <MapPin size={s(10)} color={colors.primary} strokeWidth={2.5} />
+          {searchError ? <Text style={styles.searchError}>{searchError}</Text> : null}
+
+          {/* 결과를 고르면 목록을 닫고 고른 한 건만 남긴다 */}
+          {results.map((found) => (
+            <Pressable
+              key={found.id}
+              style={styles.placeRow}
+              onPress={() => {
+                setPlace(found);
+                setResults([]);
+                setQuery(found.name);
+              }}>
+              <View style={styles.placeIcon}>
+                <MapPin size={s(10)} color={colors.primary} strokeWidth={2.5} />
+              </View>
+              <View style={styles.placeBody}>
+                <Text style={styles.placeName} numberOfLines={1}>
+                  {found.name}
+                </Text>
+                <Text style={styles.placeMeta} numberOfLines={1}>
+                  {found.address}
+                </Text>
+              </View>
+            </Pressable>
+          ))}
+
+          {place && results.length === 0 ? (
+            <View style={styles.placeRow}>
+              <View style={styles.placeIcon}>
+                <MapPin size={s(10)} color={colors.primary} strokeWidth={2.5} />
+              </View>
+              <View style={styles.placeBody}>
+                <Text style={styles.placeName} numberOfLines={1}>
+                  {place.name}
+                </Text>
+                <Text style={styles.placeMeta} numberOfLines={1}>
+                  {place.address}
+                </Text>
+              </View>
+              <View style={styles.placeCheck}>
+                <Check size={s(7)} color={colors.textOnAccent} strokeWidth={3} />
+              </View>
             </View>
-            <View style={styles.placeBody}>
-              <Text style={styles.placeName}>조선칼국수 하단점</Text>
-              <Text style={styles.placeMeta}>부산 사하구 하단동 · 도보 8분</Text>
-            </View>
-            <View style={styles.placeCheck}>
-              <Check size={s(7)} color={colors.textOnAccent} strokeWidth={3} />
-            </View>
-          </View>
+          ) : null}
 
           <Text style={styles.note}>
-            {picked.length > 0
-              ? `메이트 ${picked.length}명의 중간 지점으로 추천했어요`
-              : '메이트를 고르면 중간 지점을 추천해 드려요'}
+            {!place
+              ? '검색해서 약속 장소를 골라 주세요'
+              : picked.length > 0
+                ? `메이트 ${picked.length}명과 이 장소에서 만나요`
+                : '이 장소로 약속을 잡아요'}
           </Text>
         </View>
 
         <CompleteButton
           label="다음"
           showNext
+          disabled={!place}
           style={styles.cta}
-          onPress={() => navigate('ScheduleTime', { name: name.trim(), invitees: picked })}
+          onPress={() =>
+            navigate('ScheduleTime', {
+              name: name.trim(),
+              invitees: picked,
+              place: place ? toSchedulePlace(place) : undefined,
+            })
+          }
         />
       </ScrollView>
     </View>
@@ -260,13 +367,42 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: s(4),
-    paddingHorizontal: s(8),
+    paddingLeft: s(8),
+    // 검색 버튼이 안쪽에 들어가므로 오른쪽은 좁게 잡는다
+    paddingRight: s(3),
   },
-  searchText: {
+  searchInput: {
+    flex: 1,
+    // 웹에서 flex:1 만으로는 기본 입력 폭이 남아 넘친다
+    minWidth: 0,
+    paddingVertical: 0,
     fontFamily: fontFamily.body,
     fontSize: fs(6.5),
     lineHeight: fs(9),
-    color: colors.textMuted,
+    color: colors.textPrimary,
+  },
+  searchButton: {
+    width: s(30),
+    height: s(14),
+    borderRadius: s(7),
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchButtonText: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(6.5),
+    lineHeight: fs(9),
+    fontWeight: weight.bold,
+    color: colors.textOnAccent,
+  },
+  searchError: {
+    marginTop: s(5),
+    marginLeft: s(2),
+    fontFamily: fontFamily.body,
+    fontSize: fs(6),
+    lineHeight: fs(8),
+    color: colors.danger,
   },
   placeRow: {
     marginTop: s(8),
