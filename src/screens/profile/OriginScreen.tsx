@@ -1,49 +1,95 @@
 import { Search } from 'lucide-react-native';
-import { useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppHeader from '../../components/AppHeader';
 import { CompleteButton } from '../../components/ui/Button';
 import { saveStartLocation } from '../../lib/profile';
+import { searchPlaces, type Place } from '../../lib/tmap';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useMyProfile } from '../../profile/useMyProfile';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
 
-/** 검색어에 따라 보여줄 후보 — 실제 지오코딩 대신 쓰는 목업 데이터 */
 /**
  * Figma 프로필/지도 위치 지정 (256:2333) — 220 x 486
  * body x11.5 y82 w197 / 검색창 y118 h26 / 지도 y154 h186 / 선택 카드 y347 h51 /
  * 저장 버튼 y405 h28
  *
- * ⚠️ Figma 의 지도 영역은 회색 격자 플레이스홀더다. 실제 지도 SDK 는 아직 미정이라
- * 원본 그대로 격자로 두고, 핀을 눌러 후보 위치를 바꾸도록 했다.
+ * 지도 렌더링은 아직 없다. Figma 원본도 회색 격자 플레이스홀더이고,
+ * 지도 SDK 는 플랫폼 분기가 필요해 다음 단계로 미뤘다. 대신 Tmap POI 검색으로
+ * 좌표를 확보해 `start_latitude/longitude` 까지 저장한다.
  */
 export default function OriginScreen() {
   const insets = useSafeAreaInsets();
   const { resetTo } = useNavigation();
-
   const { userId, bundle, reload } = useMyProfile();
+
   const [query, setQuery] = useState('');
+  const [results, setResults] = useState<Place[]>([]);
+  const [picked, setPicked] = useState<Place | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
+  /** 응답이 순서를 뒤바꿔 도착해도 마지막 입력의 결과만 반영한다 */
+  const requestId = useRef(0);
+
   useEffect(() => {
     if (loaded || !bundle) return;
-    setQuery(bundle.privateProfile.startLocationName ?? '');
+    const saved = bundle.privateProfile;
+    setQuery(saved.startLocationName ?? '');
+    if (saved.startLocationName && saved.startLat !== null && saved.startLng !== null) {
+      setPicked({
+        id: 'saved',
+        name: saved.startLocationName,
+        address: saved.startLocationName,
+        lat: saved.startLat,
+        lng: saved.startLng,
+      });
+    }
     setLoaded(true);
   }, [bundle, loaded]);
 
-  /*
-   * 지도와 좌표 검색이 아직 없다. 주소 문자열만 저장하고, 위·경도는 지오코딩을
-   * 붙일 때 채운다. 없는 좌표를 임의로 찍어 두면 중간 지점 계산이 틀어진다.
-   */
+  const runSearch = async () => {
+    const keyword = query.trim();
+    if (!keyword) return;
+
+    const id = ++requestId.current;
+    setSearching(true);
+    setSearchError(null);
+
+    try {
+      const found = await searchPlaces(keyword);
+      if (id !== requestId.current) return;
+      setResults(found);
+      if (found.length === 0) setSearchError('검색 결과가 없어요.');
+    } catch (error) {
+      if (id !== requestId.current) return;
+      setResults([]);
+      setSearchError(error instanceof Error ? error.message : '검색에 실패했어요.');
+    } finally {
+      if (id === requestId.current) setSearching(false);
+    }
+  };
+
   const save = async () => {
     if (!userId) return;
     setSaving(true);
-    const error = await saveStartLocation(userId, query);
+    // 검색으로 고른 장소여야 좌표가 있다. 직접 입력한 글자는 이름만 저장된다.
+    const error = await saveStartLocation(userId, picked?.name ?? query, picked);
     setSaving(false);
 
     if (error) {
@@ -59,7 +105,10 @@ export default function OriginScreen() {
       <View style={{ height: insets.top, backgroundColor: colors.surface }} />
       <AppHeader />
 
-      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.body}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}>
         <Text style={styles.title}>출발지 설정</Text>
         <Text style={styles.sub}>중간 지점 계산에 사용됩니다</Text>
 
@@ -71,32 +120,75 @@ export default function OriginScreen() {
             onChangeText={setQuery}
             placeholder="주소 또는 장소 검색"
             placeholderTextColor={colors.textMuted}
+            returnKeyType="search"
+            onSubmitEditing={() => void runSearch()}
           />
+          <Pressable
+            style={styles.searchButton}
+            disabled={searching || !query.trim()}
+            onPress={() => void runSearch()}>
+            {searching ? (
+              <ActivityIndicator size="small" color={colors.textOnAccent} />
+            ) : (
+              <Text style={styles.searchButtonText}>검색</Text>
+            )}
+          </Pressable>
         </View>
 
-        {/* Figma 원본과 동일한 격자 플레이스홀더 */}
-        <View style={styles.map}>
-          <View style={[styles.gridLine, styles.gridV]} />
-          <View style={[styles.gridLine, styles.gridH]} />
+        {searchError ? <Text style={styles.searchError}>{searchError}</Text> : null}
 
-          <View style={styles.pin}>
-            <Text style={styles.pinIcon}>📍</Text>
-            <View style={styles.pinPill}>
-              <Text style={styles.pinText}>지도는 준비 중이에요</Text>
+        {results.length > 0 ? (
+          <View style={styles.results}>
+            {results.map((place) => {
+              const selected = picked?.lat === place.lat && picked?.lng === place.lng;
+              return (
+                <Pressable
+                  key={place.id}
+                  style={[styles.result, selected && styles.resultSelected]}
+                  onPress={() => {
+                    setPicked(place);
+                    setQuery(place.name);
+                  }}>
+                  <Text style={styles.resultName} numberOfLines={1}>
+                    {place.name}
+                  </Text>
+                  <Text style={styles.resultAddress} numberOfLines={1}>
+                    {place.address}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : (
+          /* Figma 원본과 동일한 격자 플레이스홀더 */
+          <View style={styles.map}>
+            <View style={[styles.gridLine, styles.gridV]} />
+            <View style={[styles.gridLine, styles.gridH]} />
+            <View style={styles.pin}>
+              <Text style={styles.pinIcon}>📍</Text>
+              <View style={styles.pinPill}>
+                <Text style={styles.pinText}>지도는 준비 중이에요</Text>
+              </View>
             </View>
           </View>
-        </View>
+        )}
 
         <View style={styles.card}>
           <Text style={styles.cardLabel}>선택한 위치</Text>
-          <Text style={styles.cardAddress}>{query.trim() || '아직 설정하지 않았어요'}</Text>
-          <Text style={styles.cardDetail}>중간 지점 계산에만 사용돼요</Text>
+          <Text style={styles.cardAddress}>
+            {picked?.name ?? query.trim() ?? '아직 설정하지 않았어요'}
+          </Text>
+          <Text style={styles.cardDetail}>
+            {picked
+              ? picked.address
+              : '검색해서 고르면 좌표까지 저장돼요 — 중간 지점 계산에 필요해요'}
+          </Text>
         </View>
 
         <CompleteButton
           label={saving ? '저장 중' : '이 위치로 저장'}
           style={styles.cta}
-          disabled={saving}
+          disabled={saving || (!picked && !query.trim())}
           onPress={() => void save()}
         />
       </ScrollView>
@@ -137,7 +229,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: s(6),
-    paddingHorizontal: s(11),
+    paddingLeft: s(11),
+    paddingRight: s(3),
   },
   searchInput: {
     flex: 1,
@@ -146,6 +239,64 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.body,
     fontSize: fs(7),
     color: colors.textPrimary,
+  },
+  searchButton: {
+    width: s(34),
+    height: s(20),
+    borderRadius: s(10),
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchButtonText: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(7),
+    lineHeight: fs(9),
+    fontWeight: weight.bold,
+    color: colors.textOnAccent,
+  },
+  searchError: {
+    marginTop: s(6),
+    marginLeft: s(4),
+    fontFamily: fontFamily.body,
+    fontSize: fs(6.5),
+    lineHeight: fs(9),
+    color: colors.danger,
+  },
+  results: {
+    // 지도 자리를 그대로 쓴다 (y154 h186)
+    marginTop: s(10),
+    minHeight: s(186),
+    borderRadius: s(8),
+    backgroundColor: colors.card,
+    paddingHorizontal: s(9),
+    paddingVertical: s(4),
+  },
+  result: {
+    paddingVertical: s(7),
+    borderBottomWidth: s(0.6),
+    borderBottomColor: colors.border,
+  },
+  resultSelected: {
+    backgroundColor: '#FFF5EB',
+    borderRadius: s(6),
+    paddingHorizontal: s(6),
+    marginHorizontal: s(-6),
+    borderBottomColor: 'transparent',
+  },
+  resultName: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(7.5),
+    lineHeight: fs(10),
+    fontWeight: weight.semibold,
+    color: colors.textPrimary,
+  },
+  resultAddress: {
+    marginTop: s(2),
+    fontFamily: fontFamily.body,
+    fontSize: fs(6),
+    lineHeight: fs(8),
+    color: colors.textMuted,
   },
   map: {
     // y154 h186
