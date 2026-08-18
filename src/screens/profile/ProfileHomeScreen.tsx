@@ -1,8 +1,9 @@
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
+import Avatar from '../../components/Avatar';
 import {
   countLikedTastes,
   formatAccount,
@@ -16,7 +17,6 @@ import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
 
-const avatar = require('../../../assets/brand/moa.png');
 
 type InfoRow = { label: string; value: string; danger?: boolean };
 
@@ -82,9 +82,13 @@ export default function ProfileHomeScreen() {
         <View style={styles.card}>
           {/* 아바타·이름을 누르면 프로필 수정 (309:1086) 으로 들어간다 */}
           <Pressable style={styles.identity} onPress={() => navigate('ProfileEdit')}>
-            <View style={styles.avatarBox}>
-              <Image source={avatar} style={styles.avatar} resizeMode="contain" />
-            </View>
+            <Avatar
+              name={bundle?.profile.name ?? '?'}
+              color={bundle?.profile.avatarColor ?? colors.primary}
+              url={bundle?.profile.avatarUrl}
+              size={s(46)}
+              radius={s(12)}
+            />
             <Text style={styles.name}>
               {status === 'ready' && bundle ? bundle.profile.name : '불러오는 중'}
             </Text>
@@ -185,21 +189,6 @@ const styles = StyleSheet.create({
   },
   identity: {
     alignItems: 'center',
-  },
-  avatarBox: {
-    // ph x9 y8 안의 av x71.5 y2 36×36 → 카드 중앙
-    alignSelf: 'center',
-    marginTop: s(2),
-    width: s(36),
-    height: s(36),
-    borderRadius: s(8),
-    backgroundColor: colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatar: {
-    width: s(25.92),
-    height: s(28.08),
   },
   name: {
     // ph 기준 y40
