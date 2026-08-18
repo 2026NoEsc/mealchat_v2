@@ -1,9 +1,10 @@
+import * as ImagePicker from 'expo-image-picker';
 import { useState } from 'react';
 import {
   Alert,
-  Image,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,8 +15,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
+import Avatar from '../../components/Avatar';
 import BankSelect from '../../components/ui/BankSelect';
 import { CompleteButton } from '../../components/ui/Button';
+import { removeAvatar, uploadAvatar } from '../../lib/avatar';
 import { fromBirthDate } from '../../lib/birthDate';
 import { saveMyPrivateProfile, updateMyName } from '../../lib/profile';
 import { useNavigation } from '../../navigation/NavigationContext';
@@ -23,8 +26,6 @@ import { useMyProfile } from '../../profile/useMyProfile';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
-
-const logo = require('../../../assets/brand/logo-main.png');
 
 /**
  * Figma 프로필/프로필 수정 (309:1086) — 220 x 486
@@ -64,6 +65,55 @@ function ProfileEditForm({
   const [account, setAccount] = useState(bundle.privateProfile.accountNumber ?? '');
   const [birth, setBirth] = useState(fromBirthDate(bundle.privateProfile.birthDate));
   const [saving, setSaving] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState(bundle.profile.avatarUrl);
+  const [uploading, setUploading] = useState(false);
+
+  /*
+   * 사진은 저장 버튼과 따로 즉시 올린다. 저장까지 미루면 실패했을 때 무엇이
+   * 저장되고 무엇이 안 됐는지 알려 주기 어렵다.
+   */
+  const pickAvatar = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('권한 필요', '사진을 고르려면 사진 접근 권한이 필요해요.');
+      return;
+    }
+
+    const picked = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (picked.canceled) return;
+
+    const asset = picked.assets[0];
+    setUploading(true);
+    const { url, error } = await uploadAvatar({
+      userId,
+      uri: asset.uri,
+      mimeType: asset.mimeType ?? 'image/jpeg',
+    });
+    setUploading(false);
+
+    if (error) {
+      Alert.alert('사진 올리기 실패', error.message);
+      return;
+    }
+    setAvatarUrl(url);
+  };
+
+  const clearAvatar = async () => {
+    setUploading(true);
+    const error = await removeAvatar(userId, avatarUrl);
+    setUploading(false);
+
+    if (error) {
+      Alert.alert('사진 삭제 실패', error.message);
+      return;
+    }
+    setAvatarUrl(null);
+  };
 
   const email = user?.email ?? '';
 
@@ -107,7 +157,28 @@ function ProfileEditForm({
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           <View style={styles.card}>
-            <Image source={logo} style={styles.logo} resizeMode="contain" />
+            <Pressable
+              style={styles.avatarPick}
+              disabled={uploading}
+              onPress={() => void pickAvatar()}>
+              <Avatar
+                name={nickname || bundle.profile.name}
+                color={bundle.profile.avatarColor}
+                url={avatarUrl}
+                size={s(46)}
+                radius={s(12)}
+              />
+              <Text style={styles.avatarHint}>
+                {uploading ? '올리는 중...' : '사진 바꾸기'}
+              </Text>
+            </Pressable>
+
+            {avatarUrl ? (
+              <Pressable disabled={uploading} onPress={() => void clearAvatar()}>
+                <Text style={styles.avatarRemove}>사진 지우기</Text>
+              </Pressable>
+            ) : null}
+
             <Text style={styles.title}>프로필 수정</Text>
 
             <Field label="닉네임" value={nickname} onChangeText={setNickname} />
@@ -332,6 +403,23 @@ const styles = StyleSheet.create({
   },
   cta: {
     marginTop: s(10),
+  },
+  avatarPick: {
+    alignItems: 'center',
+    gap: s(4),
+  },
+  avatarHint: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(6.5),
+    fontWeight: weight.bold,
+    color: colors.primary,
+  },
+  avatarRemove: {
+    marginTop: s(3),
+    textAlign: 'center',
+    fontFamily: fontFamily.body,
+    fontSize: fs(6.5),
+    color: colors.textMuted,
   },
   fallback: {
     flex: 1,
