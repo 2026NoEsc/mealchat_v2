@@ -1,24 +1,9 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { fs, s } from '../theme/scale';
 import { colors } from '../theme/tokens';
 import { fontFamily, weight } from '../theme/typography';
-
-/** Figma BackButton (525:3226) — 14 x 13 흰 칩 안의 왼쪽 화살표 */
-function BackArrow() {
-  return (
-    <Svg width={s(7)} height={s(7)} viewBox="0 0 8 8" fill="none">
-      <Path
-        d="M7 4H1M1 4L3.6 1.4M1 4L3.6 6.6"
-        stroke={colors.textPrimary}
-        strokeWidth={1}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </Svg>
-  );
-}
+import BackButton from './BackButton';
 
 type Props = {
   title: string;
@@ -34,9 +19,7 @@ export default function ScreenHeader({ title, onBack, action, below }: Props) {
   return (
     <View style={styles.wrapper}>
       <View style={styles.row}>
-        <Pressable style={styles.backChip} onPress={onBack} hitSlop={s(8)}>
-          <BackArrow />
-        </Pressable>
+        <BackButton onPress={onBack} />
         <Text style={styles.title}>{title}</Text>
         {action ? <View style={styles.action}>{action}</View> : null}
       </View>
@@ -55,14 +38,6 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  backChip: {
-    width: s(14),
-    height: s(13),
-    borderRadius: s(4),
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   title: {
     marginLeft: s(9),

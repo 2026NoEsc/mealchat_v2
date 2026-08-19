@@ -31,18 +31,29 @@ const toSchedulePlace = (place: Place): SchedulePlace => ({
   longitude: place.lng,
 });
 
+/** STEP 2 에서 뒤로 돌아올 때 되돌려받는 값 */
+type Params = {
+  name?: string;
+  invitees?: string[];
+  place?: SchedulePlace;
+};
+
 export default function ScheduleDetailScreen() {
   const insets = useSafeAreaInsets();
-  const { navigate } = useNavigation();
+  const { navigate, goBack, current } = useNavigation();
   const { user } = useAuth();
-  const [name, setName] = useState('');
+
+  /* 뒤로 왔다면 앞서 입력한 값이 params 로 실려 온다 */
+  const params = current.params as Params | undefined;
+
+  const [name, setName] = useState(params?.name ?? '');
 
   const [friends, setFriends] = useState<Friend[]>([]);
-  const [picked, setPicked] = useState<string[]>([]);
+  const [picked, setPicked] = useState<string[]>(params?.invitees ?? []);
 
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(params?.place?.name ?? '');
   const [results, setResults] = useState<Place[]>([]);
-  const [place, setPlace] = useState<Place | null>(null);
+  const [place, setPlace] = useState<SchedulePlace | null>(params?.place ?? null);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
 
@@ -101,6 +112,7 @@ export default function ScheduleDetailScreen() {
           step={1}
           title="어떻게 만날까요?"
           subtitle="구체적인 약속 일정을 정해주세요"
+          onBack={goBack}
         />
 
         <View style={styles.nameInput}>
@@ -192,7 +204,7 @@ export default function ScheduleDetailScreen() {
               key={found.id}
               style={styles.placeRow}
               onPress={() => {
-                setPlace(found);
+                setPlace(toSchedulePlace(found));
                 setResults([]);
                 setQuery(found.name);
               }}>
@@ -247,7 +259,7 @@ export default function ScheduleDetailScreen() {
             navigate('ScheduleTime', {
               name: name.trim(),
               invitees: picked,
-              place: place ? toSchedulePlace(place) : undefined,
+              place: place ?? undefined,
             })
           }
         />

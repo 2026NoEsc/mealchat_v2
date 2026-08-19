@@ -28,11 +28,13 @@ type Params = {
   name?: string;
   invitees?: string[];
   place?: SchedulePlace;
+  /** STEP 3 에서 뒤로 돌아올 때 되돌려받는 선택 칸 */
+  picked?: string[];
 };
 
 export default function ScheduleTimeScreen() {
   const insets = useSafeAreaInsets();
-  const { navigate, current } = useNavigation();
+  const { navigate, goBackWith, current } = useNavigation();
 
   const params = current.params as Params | undefined;
 
@@ -43,7 +45,7 @@ export default function ScheduleTimeScreen() {
   const days = useMemo(() => buildNextDays(5), []);
 
   const [picked, setPicked] = useState<Set<string>>(
-    () => new Set(),
+    () => new Set(params?.picked ?? []),
   );
 
   const toggle = (date: string, hour: number) => {
@@ -77,8 +79,14 @@ export default function ScheduleTimeScreen() {
       invitees,
       place,
       slots,
+      // STEP 3 이 뒤로 올 때 그대로 돌려주면 격자 선택이 살아난다
+      picked: [...picked],
     });
   };
+
+  /* 뒤로 갈 때 STEP 1 이 다시 채울 수 있게 입력값을 실어 보낸다 */
+  const goPrev = () =>
+    goBackWith({ name, invitees, place });
 
   return (
     <View style={styles.screen}>
@@ -99,6 +107,7 @@ export default function ScheduleTimeScreen() {
           step={2}
           title="언제 만날까요?"
           subtitle="가능한 시간을 탭해서 표시해 주세요"
+          onBack={goPrev}
         />
 
         <View style={styles.card}>

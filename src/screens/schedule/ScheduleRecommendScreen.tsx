@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppHeader from '../../components/AppHeader';
+import BackButton from '../../components/BackButton';
 import { CompleteButton } from '../../components/ui/Button';
 import { supabase } from '../../lib/supabase';
 import { useNavigation } from '../../navigation/NavigationContext';
@@ -99,6 +100,8 @@ type Params = {
   invitees?: string[];
   place?: SchedulePlace;
   slots?: CandidateSlot[];
+  /** STEP 2 의 격자 선택. 뒤로 갈 때 그대로 돌려준다 */
+  picked?: string[];
 };
 
 export default function ScheduleRecommendScreen() {
@@ -106,6 +109,7 @@ export default function ScheduleRecommendScreen() {
 
   const {
     navigate,
+    goBackWith,
     current,
   } = useNavigation();
 
@@ -123,6 +127,13 @@ export default function ScheduleRecommendScreen() {
 
   const slots =
     params?.slots ?? [];
+
+  const picked =
+    params?.picked ?? [];
+
+  /* 뒤로 가면 STEP 2 가 새로 마운트되므로 격자 선택을 돌려보낸다 */
+  const goPrev = () =>
+    goBackWith({ picked });
 
   const [picks, setPicks] =
     useState<RecommendationPick[]>([]);
@@ -316,6 +327,11 @@ export default function ScheduleRecommendScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.titleRow}>
+          <BackButton
+            onPress={goPrev}
+            style={styles.back}
+          />
+
           <Text style={styles.title}>
             AI 맞춤 추천
           </Text>
@@ -505,6 +521,11 @@ const styles = StyleSheet.create({
     marginHorizontal: s(11.5),
     flexDirection: 'row',
     alignItems: 'center',
+  },
+
+  back: {
+    // 공통 헤더와 같은 간격 (칩 오른쪽 9)
+    marginRight: s(9),
   },
 
   title: {

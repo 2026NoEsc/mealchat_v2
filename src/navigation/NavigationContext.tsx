@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 
 import type { Route, RouteName } from './routes';
+import { popStack } from './stack';
 
 type NavigationValue = {
   current: Route;
@@ -8,6 +9,13 @@ type NavigationValue = {
   navigate: (name: RouteName, params?: Record<string, unknown>) => void;
   replace: (name: RouteName, params?: Record<string, unknown>) => void;
   goBack: () => void;
+  /**
+   * 뒤로 가면서 돌아가는 화면의 params 에 값을 병합한다 (입력값 복원용).
+   *
+   * goBack 에 인자를 받게 하지 않은 것은, 대부분의 호출부가 `onPress={goBack}` 처럼
+   * 넘겨 쓰고 있어서 터치 이벤트 객체가 그대로 params 로 들어가 버리기 때문이다.
+   */
+  goBackWith: (params: Record<string, unknown>) => void;
   /** 탭 전환 — 스택을 해당 루트로 초기화한다 */
   resetTo: (name: RouteName) => void;
 };
@@ -32,7 +40,11 @@ export function NavigationProvider({
   }, []);
 
   const goBack = useCallback(() => {
-    setStack((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
+    setStack((prev) => popStack(prev));
+  }, []);
+
+  const goBackWith = useCallback((params: Record<string, unknown>) => {
+    setStack((prev) => popStack(prev, params));
   }, []);
 
   const resetTo = useCallback((name: RouteName) => {
@@ -46,9 +58,10 @@ export function NavigationProvider({
       navigate,
       replace,
       goBack,
+      goBackWith,
       resetTo,
     }),
-    [stack, navigate, replace, goBack, resetTo],
+    [stack, navigate, replace, goBack, goBackWith, resetTo],
   );
 
   return <NavigationContext.Provider value={value}>{children}</NavigationContext.Provider>;

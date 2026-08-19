@@ -1,6 +1,7 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet, Text, View } from 'react-native';
 
+import BackButton from '../../components/BackButton';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
@@ -13,10 +14,12 @@ export default function ScheduleStepHeader({
   step,
   title,
   subtitle,
+  onBack,
 }: {
   step: 1 | 2;
   title: string;
   subtitle: string;
+  onBack?: () => void;
 }) {
   return (
     <View>
@@ -29,6 +32,8 @@ export default function ScheduleStepHeader({
           style={[styles.fill, { width: `${(step / 3) * 100}%` }]}
         />
       </View>
+
+      {onBack ? <BackButton onPress={onBack} style={styles.back} /> : null}
 
       <Text style={styles.step}>STEP {step}</Text>
       <Text style={styles.title}>{title}</Text>
@@ -49,6 +54,15 @@ const styles = StyleSheet.create({
   fill: {
     height: s(5),
     borderRadius: s(3),
+  },
+  back: {
+    /*
+     * 진행바(y8~13) 아래 STEP 라벨과 같은 줄에 놓되 흐름에서 빼둔다.
+     * 줄 안에 넣으면 칩 높이 13 이 라벨 높이 9 를 밀어내 아래 전체가 4 만큼 내려간다.
+     */
+    position: 'absolute',
+    left: s(11.5),
+    top: s(17),
   },
   step: {
     marginTop: s(4),
