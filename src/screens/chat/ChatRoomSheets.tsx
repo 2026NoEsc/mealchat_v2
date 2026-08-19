@@ -2,8 +2,6 @@ import { Camera } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import {
   Alert,
-  Image,
-  ImageSourcePropType,
   Pressable,
   StyleSheet,
   Text,
@@ -12,10 +10,12 @@ import {
 } from 'react-native';
 
 import { useAuth } from '../../auth/AuthProvider';
+import Avatar from '../../components/Avatar';
 import BottomSheet from '../../components/BottomSheet';
 import { CompleteButton } from '../../components/ui/Button';
 
 import { formatAmount } from '../../lib/format';
+import type { RoomParticipant } from '../../lib/rooms';
 import {
   createRoomSettlement,
   fetchRoomSettlements,
@@ -29,10 +29,6 @@ import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
 
-const moa = require('../../../assets/brand/moa.png');
-const ddori = require('../../../assets/brand/ddori.png');
-const dudu = require('../../../assets/brand/dudu.png');
-const welling = require('../../../assets/brand/welling2.png');
 
 /** 선택된 카드 배경 — 일정 조율 화면과 동일한 오렌지 틴트 */
 const TINT = '#FFF5EB';
@@ -447,68 +443,94 @@ const styles = StyleSheet.create({
 
 /* ------------------------------------------------------------------ 참여 멤버 */
 
-type RoomMember = {
-  name: string;
-  status: string;
-  role: '방장' | '메이트';
-  avatar: ImageSourcePropType;
-  me?: boolean;
-};
-
-/** Figma 채팅/멤버 패널 (553:768) */
-const ROOM_MEMBERS: RoomMember[] = [
-  { name: '모아(나)', status: '온라인', role: '방장', avatar: moa, me: true },
-  { name: '두두', status: '온라인', role: '메이트', avatar: dudu },
-  { name: '또리', status: '3시간 전', role: '메이트', avatar: ddori },
-  { name: '웰링', status: '온라인', role: '메이트', avatar: welling },
-];
-
+/**
+ * Figma 채팅/멤버 패널 (553:768)
+ *
+ * 예전에는 브랜드 캐릭터 네 명과 초대코드 `VF4HLD` 가 그대로 박혀 있었다. Figma
+ * 시안을 옮기면서 남은 값인데, 실제 방과 아무 상관이 없다. 초대 코드는 사람을
+ * 불러들이는 유일한 통로라 가짜 코드를 보여 주면 아무도 들어오지 못한다.
+ */
 export function MembersSheet({
   visible,
+  participants,
+  code,
+  myId,
   onClose,
   onInvite,
 }: {
   visible: boolean;
+  participants: RoomParticipant[];
+  code: string | null;
+  myId: string | null;
   onClose: () => void;
-  onInvite: () => void;
+  onInvite: (code: string) => void;
 }) {
   return (
     <BottomSheet
       visible={visible}
       title="참여 멤버"
-      subtitle={`멤버 ${ROOM_MEMBERS.length}명 · 초대코드 VF4HLD`}
+      subtitle={
+        code ? `멤버 ${participants.length}명 · 초대코드 ${code}` : `멤버 ${participants.length}명`
+      }
       onClose={onClose}>
       <View style={memberStyles.list}>
-        {ROOM_MEMBERS.map((member) => (
-          <View
-            key={member.name}
-            style={[memberStyles.row, member.me && memberStyles.rowMe]}>
-            <View style={memberStyles.avatarBox}>
-              <Image source={member.avatar} style={memberStyles.avatar} resizeMode="contain" />
-            </View>
+        {participants.length === 0 ? (
+          <Text style={memberStyles.empty}>참여 멤버를 불러오지 못했어요</Text>
+        ) : (
+          participants.map((participant) => {
+            const mine = participant.profileId !== null && participant.profileId === myId;
+            return (
+              <View
+                key={participant.id}
+                style={[memberStyles.row, mine && memberStyles.rowMe]}>
+                <Avatar
+                  name={participant.name}
+                  color={participant.avatarColor}
+                  size={s(26)}
+                  style={memberStyles.avatar}
+                />
 
-            <View style={memberStyles.body}>
-              <Text style={memberStyles.name}>{member.name}</Text>
-              <Text style={memberStyles.status}>{member.status}</Text>
-            </View>
+                <View style={memberStyles.body}>
+                  <Text style={memberStyles.name}>
+                    {participant.name}
+                    {mine ? ' (나)' : ''}
+                  </Text>
+                </View>
 
-            {member.role === '방장' ? (
-              <View style={memberStyles.badge}>
-                <Text style={memberStyles.badgeText}>방장</Text>
+                {mine ? (
+                  <View style={memberStyles.badge}>
+                    <Text style={memberStyles.badgeText}>나</Text>
+                  </View>
+                ) : (
+                  <Text style={memberStyles.role}>메이트</Text>
+                )}
               </View>
-            ) : (
-              <Text style={memberStyles.role}>메이트</Text>
-            )}
-          </View>
-        ))}
+            );
+          })
+        )}
       </View>
 
-      <CompleteButton label="＋ 메이트 초대" style={memberStyles.cta} onPress={onInvite} />
+      {/* 코드가 없으면 알려 줄 것이 없으므로 버튼도 내린다 */}
+      {code ? (
+        <CompleteButton
+          label="＋ 메이트 초대"
+          style={memberStyles.cta}
+          onPress={() => onInvite(code)}
+        />
+      ) : null}
     </BottomSheet>
   );
 }
 
 const memberStyles = StyleSheet.create({
+  empty: {
+    paddingVertical: s(12),
+    textAlign: 'center',
+    fontFamily: fontFamily.body,
+    fontSize: fs(7),
+    lineHeight: fs(10),
+    color: colors.textMuted,
+  },
   list: {
     marginTop: s(10),
     gap: s(5),

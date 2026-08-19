@@ -305,10 +305,17 @@ export default function ChatRoomScreen() {
       />
       <MembersSheet
         visible={sheet === 'members'}
+        participants={room?.participants ?? []}
+        code={room?.code ?? null}
+        myId={user?.id ?? null}
         onClose={() => setSheet(null)}
-        onInvite={() => {
+        onInvite={(code) => {
           setSheet(null);
-          append({ kind: 'sys', text: '초대 코드를 복사했어요 — VF4HLD' });
+          /*
+           * 복사하지 않고 코드를 그대로 적어 남긴다. 클립보드 모듈이 없는데
+           * "복사했어요" 라고 말하면 사용자는 붙여넣기가 되는 줄 안다.
+           */
+          append({ kind: 'sys', text: `초대 코드 ${code} 를 메이트에게 알려 주세요` });
         }}
       />
     </KeyboardAvoidingView>
