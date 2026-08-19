@@ -18,7 +18,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../auth/AuthProvider';
 import { parseEmoticonToken } from '../../lib/emoticon';
 import { dayKey, dayLabel, roomTimerLabel, timeLabel } from '../../lib/roomFormat';
-import { sendRoomMessage, sendRoomSticker, type RoomMessage } from '../../lib/rooms';
+import {
+  postRoomSystemMessage,
+  sendRoomMessage,
+  sendRoomSticker,
+  type RoomMessage,
+} from '../../lib/rooms';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useRoom, useRoomMessages } from '../../rooms/useMyRooms';
 import { fs, s } from '../../theme/scale';
@@ -57,6 +62,11 @@ function toDisplayMessages(rows: RoomMessage[], myId: string | null): Message[] 
     if (day && day !== lastDay) {
       out.push({ kind: 'date', text: dayLabel(row.createdAt) });
       lastDay = day;
+    }
+
+    if (row.kind === 'system') {
+      out.push({ kind: 'sys', text: row.text });
+      continue;
     }
 
     const mine = Boolean(myId) && row.senderId === myId;
@@ -122,14 +132,21 @@ export default function ChatRoomScreen() {
   const scrollRef = useRef<ScrollView>(null);
 
   /*
-   * 스티커와 시스템 안내는 messages 테이블이 담을 수 없다 (텍스트 컬럼 하나뿐).
-   * 스키마가 생기기 전까지는 화면에만 남는 임시 항목으로 두고, 서버 목록 뒤에 붙인다.
+   * 방에서 일어난 일은 messages 에 kind='system' 으로 남는다. 예전에는 화면에만
+   * 붙였다가 새로고침하면 사라져서, 무슨 일이 있었는지가 남지 않았다.
    */
-  const [localMessages, setLocalMessages] = useState<Message[]>([]);
-  const append = (message: Message) => setLocalMessages((prev) => [...prev, message]);
+  const notice = async (text: string) => {
+    if (!roomId) return;
+    const error = await postRoomSystemMessage(roomId, text);
+    if (error) {
+      Alert.alert('안내를 남기지 못했어요', error.message);
+      return;
+    }
+    reload();
+  };
 
   /* 서버가 준 목록에 날짜 구분선을 끼워 화면용 배열로 만든다 */
-  const messages = [...toDisplayMessages(remoteMessages, user?.id ?? null), ...localMessages];
+  const messages = toDisplayMessages(remoteMessages, user?.id ?? null);
 
   const send = async () => {
     const text = draft.trim();
@@ -284,7 +301,7 @@ export default function ChatRoomScreen() {
         placeholder="예: 12:30 – 13:30"
         confirmMessage={(label) => `${label} 로 일정을 제안했어요`}
         onClose={() => setSheet(null)}
-        onConfirm={(text) => append({ kind: 'sys', text })}
+        onConfirm={(text) => void notice(text)}
       />
       <VotingSheet
         visible={sheet === 'menu'}
@@ -295,13 +312,13 @@ export default function ChatRoomScreen() {
         placeholder="예: 칼국수"
         confirmMessage={(label) => `오늘 메뉴는 '${label}' 로 정해졌어요`}
         onClose={() => setSheet(null)}
-        onConfirm={(text) => append({ kind: 'sys', text })}
+        onConfirm={(text) => void notice(text)}
       />
       <SettlementSheet
         roomId={roomId}
         visible={sheet === 'settlement'}
         onClose={() => setSheet(null)}
-        onConfirm={(text) => append({ kind: 'sys', text })}
+        onConfirm={(text) => void notice(text)}
       />
       <MembersSheet
         visible={sheet === 'members'}
@@ -312,10 +329,10 @@ export default function ChatRoomScreen() {
         onInvite={(code) => {
           setSheet(null);
           /*
-           * 복사하지 않고 코드를 그대로 적어 남긴다. 클립보드 모듈이 없는데
-           * "복사했어요" 라고 말하면 사용자는 붙여넣기가 되는 줄 안다.
+           * 복사하지 않고 코드를 채팅에 남긴다. 클립보드 모듈이 없는데 "복사했어요"
+           * 라고 말하면 붙여넣기가 되는 줄 안다. 방에 남겨 두면 나중에 다시 찾을 수도 있다.
            */
-          append({ kind: 'sys', text: `초대 코드 ${code} 를 메이트에게 알려 주세요` });
+          void notice(`초대 코드 ${code} 를 메이트에게 알려 주세요`);
         }}
       />
     </KeyboardAvoidingView>

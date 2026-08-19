@@ -35,6 +35,8 @@ export type RoomMessage = {
   senderColor: string;
   text: string;
   createdAt: string;
+  /** system 은 방에서 일어난 일의 안내다. 사람이 보낼 수 없다 */
+  kind: 'user' | 'system';
 };
 
 type ParticipantRow = {
@@ -66,6 +68,7 @@ type MessageRow = {
   sender_color: string;
   message: string;
   created_at: string;
+  kind: string | null;
 };
 
 function toParticipant(row: ParticipantRow): RoomParticipant {
@@ -166,7 +169,7 @@ export async function fetchRoomMessages(roomId: string): Promise<{
 }> {
   const { data, error } = await supabase
     .from('messages')
-    .select('id, room_id, sender_id, sender_name, sender_color, message, created_at')
+    .select('id, room_id, sender_id, sender_name, sender_color, message, created_at, kind')
     .eq('room_id', roomId)
     .order('created_at', { ascending: true })
     .returns<MessageRow[]>();
@@ -182,9 +185,25 @@ export async function fetchRoomMessages(roomId: string): Promise<{
       senderColor: row.sender_color,
       text: row.message,
       createdAt: row.created_at,
+      /* 모르는 값이 오면 사람 말로 다룬다 — 시스템 줄로 잘못 꾸미는 쪽이 더 나쁘다 */
+      kind: row.kind === 'system' ? 'system' : 'user',
     })),
     error: null,
   };
+}
+
+/**
+ * 방에서 일어난 일을 채팅에 남긴다.
+ *
+ * messages 직접 INSERT 로는 kind 를 정할 수 없다 (권한이 room_id, message 뿐).
+ * 서버가 참가자인지 확인하고 system 으로 넣어 준다.
+ */
+export async function postRoomSystemMessage(roomId: string, text: string): Promise<Error | null> {
+  const { error } = await supabase.rpc('post_room_system_message', {
+    target_room: roomId,
+    body: text,
+  });
+  return error;
 }
 
 /**
