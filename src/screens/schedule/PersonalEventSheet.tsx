@@ -33,7 +33,8 @@ type EventSheetProps = {
   /** 값이 있으면 수정, 없으면 새로 추가 */
   editing?: PersonalEvent | null;
   onClose: () => void;
-  onSave: (event: PersonalEvent) => void;
+  /** 저장에 성공했을 때만 true. 실패하면 시트를 열어 둬 입력을 잃지 않는다 */
+  onSave: (event: PersonalEvent) => Promise<boolean>;
   onDelete?: (id: string) => void;
 };
 
@@ -75,16 +76,26 @@ function EventSheetFields({ editing, onClose, onSave, onDelete }: EventSheetFiel
   const [end, setEnd] = useState(initial.end);
   const [color, setColor] = useState(initial.color);
 
-  const save = () => {
+  const [saving, setSaving] = useState(false);
+
+  /*
+   * 예전에는 onSave 를 부르고 곧바로 닫았다. 저장이 실패해도 시트가 사라져서
+   * 사용자는 방금 적은 것을 통째로 다시 입력해야 했다. 성공했을 때만 닫는다.
+   */
+  const save = async () => {
     const trimmed = title.trim();
-    if (!trimmed) return;
-    onSave({
+    if (!trimmed || saving) return;
+
+    setSaving(true);
+    const saved = await onSave({
       id: editing?.id ?? `${Date.now()}`,
       title: trimmed,
       time: `${start} ~ ${end}`,
       color,
     });
-    onClose();
+    setSaving(false);
+
+    if (saved) onClose();
   };
 
   return (
@@ -136,8 +147,8 @@ function EventSheetFields({ editing, onClose, onSave, onDelete }: EventSheetFiel
       <CompleteButton
         label={editing ? '수정하기' : '추가하기'}
         style={styles.cta}
-        disabled={title.trim().length === 0}
-        onPress={save}
+        disabled={saving || title.trim().length === 0}
+        onPress={() => void save()}
       />
 
       {editing && onDelete ? (
@@ -177,7 +188,8 @@ type MemoSheetProps = {
   day: number;
   memo: string;
   onClose: () => void;
-  onSave: (memo: string) => void;
+  /** 저장에 성공했을 때만 true */
+  onSave: (memo: string) => Promise<boolean>;
 };
 
 /** Figma "＋ 이 날짜에 약속 메모 남기기" 에 대응하는 메모 입력 시트 */
@@ -206,6 +218,16 @@ type MemoSheetFieldsProps = Pick<MemoSheetProps, 'memo' | 'onClose' | 'onSave'>;
 
 function MemoSheetFields({ memo, onClose, onSave }: MemoSheetFieldsProps) {
   const [draft, setDraft] = useState(memo);
+  const [saving, setSaving] = useState(false);
+
+  /* 일정 시트와 같은 이유로 성공했을 때만 닫는다 */
+  const save = async () => {
+    if (saving) return;
+    setSaving(true);
+    const saved = await onSave(draft.trim());
+    setSaving(false);
+    if (saved) onClose();
+  };
 
   return (
     <>
@@ -222,10 +244,8 @@ function MemoSheetFields({ memo, onClose, onSave }: MemoSheetFieldsProps) {
       <CompleteButton
         label="저장하기"
         style={styles.cta}
-        onPress={() => {
-          onSave(draft.trim());
-          onClose();
-        }}
+        disabled={saving}
+        onPress={() => void save()}
       />
 
       {memo ? (

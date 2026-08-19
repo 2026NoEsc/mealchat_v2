@@ -5,7 +5,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
-import { buildWeeksOf, columnOfIn, shiftMonth, todayParts, WEEKDAYS } from '../../lib/calendar';
+import {
+  buildWeeksOf,
+  columnOfIn,
+  daysInMonth,
+  shiftMonth,
+  todayParts,
+  WEEKDAYS,
+} from '../../lib/calendar';
 import { createEvent, deleteNote, saveMemo as saveMemoNote, updateEvent } from '../../lib/calendarNotes';
 import { groupNotes, useMonthNotes } from '../../schedule/useMonthNotes';
 import { fs, s } from '../../theme/scale';
@@ -28,6 +35,20 @@ export default function ScheduleHomeScreen() {
   const [selected, setSelected] = useState(today.day);
   const weeks = buildWeeksOf(month.year, month.month);
   const [autoSync, setAutoSync] = useState(true);
+
+  /**
+   * 달을 옮긴다. 고른 날이 새 달에 없으면 그 달의 마지막 날로 당긴다.
+   *
+   * 그냥 두면 8월 31일을 고른 채 9월로 넘어갔을 때 "9월 31일" 이 헤더에 뜨고,
+   * 그 날짜로 일정을 만들면 서버가 `date/time field value out of range` 로 거절한다.
+   * 달력 격자에는 그런 칸이 없으니 사용자는 무엇이 잘못됐는지 알 수도 없다.
+   */
+  const goMonth = (delta: number) =>
+    setMonth((current) => {
+      const next = shiftMonth(current.year, current.month, delta);
+      setSelected((day) => Math.min(day, daysInMonth(next.year, next.month)));
+      return next;
+    });
 
   const { notes, status, reload } = useMonthNotes(month.year, month.month);
   const { eventsByDay, memosByDay, memoIdByDay } = groupNotes(notes);
@@ -60,8 +81,9 @@ export default function ScheduleHomeScreen() {
   const dateOf = (day: number) =>
     `${month.year}-${String(month.month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
-  const saveEvent = async (event: PersonalEvent) => {
-    if (!userId) return;
+  /** 저장에 성공했을 때만 true — 실패하면 시트가 열린 채로 남는다 */
+  const saveEvent = async (event: PersonalEvent): Promise<boolean> => {
+    if (!userId) return false;
     const [start, end] = event.time.split('~').map((part) => part.trim());
     /* id 가 서버에 있는 것이면 수정, 시트가 만든 임시 id 면 새로 만든다 */
     const existing = events.some((item) => item.id === event.id);
@@ -86,9 +108,10 @@ export default function ScheduleHomeScreen() {
 
     if (error) {
       Alert.alert('저장 실패', error.message);
-      return;
+      return false;
     }
     reload();
+    return true;
   };
 
   const deleteEvent = async (id: string) => {
@@ -100,8 +123,8 @@ export default function ScheduleHomeScreen() {
     reload();
   };
 
-  const saveMemo = async (next: string) => {
-    if (!userId) return;
+  const saveMemo = async (next: string): Promise<boolean> => {
+    if (!userId) return false;
     const error = await saveMemoNote({
       profileId: userId,
       date: dateOf(selected),
@@ -110,9 +133,10 @@ export default function ScheduleHomeScreen() {
     });
     if (error) {
       Alert.alert('저장 실패', error.message);
-      return;
+      return false;
     }
     reload();
+    return true;
   };
 
   return (
@@ -135,13 +159,13 @@ export default function ScheduleHomeScreen() {
 
         <View style={styles.card}>
           <View style={styles.nav}>
-            <Pressable hitSlop={s(8)} onPress={() => setMonth((m) => shiftMonth(m.year, m.month, -1))}>
+            <Pressable hitSlop={s(8)} onPress={() => goMonth(-1)}>
               <Text style={styles.navArrow}>‹</Text>
             </Pressable>
             <Text style={styles.navMonth}>
               {month.year}년 {month.month}월
             </Text>
-            <Pressable hitSlop={s(8)} onPress={() => setMonth((m) => shiftMonth(m.year, m.month, 1))}>
+            <Pressable hitSlop={s(8)} onPress={() => goMonth(1)}>
               <Text style={styles.navArrow}>›</Text>
             </Pressable>
           </View>
@@ -248,7 +272,7 @@ export default function ScheduleHomeScreen() {
         editing={eventSheet.editing}
         // editing 을 남겨둬야 닫히는 동안 제목·버튼이 그대로 보인다
         onClose={() => setEventSheet((prev) => ({ ...prev, open: false }))}
-        onSave={(event) => void saveEvent(event)}
+        onSave={saveEvent}
         onDelete={(id) => void deleteEvent(id)}
       />
 
@@ -260,7 +284,7 @@ export default function ScheduleHomeScreen() {
         day={selected}
         memo={memo}
         onClose={() => setMemoSheet((prev) => ({ ...prev, open: false }))}
-        onSave={(next) => void saveMemo(next)}
+        onSave={saveMemo}
       />
     </View>
   );
