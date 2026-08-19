@@ -25,7 +25,7 @@ export default function HomeScreen() {
   const { navigate } = useNavigation();
   const insets = useSafeAreaInsets();
   const { bundle } = useMyProfile();
-  const { rooms } = useMyRooms();
+  const { rooms, status } = useMyRooms();
   const settlements = useMySettlements();
 
   const name = bundle?.profile.name;
@@ -52,10 +52,19 @@ export default function HomeScreen() {
         <Text style={styles.greeting}>
           {name ? `안녕하세요, ${name}님!` : '안녕하세요!'}
         </Text>
+        {/*
+          * 불러오는 중이거나 실패했을 때 "밥약이 없다" 고 단정하지 않는다.
+          * 목록을 못 받은 것과 정말 없는 것은 다른 사실이고, 처음 들어온 사람에게는
+          * 그 차이가 앱이 고장 난 것처럼 보이는지 아닌지를 가른다.
+          */}
         <Text style={styles.greetingSub}>
-          {activeRooms.length === 0 && openSettlements.length === 0
-            ? '아직 잡힌 밥약이 없어요. 하나 만들어 볼까요?'
-            : `현재 밥약 ${activeRooms.length}건, 정산 ${openSettlements.length}건이 기다리고 있어요~`}
+          {status === 'loading'
+            ? '밥약을 불러오는 중이에요'
+            : status === 'error'
+              ? '밥약을 불러오지 못했어요. 잠시 후 다시 열어 주세요'
+              : activeRooms.length === 0 && openSettlements.length === 0
+                ? '아직 잡힌 밥약이 없어요. 하나 만들어 볼까요?'
+                : `현재 밥약 ${activeRooms.length}건, 정산 ${openSettlements.length}건이 기다리고 있어요~`}
         </Text>
 
         <View style={styles.banner}>
@@ -76,7 +85,11 @@ export default function HomeScreen() {
             </Pressable>
           </View>
 
-          {upcoming.length === 0 ? (
+          {status === 'loading' ? (
+            <Text style={styles.emptyItem}>불러오는 중...</Text>
+          ) : status === 'error' ? (
+            <Text style={styles.emptyItem}>밥약을 불러오지 못했어요</Text>
+          ) : upcoming.length === 0 ? (
             <Text style={styles.emptyItem}>다가올 밥약이 없어요</Text>
           ) : (
             upcoming.map((room, i) => {

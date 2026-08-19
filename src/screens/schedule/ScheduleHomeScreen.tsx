@@ -195,6 +195,9 @@ export default function ScheduleHomeScreen() {
 
           {status === 'loading' ? (
             <Text style={styles.emptyText}>불러오는 중...</Text>
+          ) : status === 'error' ? (
+            /* 못 불러온 것을 "없다" 고 적으면 사용자가 자기 일정이 지워진 줄 안다 */
+            <Text style={styles.emptyText}>일정을 불러오지 못했어요</Text>
           ) : events.length === 0 ? (
             <Text style={styles.emptyText}>등록된 일정이 없어요</Text>
           ) : (
