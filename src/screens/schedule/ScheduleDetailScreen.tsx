@@ -128,8 +128,11 @@ export default function ScheduleDetailScreen() {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Text style={styles.cardTitle}>밥약 메이트 선택</Text>
+            {/* 돋보기는 친구 검색이 생길 때 배선한다 — 지금은 아직 눌러도 아무 일 없다 */}
             <Search size={s(9)} color={colors.primary} strokeWidth={2.5} />
-            <Plus size={s(10)} color={colors.primary} strokeWidth={3} />
+            <Pressable onPress={() => navigate('Friends')} hitSlop={s(8)}>
+              <Plus size={s(10)} color={colors.primary} strokeWidth={3} />
+            </Pressable>
           </View>
 
           {friends.length === 0 ? (
