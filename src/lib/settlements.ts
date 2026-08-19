@@ -190,3 +190,31 @@ export async function sendSettlementNotification(input: {
   });
   return error;
 }
+
+
+/**
+ * 내가 알림을 어디까지 읽었는지.
+ *
+ * 행이 없으면(가입 트리거 전) null 로 본다 — 아직 아무것도 읽지 않은 것과 같다.
+ */
+export async function fetchNotificationsReadAt(): Promise<{
+  data: string | null;
+  error: Error | null;
+}> {
+  const { data, error } = await supabase
+    .from('profile_private')
+    .select('notifications_read_at')
+    .maybeSingle<{ notifications_read_at: string | null }>();
+
+  if (error) return { data: null, error };
+  return { data: data?.notifications_read_at ?? null, error: null };
+}
+
+/** "모두 읽음". 지금 시각을 적어 두면 그 이후 알림만 안 읽은 것이 된다. */
+export async function markNotificationsRead(userId: string): Promise<Error | null> {
+  const { error } = await supabase
+    .from('profile_private')
+    .update({ notifications_read_at: new Date().toISOString() })
+    .eq('id', userId);
+  return error;
+}

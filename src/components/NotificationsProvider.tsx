@@ -2,7 +2,13 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { StyleSheet, View } from 'react-native';
 
 import { useAuth } from '../auth/AuthProvider';
-import { fetchMyNotifications, type RoomNotification } from '../lib/settlements';
+import { hasUnreadNotices } from '../lib/notificationsRead';
+import {
+  fetchMyNotifications,
+  fetchNotificationsReadAt,
+  markNotificationsRead,
+  type RoomNotification,
+} from '../lib/settlements';
 import NotificationPanel from './NotificationPanel';
 
 type NotificationsValue = {
@@ -21,27 +27,31 @@ const NotificationsContext = createContext<NotificationsValue | null>(null);
  * 패널은 하단 탭까지 덮어야 하므로 네비게이터 바깥에서 렌더하고,
  * 헤더는 화면마다 다시 배선할 필요 없이 이 컨텍스트로 벨을 연결한다.
  *
- * 읽음 여부는 서버에 없다. notifications 에 읽음 컬럼이 없어서, 이 세션에서
- * "모두 읽음"을 눌렀는지만 기억한다. 앱을 다시 켜면 다시 점이 붙는다.
+ * 읽음 여부는 profile_private.notifications_read_at 에 사람마다 한 값으로 둔다.
+ * 그 시각보다 뒤에 만들어진 알림이 안 읽은 것이다. 알림 행 자체에 표시를 달 수는
+ * 없다 — 그 행은 방 참가자가 함께 보는 것이라 한 사람이 읽으면 모두가 읽은 것이 된다.
  */
 export function NotificationsProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const userId = user?.id ?? null;
 
   const [visible, setVisible] = useState(false);
-  const [dismissed, setDismissed] = useState(false);
   const [notices, setNotices] = useState<RoomNotification[]>([]);
+  const [readAt, setReadAt] = useState<string | null>(null);
 
   useEffect(() => {
     if (!userId) {
       setNotices([]);
+      setReadAt(null);
       return;
     }
 
     let active = true;
-    void fetchMyNotifications()
-      .then(({ data }) => {
-        if (active) setNotices(data ?? []);
+    void Promise.all([fetchMyNotifications(), fetchNotificationsReadAt()])
+      .then(([noticeResult, readResult]) => {
+        if (!active) return;
+        setNotices(noticeResult.data ?? []);
+        setReadAt(readResult.data);
       })
       .catch(() => {
         if (active) setNotices([]);
@@ -54,11 +64,28 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
 
   const open = useCallback(() => setVisible(true), []);
   const close = useCallback(() => setVisible(false), []);
-  const markAllRead = useCallback(() => setDismissed(true), []);
+
+  /*
+   * 점은 먼저 끄고 서버에 적는다. 실패하면 되돌린다 — 눌렀는데 점이 그대로 있으면
+   * 눌린 것인지 알 수 없어서, 여기서는 낙관적으로 반영하는 편이 낫다.
+   */
+  const markAllRead = useCallback(() => {
+    if (!userId) return;
+
+    const previous = readAt;
+    const now = new Date().toISOString();
+    setReadAt(now);
+
+    void markNotificationsRead(userId).then((error) => {
+      if (error) setReadAt(previous);
+    });
+  }, [userId, readAt]);
+
+  const unread = hasUnreadNotices(notices, readAt);
 
   const value = useMemo<NotificationsValue>(
-    () => ({ hasUnread: notices.length > 0 && !dismissed, open, close, markAllRead }),
-    [notices.length, dismissed, open, close, markAllRead],
+    () => ({ hasUnread: unread, open, close, markAllRead }),
+    [unread, open, close, markAllRead],
   );
 
   return (
@@ -68,7 +95,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
         {visible ? (
           <NotificationPanel
             notices={notices}
-            allRead={dismissed}
+            allRead={!unread}
             onClose={close}
             onMarkAllRead={markAllRead}
           />
