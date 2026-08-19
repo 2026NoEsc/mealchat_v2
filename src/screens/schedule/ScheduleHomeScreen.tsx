@@ -5,16 +5,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
-import { buildWeeksOf, columnOfIn, MONTH, shiftMonth, WEEKDAYS, YEAR } from '../../lib/calendar';
+import { buildWeeksOf, columnOfIn, shiftMonth, todayParts, WEEKDAYS } from '../../lib/calendar';
 import { createEvent, deleteNote, saveMemo as saveMemoNote, updateEvent } from '../../lib/calendarNotes';
 import { groupNotes, useMonthNotes } from '../../schedule/useMonthNotes';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
 import { EventSheet, MemoSheet, type PersonalEvent } from './PersonalEventSheet';
-
-/** 연한 배경으로 강조된 날 (Figma 표현 유지) */
-const TINTED = [3, 18];
 
 /**
  * Figma 일정 조율 (309:1077) — 220 x 486
@@ -25,8 +22,10 @@ export default function ScheduleHomeScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const userId = user?.id ?? null;
-  const [month, setMonth] = useState({ year: YEAR, month: MONTH });
-  const [selected, setSelected] = useState(13);
+  /* 상수로 박아 두면 다음 달에 앱을 열어도 지난 달이 나온다 */
+  const [today] = useState(todayParts);
+  const [month, setMonth] = useState({ year: today.year, month: today.month });
+  const [selected, setSelected] = useState(today.day);
   const weeks = buildWeeksOf(month.year, month.month);
   const [autoSync, setAutoSync] = useState(true);
 
@@ -160,12 +159,16 @@ export default function ScheduleHomeScreen() {
               {week.map((day, di) => {
                 if (day === null) return <View key={di} style={styles.cell} />;
                 const isSelected = day === selected;
+                const isToday =
+                  day === today.day &&
+                  month.year === today.year &&
+                  month.month === today.month;
                 return (
                   <Pressable
                     key={di}
                     style={[
                       styles.cell,
-                      TINTED.includes(day) && styles.cellTinted,
+                      isToday && styles.cellToday,
                       isSelected && styles.cellSelected,
                     ]}
                     onPress={() => setSelected(day)}>
@@ -239,6 +242,8 @@ export default function ScheduleHomeScreen() {
       <EventSheet
         visible={eventSheet.open}
         session={eventSheet.session}
+        year={month.year}
+        month={month.month}
         day={selected}
         editing={eventSheet.editing}
         // editing 을 남겨둬야 닫히는 동안 제목·버튼이 그대로 보인다
@@ -250,6 +255,8 @@ export default function ScheduleHomeScreen() {
       <MemoSheet
         visible={memoSheet.open}
         session={memoSheet.session}
+        year={month.year}
+        month={month.month}
         day={selected}
         memo={memo}
         onClose={() => setMemoSheet((prev) => ({ ...prev, open: false }))}
@@ -369,7 +376,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cellTinted: {
+  /* 오늘 — Figma 가 [3, 18] 을 연한 배경으로 강조하던 자리를 실제 정보로 쓴다 */
+  cellToday: {
     backgroundColor: '#FFF5EB',
   },
   cellSelected: {

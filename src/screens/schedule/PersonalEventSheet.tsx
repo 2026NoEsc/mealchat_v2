@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import BottomSheet from '../../components/BottomSheet';
 import { CompleteButton, DangerButton } from '../../components/ui/Button';
-import { formatDate } from '../../lib/calendar';
+import { formatDateIn } from '../../lib/calendar';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
@@ -27,6 +27,8 @@ type EventSheetProps = {
    * `visible` 로 초기화하면 닫는 순간 Modal 까지 언마운트돼 iOS 슬라이드 애니메이션이 끊긴다.
    */
   session: number;
+  year: number;
+  month: number;
   day: number;
   /** 값이 있으면 수정, 없으면 새로 추가 */
   editing?: PersonalEvent | null;
@@ -39,6 +41,8 @@ type EventSheetProps = {
 export function EventSheet({
   visible,
   session,
+  year,
+  month,
   day,
   editing,
   onClose,
@@ -49,7 +53,7 @@ export function EventSheet({
     <BottomSheet
       visible={visible}
       title={editing ? '일정 수정' : '일정 추가'}
-      subtitle={formatDate(day)}
+      subtitle={formatDateIn(year, month, day)}
       onClose={onClose}>
       <EventSheetFields
         key={session}
@@ -168,6 +172,8 @@ type MemoSheetProps = {
   visible: boolean;
   /** EventSheet 과 같은 이유로 열 때마다 증가한다 */
   session: number;
+  year: number;
+  month: number;
   day: number;
   memo: string;
   onClose: () => void;
@@ -175,12 +181,21 @@ type MemoSheetProps = {
 };
 
 /** Figma "＋ 이 날짜에 약속 메모 남기기" 에 대응하는 메모 입력 시트 */
-export function MemoSheet({ visible, session, day, memo, onClose, onSave }: MemoSheetProps) {
+export function MemoSheet({
+  visible,
+  session,
+  year,
+  month,
+  day,
+  memo,
+  onClose,
+  onSave,
+}: MemoSheetProps) {
   return (
     <BottomSheet
       visible={visible}
       title="약속 메모"
-      subtitle={`${formatDate(day)} 에 남길 메모`}
+      subtitle={`${formatDateIn(year, month, day)} 에 남길 메모`}
       onClose={onClose}>
       <MemoSheetFields key={session} memo={memo} onClose={onClose} onSave={onSave} />
     </BottomSheet>
