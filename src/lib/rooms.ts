@@ -1,4 +1,9 @@
 import { toEmoticonToken } from './emoticon';
+import {
+  toSettlementSummary,
+  type SettlementBillRow,
+  type SettlementSummary,
+} from './settlementSummary';
 import { supabase } from './supabase';
 
 export type RoomParticipant = {
@@ -227,39 +232,29 @@ export async function leaveRoom(roomId: string): Promise<Error | null> {
   return error;
 }
 
-export type SettlementSummary = {
-  id: string;
-  roomId: string | null;
-  title: string;
-  totalAmount: number;
-};
-
 /**
- * 내가 만든 정산만 돌아온다. dutch_pay_bills 의 정책이 creator 로 제한한다.
+ * 내가 만들었거나 내가 참가한 방의 정산.
  *
- * "미완료" 여부는 아직 알 수 없다. 완료 표시는 dutch_pay_members.is_completed 에
- * 있는데 그 테이블은 정책도 권한도 없이 잠겨 있다. 참가자별 정산을 열려면
- * 누가 무엇을 볼 수 있는지부터 정하는 별도 작업이 필요하다.
+ * dutch_pay_bills 의 정책은 creator 와 방 참가자를 통과시키고, dutch_pay_members 도
+ * 같은 기준으로 열려 있다 (`20260817200241_open_room_features.sql`). 그래서 누가
+ * 아직 안 보냈는지까지 함께 읽는다.
  */
-export async function fetchMySettlements(): Promise<{
+export type { SettlementSummary };
+
+export async function fetchMySettlements(userId: string | null): Promise<{
   data: SettlementSummary[] | null;
   error: Error | null;
 }> {
   const { data, error } = await supabase
     .from('dutch_pay_bills')
-    .select('id, room_id, title, total_amount')
+    .select('id, room_id, title, total_amount, dutch_pay_members(profile_id, is_completed)')
     .order('created_at', { ascending: false })
-    .returns<{ id: string; room_id: string | null; title: string; total_amount: number }[]>();
+    .returns<SettlementBillRow[]>();
 
   if (error) return { data: null, error };
 
   return {
-    data: (data ?? []).map((row) => ({
-      id: row.id,
-      roomId: row.room_id,
-      title: row.title,
-      totalAmount: row.total_amount,
-    })),
+    data: (data ?? []).map((row) => toSettlementSummary(row, userId)),
     error: null,
   };
 }

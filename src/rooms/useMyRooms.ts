@@ -131,7 +131,7 @@ export function useRoom(roomId: string | null) {
   return room;
 }
 
-/** 내가 만든 정산 목록. 홈의 정산 넛지가 쓴다. */
+/** 내가 볼 수 있는 정산 목록. 홈의 정산 넛지가 쓴다. */
 export function useMySettlements() {
   const { user } = useAuth();
   const userId = user?.id ?? null;
@@ -144,7 +144,7 @@ export function useMySettlements() {
     }
 
     let active = true;
-    void fetchMySettlements()
+    void fetchMySettlements(userId)
       .then(({ data }) => {
         if (active) setSettlements(data ?? []);
       })

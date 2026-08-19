@@ -32,7 +32,16 @@ export default function HomeScreen() {
   /* 아직 끝나지 않은 밥약만 센다 */
   const activeRooms = rooms.filter((room) => roomStatus(room) !== 'expired');
   const upcoming = selectUpcoming(rooms);
-  const settlementRoomId = settlements[0]?.roomId ?? null;
+
+  /* 전원이 송금을 끝낸 정산은 넛지에서 뺀다 */
+  const openSettlements = settlements.filter((settlement) => !settlement.settled);
+  const myTurn = openSettlements.filter((settlement) => settlement.waitingOnMe);
+  /* 내가 보내야 하는 것이 있으면 그 방을 먼저 연다 */
+  const settlementRoomId = (myTurn[0] ?? openSettlements[0])?.roomId ?? null;
+  const pendingPeople = openSettlements.reduce(
+    (total, settlement) => total + settlement.pendingCount,
+    0,
+  );
 
   return (
     <View style={styles.screen}>
@@ -44,9 +53,9 @@ export default function HomeScreen() {
           {name ? `안녕하세요, ${name}님!` : '안녕하세요!'}
         </Text>
         <Text style={styles.greetingSub}>
-          {activeRooms.length === 0 && settlements.length === 0
+          {activeRooms.length === 0 && openSettlements.length === 0
             ? '아직 잡힌 밥약이 없어요. 하나 만들어 볼까요?'
-            : `현재 밥약 ${activeRooms.length}건, 정산 ${settlements.length}건이 기다리고 있어요~`}
+            : `현재 밥약 ${activeRooms.length}건, 정산 ${openSettlements.length}건이 기다리고 있어요~`}
         </Text>
 
         <View style={styles.banner}>
@@ -108,7 +117,7 @@ export default function HomeScreen() {
         </View>
 
         {/* 정산 UI 는 채팅방의 N빵 정산 시트뿐이라 해당 방을 열면서 시트를 펼친다 */}
-        {settlements.length > 0 ? (
+        {openSettlements.length > 0 ? (
           <Pressable
             style={styles.payNudge}
             disabled={!settlementRoomId}
@@ -117,9 +126,17 @@ export default function HomeScreen() {
               navigate('ChatRoom', { roomId: settlementRoomId, openSheet: 'settlement' })
             }>
             <View style={styles.flex}>
-              {/* 완료 여부는 dutch_pay_members 가 잠겨 있어 아직 알 수 없다 */}
-              <Text style={styles.payTitle}>정산 {settlements.length}건</Text>
-              <Text style={styles.paySub}>방이 사라져도 정산 내역은 남아 있어요</Text>
+              {/* 내가 보낼 차례인지부터 알려 준다 — 그게 지금 할 일이다 */}
+              <Text style={styles.payTitle}>
+                {myTurn.length > 0
+                  ? `보낼 정산 ${myTurn.length}건`
+                  : `정산 ${openSettlements.length}건 진행 중`}
+              </Text>
+              <Text style={styles.paySub}>
+                {myTurn.length > 0
+                  ? '아직 송금하지 않았어요'
+                  : `${pendingPeople}명이 아직 안 보냈어요`}
+              </Text>
             </View>
             <Text style={styles.payLink}>보기 →</Text>
           </Pressable>
