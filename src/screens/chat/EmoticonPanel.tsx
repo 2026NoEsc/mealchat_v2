@@ -7,7 +7,10 @@ import { fontFamily, weight } from '../../theme/typography';
 
 export type Sticker = { id: string; source: ImageSourcePropType };
 
-/** Figma 채팅/이모티콘 (555:416) — 4열 × 2행 */
+/**
+ * Figma 채팅/이모티콘 (555:416) — 4열 × 2행.
+ * 패널이 이 목록을 통째로 보여주므로 Figma 의 "전체 보기 →" 는 갈 곳이 없다.
+ */
 export const STICKERS: Sticker[] = [
   { id: 'dudu-love', source: require('../../../assets/stickers/dudu-love.png') },
   { id: 'moa-sleep', source: require('../../../assets/stickers/moa-sleep.png') },
@@ -39,7 +42,6 @@ export default function EmoticonPanel({ onPick }: { onPick: (sticker: Sticker) =
     <View style={styles.panel}>
       <View style={styles.header}>
         <Text style={styles.title}>이모티콘</Text>
-        <Text style={styles.more}>전체 보기 →</Text>
       </View>
 
       <View style={styles.grid}>
@@ -74,13 +76,6 @@ const styles = StyleSheet.create({
     lineHeight: fs(10),
     fontWeight: weight.bold,
     color: colors.textPrimary,
-  },
-  more: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(8),
-    fontWeight: weight.semibold,
-    color: colors.primary,
   },
   grid: {
     // 헤더 하단(y19) → 그리드(y26)

@@ -73,6 +73,11 @@ Docker Desktop 이 있으면 `npx supabase start` 로 로컬 스택을 띄우고
 | `20260817172900_room_invitations.sql` | 적용됨 |
 | `20260817173500_private_profile_split.sql` | 적용됨 |
 
+이 표는 Auth 하드닝 시점의 다섯 건까지다. 이후 기능 작업으로 여섯 건
+(`terms_reconsent_rpc` · `open_room_features` · `room_voting` · `invite_friend_to_room` ·
+`leave_room_rpc` · `avatar_storage`)이 더 쌓였다. 원격 적용 여부는 표를 믿지 말고
+`npx supabase migration list --linked` 로 직접 확인한다.
+
 운영 적용 전에 `db dump --data-only` 로 받은 실제 데이터를 로컬 baseline DB 에 복원하고
 그 위에 네 건을 `migration up` 으로 돌려 리허설했다. 테이블이 비어 있지 않았기 때문에
 (프로필 2, 방 4, 메시지 3, 인증 사용자 4) 반드시 필요한 단계였다.
@@ -154,8 +159,9 @@ Expo Go 로 개발할 때는 `exp://<주소>:8081/--/auth/callback` 형태도 �
   각자 들고 있다. 무엇을 복사할지 정하는 별도 작업이 필요하다.
 - 초대 코드는 대소문자를 구분한다. 무시하게 하려면 `lower(code)` UNIQUE 인덱스가
   먼저 필요한데 기존 코드끼리 충돌하면 생성이 실패하므로 별도 작업이다.
-- `EXPO_PUBLIC_GEMINI_API_KEY`, `EXPO_PUBLIC_KAKAO_REST_API_KEY` 는 `.env` 에 있지만
-  코드에서 아직 쓰지 않는다. 쓰는 순간 번들에 공개되므로 Edge Function 뒤로 옮긴다.
+- Gemini 키는 `supabase/functions/schedule-recommend` 안에서만 쓴다. 앱은 이 Edge
+  Function 을 호출할 뿐이라 키가 번들에 실리지 않는다. `EXPO_PUBLIC_KAKAO_REST_API_KEY`
+  는 아직 쓰는 곳이 없고, 쓰게 되면 같은 방식으로 Edge Function 뒤에 둔다.
 - `.env` 의 변수명이 `EXPO_PUBLIC_SUPABASE_ANON_KEY` 인데 값은 `sb_publishable_…` 이다.
   fallback 이 있어 동작하지만 `.env.example` 대로 `..._PUBLISHABLE_KEY` 로 바꾸는 편이 맞다.
 
@@ -349,26 +355,40 @@ window.zoom=()=>{const el=document.getElementById('root');
 
 ## 7. 다음 할 일
 
-Figma 에 남아 있는 미구현 화면은 **프로필 수정 `309:1086`** 하나뿐이다.
+Figma 화면은 전부 옮겼다. 프로필 수정(`309:1086`)·은행 드롭다운(`549:3366`)도
+[ProfileEditScreen](../src/screens/profile/ProfileEditScreen.tsx) 과
+[BankSelect](../src/components/ui/BankSelect.tsx) 로 들어가 있다.
 화면별 구성은 [figma-specs.md](./figma-specs.md) 에 정리돼 있다.
 
-추천 순서:
+남은 것은 운영 설정과 품질 이슈다. 아래 "Dashboard 에서만 되는 설정" 이 여전히 1순위다.
 
-1. **프로필 수정 `309:1086`** — 회원가입 개인정보 입력(`150:121`)과 필드 구성이 거의 같아
-   [SignupPersonalScreen](../src/screens/signup/SignupPersonalScreen.tsx) 을 참고하면 된다.
-2. **은행 드롭다운 `549:3366`** — 회원가입·프로필 수정이 공유하는 공용 오버레이.
-3. **Supabase 데이터 연동** — RLS 하드닝 마이그레이션 승인·적용 후 프로필부터 연결한다.
-
-### 아직 눌러도 아무 일 없는 버튼
-
-| 위치 | 버튼 | 필요한 것 |
-|---|---|---|
-| 회원가입·프로필 수정 | 은행 칩 | 은행 드롭다운 `549:3366` |
-| 로그인 | `아이디 비밀번호 찾기` | Figma 에도 화면 없음 |
-| 이모티콘 패널 | `전체 보기 →` | 전체 스티커 목록 화면 없음 |
+화면에서 눌러도 아무 일 없는 버튼은 이제 없다. 이모티콘 패널의 `전체 보기 →` 는
+패널이 스티커 8개를 이미 전부 보여주고 있어 갈 곳이 없는 장식이라 지웠다.
+스티커를 더 만들면 그때 목록 화면과 함께 되살린다.
 
 ### 남아 있는 품질 이슈
 
 - `assets/ad/banner-1.png` 가 저해상도 (위 3절 참고)
-- Auth 외 Supabase 데이터 미연동 — 모든 도메인 화면은 파일 안 상수 배열로 동작한다
-- 일정 추가 STEP 1~3 에 뒤로가기가 없다
+- `EXPO_PUBLIC_KAKAO_REST_API_KEY` 는 `.env` 에 있지만 코드에서 쓰지 않는다.
+  쓰는 순간 번들에 공개되므로 Gemini 처럼 Edge Function 뒤로 옮긴다.
+- 장소 검색은 Tmap 에서 **카카오로 바꿀 예정**이다. 그때까지
+  `EXPO_PUBLIC_TMAP_APP_KEY` 가 `.env` 에 없으면 일정 추가 STEP 1 의 장소 검색이
+  통째로 실패한다 — 브라우저로 이 흐름을 확인하려면 먼저 채워 넣어야 한다.
+- `getSupabaseConfig` 의 `EXPO_PUBLIC_SUPABASE_ANON_KEY` fallback 은 아직 못 지운다.
+  `.env` 는 git 에 없어서 한 번의 커밋으로 모두의 파일을 바꿀 수 없다.
+  **각자 자기 `.env` 에서 `..._ANON_KEY` 를 `..._PUBLISHABLE_KEY` 로 바꾸고**,
+  팀 전원이 끝났을 때 [supabaseConfig.ts](../src/lib/supabaseConfig.ts) 의 fallback 과
+  `tests/supabaseConfig.test.ts` 의 해당 케이스를 함께 지운다.
+
+### 화면 사이를 뒤로 갈 때 ⚠️
+
+네비게이터는 **스택 최상단 한 장만 렌더한다.** 뒤로 가면 앞 화면이 새로 마운트되므로
+`useState` 로 들고 있던 입력값은 그대로 사라진다. 그래서 뒤로가기를 붙일 때는
+`goBack()` 이 아니라 `goBackWith({ … })` 로 값을 돌려보내고, 받는 화면은 그 params 로
+state 를 초기화해야 한다 ([stack.ts](../src/navigation/stack.ts)).
+
+일정 추가 STEP 1~3 이 이 방식으로 연결돼 있다. STEP 2 는 이름·메이트·장소를,
+STEP 3 은 격자 선택(`picked`)을 돌려준다.
+
+> `goBack` 은 `onPress={goBack}` 형태로 넘겨 쓰는 곳이 많아 인자를 받지 않는다.
+> 받게 하면 터치 이벤트 객체가 그대로 params 로 들어간다.
