@@ -145,10 +145,17 @@ export default function HomeScreen() {
                   ? `보낼 정산 ${myTurn.length}건`
                   : `정산 ${openSettlements.length}건 진행 중`}
               </Text>
+              {/*
+                * pendingPeople 이 0 인데 여기까지 왔다는 것은 참가자 명단을 못 읽었다는
+                * 뜻이다 (정책에 막혔거나 RPC 이전에 만들어진 정산). "0명이 아직 안
+                * 보냈어요" 는 말이 되지 않으므로 인원을 아는 경우에만 인원을 적는다.
+                */}
               <Text style={styles.paySub}>
                 {myTurn.length > 0
                   ? '아직 송금하지 않았어요'
-                  : `${pendingPeople}명이 아직 안 보냈어요`}
+                  : pendingPeople > 0
+                    ? `${pendingPeople}명이 아직 안 보냈어요`
+                    : '방이 사라져도 정산 내역은 남아 있어요'}
               </Text>
             </View>
             <Text style={styles.payLink}>보기 →</Text>

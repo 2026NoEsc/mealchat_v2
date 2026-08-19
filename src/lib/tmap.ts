@@ -31,7 +31,12 @@ export class TmapError extends Error {}
 function appKey(): string {
   const key = process.env.EXPO_PUBLIC_TMAP_APP_KEY?.trim();
   if (!key) {
-    throw new TmapError('EXPO_PUBLIC_TMAP_APP_KEY 가 설정되지 않았습니다.');
+    /*
+     * 사용자에게는 환경변수명을 보여 주지 않는다. 앱을 처음 쓰는 사람에게
+     * `EXPO_PUBLIC_...` 은 앱이 고장 났다는 신호로만 읽힌다. 원인은 로그로 남긴다.
+     */
+    console.warn('EXPO_PUBLIC_TMAP_APP_KEY 가 설정되지 않아 장소 검색을 할 수 없습니다.');
+    throw new TmapError('장소 검색을 지금 쓸 수 없어요. 잠시 후 다시 시도해 주세요.');
   }
   return key;
 }
