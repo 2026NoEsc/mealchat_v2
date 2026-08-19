@@ -21,7 +21,8 @@ export type RouteName =
   | 'Friends'
   | 'Privacy'
   | 'Origin'
-  | 'ProfileEdit';
+  | 'ProfileEdit'
+  | 'Settlements';
 
 export type Route = {
   name: RouteName;
@@ -49,6 +50,8 @@ export const ROUTE_TO_TAB: Partial<Record<RouteName, TabKey>> = {
   ScheduleTime: 'schedule',
   ScheduleRecommend: 'schedule',
   ScheduleConfirmed: 'schedule',
+  // 정산은 홈에서 들어가므로 홈 탭을 유지한다
+  Settlements: 'home',
   Chat: 'chat',
   Profile: 'profile',
 };

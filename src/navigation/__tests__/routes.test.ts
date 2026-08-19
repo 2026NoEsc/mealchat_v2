@@ -24,6 +24,7 @@ describe('navigation route mappings', () => {
       ScheduleDetail: 'schedule',
       ScheduleRecommend: 'schedule',
       ScheduleTime: 'schedule',
+      Settlements: 'home',
     });
   });
 });

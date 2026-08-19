@@ -12,6 +12,7 @@ import PrivacyScreen from '../screens/profile/PrivacyScreen';
 import ProfileEditScreen from '../screens/profile/ProfileEditScreen';
 import ProfileHomeScreen from '../screens/profile/ProfileHomeScreen';
 import ScheduleConfirmedScreen from '../screens/schedule/ScheduleConfirmedScreen';
+import SettlementsScreen from '../screens/settlement/SettlementsScreen';
 import ScheduleDetailScreen from '../screens/schedule/ScheduleDetailScreen';
 import ScheduleHomeScreen from '../screens/schedule/ScheduleHomeScreen';
 import ScheduleRecommendScreen from '../screens/schedule/ScheduleRecommendScreen';
@@ -69,6 +70,8 @@ function renderScreen(name: RouteName) {
       return <ScheduleRecommendScreen />;
     case 'ScheduleConfirmed':
       return <ScheduleConfirmedScreen />;
+    case 'Settlements':
+      return <SettlementsScreen />;
     case 'Chat':
       return <ChatHomeScreen />;
     case 'ChatRoom':

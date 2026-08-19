@@ -10,12 +10,15 @@ export type SettlementMember = {
 export type Settlement = {
   id: string;
   roomId: string | null;
+  /** 방이 사라졌으면 null. 정산은 방보다 오래 남는다 */
+  roomTitle: string | null;
   title: string;
   totalAmount: number;
   splitCount: number;
   bankName: string;
   accountNumber: string;
   accountHolder: string;
+  createdAt: string;
   members: SettlementMember[];
 };
 
@@ -35,23 +38,30 @@ type BillRow = {
   bank_name: string;
   account_number: string;
   account_holder: string;
+  created_at: string;
+  rooms: { title: string } | { title: string }[] | null;
   dutch_pay_members: MemberRow[] | null;
 };
 
 const SELECT =
   'id, room_id, title, total_amount, split_count, bank_name, account_number, account_holder, ' +
-  'dutch_pay_members(id, profile_id, name, is_completed)';
+  'created_at, rooms(title), dutch_pay_members(id, profile_id, name, is_completed)';
 
 function toSettlement(row: BillRow): Settlement {
+  /* PostgREST 는 관계를 객체로 줄 때도 배열로 줄 때도 있다 */
+  const room = Array.isArray(row.rooms) ? row.rooms[0] : row.rooms;
+
   return {
     id: row.id,
     roomId: row.room_id,
+    roomTitle: room?.title ?? null,
     title: row.title,
     totalAmount: row.total_amount,
     splitCount: row.split_count,
     bankName: row.bank_name,
     accountNumber: row.account_number,
     accountHolder: row.account_holder,
+    createdAt: row.created_at,
     members: (row.dutch_pay_members ?? []).map((member) => ({
       id: member.id,
       profileId: member.profile_id,
@@ -217,4 +227,26 @@ export async function markNotificationsRead(userId: string): Promise<Error | nul
     .update({ notifications_read_at: new Date().toISOString() })
     .eq('id', userId);
   return error;
+}
+
+
+/**
+ * 내가 볼 수 있는 정산 전부, 최신순.
+ *
+ * 정책이 이미 "내가 만들었거나 내가 참가한 방" 으로 제한하므로 따로 거르지 않는다.
+ * 방이 사라진 정산도 그대로 돌아온다 — 채팅방을 거치지 않는 정산 화면이 필요한
+ * 이유가 그것이다.
+ */
+export async function fetchMySettlementsDetailed(): Promise<{
+  data: Settlement[] | null;
+  error: Error | null;
+}> {
+  const { data, error } = await supabase
+    .from('dutch_pay_bills')
+    .select(SELECT)
+    .order('created_at', { ascending: false })
+    .returns<BillRow[]>();
+
+  if (error) return { data: null, error };
+  return { data: (data ?? []).map(toSettlement), error: null };
 }

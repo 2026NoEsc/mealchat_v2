@@ -8,7 +8,6 @@ import {
   type ViewStyle,
 } from 'react-native';
 
-import { fs } from '../theme/scale';
 import { colors } from '../theme/tokens';
 import { fontFamily, weight } from '../theme/typography';
 
@@ -49,7 +48,11 @@ export default function Avatar({ name, color, url, size, radius, style }: Props)
 
   return (
     <View style={[styles.fallback, box, style as StyleProp<ViewStyle>]}>
-      <Text style={[styles.initial, { fontSize: fs(size * 0.42) }]}>
+      {/*
+        * size 는 호출부에서 이미 s() 로 변환한 기기 픽셀이다. 여기서 fs() 를 다시
+        * 씌우면 비율이 한 번 더 곱해져 글자가 원을 훌쩍 넘는다.
+        */}
+      <Text style={[styles.initial, { fontSize: Math.round(size * 0.42) }]}>
         {[...name.trim()][0] ?? '?'}
       </Text>
     </View>

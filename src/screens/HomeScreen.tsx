@@ -36,14 +36,6 @@ export default function HomeScreen() {
   /* 전원이 송금을 끝낸 정산은 넛지에서 뺀다 */
   const openSettlements = settlements.filter((settlement) => !settlement.settled);
   const myTurn = openSettlements.filter((settlement) => settlement.waitingOnMe);
-  /*
-   * 방이 사라져도 정산은 남는다 (dutch_pay_bills.room_id 는 on delete set null).
-   * 정산 화면이 채팅방 시트뿐이라 방 없는 정산은 열 수 없다. 그래서 열 수 있는 것
-   * 중에서 고른다 — 앞의 하나가 방이 없다는 이유로 넛지 전체가 죽으면 안 된다.
-   * 내가 보내야 하는 것이 먼저다.
-   */
-  const openable = [...myTurn, ...openSettlements].find((settlement) => settlement.roomId);
-  const settlementRoomId = openable?.roomId ?? null;
   const pendingPeople = openSettlements.reduce(
     (total, settlement) => total + settlement.pendingCount,
     0,
@@ -135,15 +127,12 @@ export default function HomeScreen() {
           )}
         </View>
 
-        {/* 정산 UI 는 채팅방의 N빵 정산 시트뿐이라 해당 방을 열면서 시트를 펼친다 */}
+        {/*
+          * 정산 목록 화면으로 보낸다. 예전에는 해당 방의 채팅을 열면서 시트를 펼쳤는데,
+          * 방이 사라진 정산은 그 경로로 갈 수 없어 넛지가 통째로 죽었다.
+          */}
         {openSettlements.length > 0 ? (
-          <Pressable
-            style={styles.payNudge}
-            disabled={!settlementRoomId}
-            onPress={() =>
-              settlementRoomId &&
-              navigate('ChatRoom', { roomId: settlementRoomId, openSheet: 'settlement' })
-            }>
+          <Pressable style={styles.payNudge} onPress={() => navigate('Settlements')}>
             <View style={styles.flex}>
               {/* 내가 보낼 차례인지부터 알려 준다 — 그게 지금 할 일이다 */}
               <Text style={styles.payTitle}>
@@ -164,8 +153,7 @@ export default function HomeScreen() {
                     : '방이 사라져도 정산 내역은 남아 있어요'}
               </Text>
             </View>
-            {/* 열 수 없으면 링크처럼 보이지 않게 한다 — 눌리지 않는 화살표는 고장으로 읽힌다 */}
-            {settlementRoomId ? <Text style={styles.payLink}>보기 →</Text> : null}
+            <Text style={styles.payLink}>보기 →</Text>
           </Pressable>
         ) : null}
 
