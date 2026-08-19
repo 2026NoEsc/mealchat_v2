@@ -55,3 +55,56 @@ export function toSettlementSummary(
     settled: members.length > 0 && pending.length === 0,
   };
 }
+
+
+/* ------------------------------------------------ 방에서 지금 볼 정산 고르기 */
+
+/**
+ * 정산 하나를 고를 때 필요한 최소한의 모양.
+ *
+ * 홈이 쓰는 SettlementSummary 와 채팅방 시트가 쓰는 Settlement 이 서로 다른 타입이라
+ * 구조만 요구한다.
+ */
+export type PickableSettlement = {
+  members: { profileId: string | null; isCompleted: boolean }[];
+};
+
+/** 명단이 있고 전원이 보냈을 때만 끝난 것으로 본다 */
+export function isSettled(settlement: PickableSettlement): boolean {
+  return (
+    settlement.members.length > 0 && settlement.members.every((member) => member.isCompleted)
+  );
+}
+
+/**
+ * 방에 정산이 여러 건일 때 시트에 띄울 하나를 고른다.
+ *
+ * 예전에는 `created_at` 최신 한 건만 읽었다. 그러면 끝난 정산이 더 최근일 때
+ * 아직 돈을 안 보낸 정산에 UI 로 갈 방법이 없다 — 홈은 "정산 1건 진행 중" 이라고
+ * 세는데 눌러 들어가면 끝난 정산이 보인다.
+ *
+ * 우선순위는 사용자가 지금 해야 할 일 순서다.
+ *   1. 내가 아직 보내야 하는 정산
+ *   2. 누군가 아직 안 보낸 정산
+ *   3. 그것도 없으면 가장 최근 정산 (전부 끝난 상태를 보여 준다)
+ *
+ * 목록은 최신순으로 들어온다고 본다. 같은 순위 안에서는 그 순서를 지킨다.
+ */
+export function pickActiveSettlement<T extends PickableSettlement>(
+  settlements: T[],
+  userId: string | null,
+): T | null {
+  if (settlements.length === 0) return null;
+
+  const mine = settlements.find((settlement) =>
+    settlement.members.some(
+      (member) => member.profileId === userId && !member.isCompleted && userId !== null,
+    ),
+  );
+  if (mine) return mine;
+
+  const open = settlements.find((settlement) => !isSettled(settlement));
+  if (open) return open;
+
+  return settlements[0];
+}

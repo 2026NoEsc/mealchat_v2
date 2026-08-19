@@ -62,8 +62,15 @@ function toSettlement(row: BillRow): Settlement {
 }
 
 /** 방의 정산. 정책이 방 참가자로 제한하므로 room_id 만 걸면 된다. */
-export async function fetchRoomSettlement(roomId: string): Promise<{
-  data: Settlement | null;
+/**
+ * 방의 정산 전부, 최신순.
+ *
+ * 예전에는 `.limit(1)` 로 최신 한 건만 읽었다. 그러면 끝난 정산이 더 최근일 때
+ * 아직 안 끝난 정산에 UI 로 갈 방법이 사라진다. 어느 것을 띄울지는
+ * [pickActiveSettlement](./settlementSummary.ts) 가 정한다.
+ */
+export async function fetchRoomSettlements(roomId: string): Promise<{
+  data: Settlement[] | null;
   error: Error | null;
 }> {
   const { data, error } = await supabase
@@ -71,11 +78,10 @@ export async function fetchRoomSettlement(roomId: string): Promise<{
     .select(SELECT)
     .eq('room_id', roomId)
     .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle<BillRow>();
+    .returns<BillRow[]>();
 
   if (error) return { data: null, error };
-  return { data: data ? toSettlement(data) : null, error: null };
+  return { data: (data ?? []).map(toSettlement), error: null };
 }
 
 /**

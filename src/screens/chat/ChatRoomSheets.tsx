@@ -18,12 +18,13 @@ import { CompleteButton } from '../../components/ui/Button';
 import { formatAmount } from '../../lib/format';
 import {
   createRoomSettlement,
-  fetchRoomSettlement,
+  fetchRoomSettlements,
   sendSettlementNotification,
   setSettlementCompleted,
   type Settlement,
   type SettlementMember,
 } from '../../lib/settlements';
+import { pickActiveSettlement } from '../../lib/settlementSummary';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
@@ -65,11 +66,13 @@ export function SettlementSheet({
     if (!visible || !roomId) return;
 
     let active = true;
-    void fetchRoomSettlement(roomId)
+    void fetchRoomSettlements(roomId)
       .then(({ data }) => {
         if (!active) return;
-        setSettlement(data);
-        if (data) setAmountText(String(data.totalAmount));
+        /* 방에 정산이 여러 건이면 지금 할 일이 남은 것을 띄운다 */
+        const picked = pickActiveSettlement(data ?? [], user?.id ?? null);
+        setSettlement(picked);
+        if (picked) setAmountText(String(picked.totalAmount));
       })
       .catch(() => {
         if (active) setSettlement(null);
@@ -78,7 +81,7 @@ export function SettlementSheet({
     return () => {
       active = false;
     };
-  }, [visible, roomId, reloadToken]);
+  }, [visible, roomId, reloadToken, user?.id]);
 
   const amount = Number(amountText.replace(/[^0-9]/g, '')) || 0;
   const members = settlement?.members ?? [];
