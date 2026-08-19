@@ -73,10 +73,16 @@ Docker Desktop 이 있으면 `npx supabase start` 로 로컬 스택을 띄우고
 | `20260817172900_room_invitations.sql` | 적용됨 |
 | `20260817173500_private_profile_split.sql` | 적용됨 |
 
-이 표는 Auth 하드닝 시점의 다섯 건까지다. 이후 기능 작업으로 여섯 건
+이 표는 Auth 하드닝 시점의 다섯 건까지다. 이후 기능 작업으로 여덟 건이 더 쌓였고
 (`terms_reconsent_rpc` · `open_room_features` · `room_voting` · `invite_friend_to_room` ·
-`leave_room_rpc` · `avatar_storage`)이 더 쌓였다. 원격 적용 여부는 표를 믿지 말고
-`npx supabase migration list --linked` 로 직접 확인한다.
+`leave_room_rpc` · `avatar_storage` · `toggle_vote_legacy_items` ·
+`drop_pre_rpc_settlement`), **2026-08-20 기준 열세 건 전부 운영에 적용돼 있다.**
+
+> `20260820120000_toggle_vote_legacy_items` 를 넣은 커밋은 제목에 "(미적용)" 이라고
+> 적혀 있다. 커밋 시점에는 사실이었고 같은 날 승인을 받아 push 했다. 적용 여부는
+> 커밋 메시지가 아니라 아래 명령으로 확인한다.
+
+원격 적용 여부는 표를 믿지 말고 `npx supabase migration list --linked` 로 직접 확인한다.
 
 운영 적용 전에 `db dump --data-only` 로 받은 실제 데이터를 로컬 baseline DB 에 복원하고
 그 위에 네 건을 `migration up` 으로 돌려 리허설했다. 테이블이 비어 있지 않았기 때문에
