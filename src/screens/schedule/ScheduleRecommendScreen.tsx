@@ -20,11 +20,14 @@ import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors, shadows } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
+import {
+  buildScheduleRecommendRequest,
+  parseScheduleRecommendations,
+} from './scheduleRecommendContract';
 import type {
   CandidateSlot,
   RecommendationPick,
   SchedulePlace,
-  ScheduleRecommendResponse,
 } from './scheduleTypes';
 
 /*
@@ -182,12 +185,12 @@ export default function ScheduleRecommendScreen() {
           await supabase.functions.invoke(
             'schedule-recommend',
             {
-              body: {
+              body: buildScheduleRecommendRequest({
                 meetingName: name,
                 inviteeIds: invitees,
                 place,
                 candidateSlots: slots,
-              },
+              }),
 
               timeout: INVOKE_TIMEOUT_MS,
             },
@@ -197,15 +200,10 @@ export default function ScheduleRecommendScreen() {
           throw error;
         }
 
-        const response =
-          data as ScheduleRecommendResponse;
+        const recommendations =
+          parseScheduleRecommendations(data);
 
-        if (
-          !response ||
-          !Array.isArray(
-            response.recommendations,
-          )
-        ) {
+        if (!recommendations) {
           throw new Error(
             '추천 응답 형식이 올바르지 않습니다.',
           );
@@ -220,7 +218,7 @@ export default function ScheduleRecommendScreen() {
           );
 
         const nextPicks =
-          response.recommendations
+          recommendations
             .map((recommendation) => {
               const slot =
                 slotMap.get(

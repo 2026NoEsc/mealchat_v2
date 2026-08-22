@@ -25,6 +25,7 @@ import ScheduleStepHeader from './ScheduleStepHeader';
 
 /** Tmap 검색 결과를 다음 단계로 넘길 형태로 옮긴다 */
 const toSchedulePlace = (place: Place): SchedulePlace => ({
+  id: place.id,
   name: place.name,
   address: place.address,
   latitude: place.lat,

@@ -17,12 +17,12 @@ Figma 디자인(`xBf3b09D6Bj1dTiCixt25e`)을 React Native 앱으로 옮기는 �
 | 언어 | TypeScript 5.9 (strict) |
 | 아이콘 | `lucide-react-native` + `react-native-svg` |
 | 네비게이션 | **라이브러리 없음** — 원본에 react-navigation 계열이 없어 Context 기반으로 직접 구현 |
-| 백엔드 | Supabase Auth 기반 구현 완료, 데이터 CRUD 보안 마이그레이션 대기 |
+| 백엔드 | Supabase Auth·RLS 마이그레이션 16개 운영 적용, 실제 Auth E2E 진행 중 |
 
 `.npmrc` 에 `legacy-peer-deps=true` 가 필요하다.
 `lucide-react-native@0.300.0` 이 React 19 를 peer 로 허용하지 않아서 없으면 설치가 실패한다.
 
-### Supabase 진행 상태 (2026-08-17)
+### Supabase 진행 상태 (2026-08-23)
 
 - `src/lib/supabase.ts` 는 publishable key, AsyncStorage 세션, AppState 토큰 갱신을 구성한다.
 - `src/auth/` 는 이메일 로그인·회원가입·비밀번호 재설정·딥링크 세션 교환과 가입 초안을 담당한다.
@@ -51,13 +51,18 @@ Figma 디자인(`xBf3b09D6Bj1dTiCixt25e`)을 React Native 앱으로 옮기는 �
   | 가입 이메일 확인 | `mealchat://auth/callback` |
   | 비밀번호 재설정 | `mealchat://auth/reset` |
 
-  둘 다 Dashboard 의 Auth Redirect URLs 에 등록해야 하고, Expo Go 개발용
+  둘 다 Dashboard 의 Auth Redirect URLs 에 등록해야 한다. 두 standalone URL은
+  **2026-08-22 운영 Dashboard에 등록·저장됐다.** Expo Go 개발용
   `exp://…/--/auth/callback`·`exp://…/--/auth/reset` 도 함께 등록한다.
+- 2026-08-23 실제 테스트 계정 두 개에서 가입 메일 확인과 비밀번호 로그인을 완료했다.
+  비밀번호 재설정은 요청을 만든 앱의 PKCE verifier가 필요하므로 실제 MealChat 앱에서
+  시작해 딥링크 교환까지 검증해야 한다.
 - 재설정 링크로 들어오면 `App.tsx` 가 네비게이터 대신
   [NewPasswordScreen](../src/screens/auth/NewPasswordScreen.tsx) 을 띄운다.
   새 비밀번호를 정하기 전에는 본문으로 통과시키지 않는다 — 그러지 않으면
   재설정 링크가 그냥 매직링크 로그인이 되어 버린다.
-- Dashboard 에서 leaked-password protection 을 켜야 한다.
+- Dashboard 의 leaked-password protection 은 Pro 이상에서만 사용할 수 있다.
+  현재 Free 플랜에서는 비활성화 상태이므로 플랜 변경을 별도로 승인한 뒤 켜야 한다.
 
 #### 마이그레이션 상태
 
@@ -73,10 +78,14 @@ Docker Desktop 이 있으면 `npx supabase start` 로 로컬 스택을 띄우고
 | `20260817172900_room_invitations.sql` | 적용됨 |
 | `20260817173500_private_profile_split.sql` | 적용됨 |
 
-이 표는 Auth 하드닝 시점의 다섯 건까지다. 이후 기능 작업으로 여덟 건이 더 쌓였고
+이 표는 Auth 하드닝 시점의 다섯 건까지다. 이후 기능 작업으로 열한 건이 더 쌓였고
 (`terms_reconsent_rpc` · `open_room_features` · `room_voting` · `invite_friend_to_room` ·
 `leave_room_rpc` · `avatar_storage` · `toggle_vote_legacy_items` ·
-`drop_pre_rpc_settlement`), **2026-08-20 기준 열세 건 전부 운영에 적용돼 있다.**
+`drop_pre_rpc_settlement` · `one_open_settlement_per_room` · `notifications_read_at` ·
+`system_messages`), **2026-08-22 원격 조회 기준 열여섯 건 전부 운영에 적용돼 있다.**
+
+같은 날의 RPC·RLS·Edge Function 재검토 결과와 미해결 위험은
+[보안 감사 기록](./security-audit-2026-08-22.md)에 남겼다.
 
 > `20260820120000_toggle_vote_legacy_items` 를 넣은 커밋은 제목에 "(미적용)" 이라고
 > 적혀 있다. 커밋 시점에는 사실이었고 같은 날 승인을 받아 push 했다. 적용 여부는
@@ -117,7 +126,7 @@ baseline 은 원격에 이미 존재하던 스키마를 `db dump` 로 보존한 
 자동으로 참가자에 넣는다. 나가기는 자기 행 DELETE 정책으로 가능하고,
 남을 내보내는 기능은 아직 없다.
 
-#### Dashboard 에서만 되는 설정 ⚠️ 미완
+#### Dashboard 에서만 되는 설정 ⚠️ 일부 미완
 
 마이그레이션으로도, `supabase config push` 로도 안전하게 할 수 없다.
 `config push` 는 설정 하나만 고르는 방법이 없어 `[auth]` 전체를 밀어 넣는데,
@@ -131,6 +140,8 @@ mealchat://auth/callback
 mealchat://auth/reset
 ```
 
+**2026-08-22 운영 Dashboard에 두 URL을 등록·저장했다.**
+
 Expo Go 로 개발할 때는 `exp://<주소>:8081/--/auth/callback` 형태도 함께 넣는다.
 `npx expo start` 가 찍어 주는 주소를 쓰면 된다.
 
@@ -139,8 +150,10 @@ Expo Go 로 개발할 때는 `exp://<주소>:8081/--/auth/callback` 형태도 �
 
 **2. 유출 비밀번호 차단** — Authentication → Policies → Password Protection 에서
 "Check against HaveIBeenPwned" 를 켠다. Security Advisor 가 지적한 항목이다.
+다만 현재 프로젝트는 Free 플랜이고 이 기능은 Pro 이상에서만 제공된다. 이번 작업에서는
+결제·플랜 변경을 하지 않았으므로 여전히 꺼져 있다. 플랜 변경은 별도 승인을 받아야 한다.
 
-두 가지 모두 바꾼 뒤에는 실제로 신규 가입을 해서 확인 메일 링크가 앱으로 돌아오는지
+남은 설정을 마친 뒤에는 실제로 신규 가입을 해서 확인 메일 링크가 앱으로 돌아오는지
 확인한다. 등록된 URL 과 앱이 만드는 URL 이 한 글자라도 다르면 조용히 실패한다.
 
 #### 운영 DB 현재 상태
@@ -155,7 +168,12 @@ Expo Go 로 개발할 때는 `exp://<주소>:8081/--/auth/callback` 형태도 �
 
 #### 아직 남은 일
 
-- **Dashboard 설정 두 가지가 남았다.** 아래 "Dashboard 에서만 되는 설정" 참고.
+- **유출 비밀번호 차단이 남았다.** 현재 Free 플랜에서는 켤 수 없으므로 Pro 플랜 변경을
+  별도 승인한 뒤 적용해야 한다. Redirect URL 두 개는 2026-08-22 등록했다.
+- **실제 가입·이메일 확인·로그인은 두 테스트 계정에서 통과했다.** 각 계정의
+  `profiles`·`profile_private` 자동 생성과 두 세션의 방·메시지·참가자 격리도 통과했다.
+  임시 방은 `.delete()` 성공 표시를 믿지 않고 `leave_room` 결과와 재조회로 0개까지
+  확인했다. 남은 Auth E2E는 실제 앱에서 시작하는 비밀번호 재설정·딥링크다.
 - **이메일 확인이 켜져 있으면 가입 시점에 계좌·생년월일이 저장되지 않는다.**
   `profile_private` 쓰기는 세션을 요구하는데 확인 대기 중에는 세션이 없다.
   사용자 메타데이터로 넘기면 JWT 에 실려 나가므로 그 방법은 쓰지 않는다.
@@ -168,8 +186,15 @@ Expo Go 로 개발할 때는 `exp://<주소>:8081/--/auth/callback` 형태도 �
 - Gemini 키는 `supabase/functions/schedule-recommend` 안에서만 쓴다. 앱은 이 Edge
   Function 을 호출할 뿐이라 키가 번들에 실리지 않는다. `EXPO_PUBLIC_KAKAO_REST_API_KEY`
   는 아직 쓰는 곳이 없고, 쓰게 되면 같은 방식으로 Edge Function 뒤에 둔다.
-- `.env` 의 변수명이 `EXPO_PUBLIC_SUPABASE_ANON_KEY` 인데 값은 `sb_publishable_…` 이다.
-  fallback 이 있어 동작하지만 `.env.example` 대로 `..._PUBLISHABLE_KEY` 로 바꾸는 편이 맞다.
+- 운영 `schedule-recommend` version 7은 `placeCandidates`를 받고
+  `slotRecommendations`·`placeRecommendations`를 반환하지만, 저장소의 레거시 함수는
+  `place`와 `recommendations`를 쓴다. 2026-08-23 클라이언트는 두 요청 필드를 함께 보내고
+  두 시간 추천 응답을 같은 화면 모델로 정규화하도록 바꿨다. 같은 날 운영 v7의
+  `index.ts`·`deno.json`도 로컬 작업 트리에 복원했고, Deno 검사에서 드러난 미검증
+  `body` 참조 네 곳을 `requestBody`로 바꿔 타입 검사를 통과시켰다. 이 로컬 수정은 아직
+  운영에 재배포하지 않았다. 실제 사용자 JWT로 운영 함수를 두 차례 호출했을 때 Auth와
+  함수 검증은 통과했지만 Gemini가 매번 세 차례 `503 UNAVAILABLE`을 반환했다. 따라서
+  제공자 요청까지는 실증됐고 실제 응답 파싱·화면 렌더링은 아직 미검증이다.
 
 ---
 
@@ -366,7 +391,9 @@ Figma 화면은 전부 옮겼다. 프로필 수정(`309:1086`)·은행 드롭다
 [BankSelect](../src/components/ui/BankSelect.tsx) 로 들어가 있다.
 화면별 구성은 [figma-specs.md](./figma-specs.md) 에 정리돼 있다.
 
-남은 것은 운영 설정과 품질 이슈다. 아래 "Dashboard 에서만 되는 설정" 이 여전히 1순위다.
+남은 것은 실제 앱의 비밀번호 재설정·딥링크, Gemini 정상 응답 이후 파싱·렌더링, RPC 역할
+결정, 로컬 함수 수정의 배포 여부다. Redirect URL은 등록됐고 유출 비밀번호 차단은 Pro
+플랜 변경 승인이 있어야 진행할 수 있다.
 
 ### 아직 눌러도 아무 일 없는 컨트롤
 
