@@ -119,3 +119,41 @@ export function formatSlotDate(slot: Pick<CandidateSlot, 'date' | 'startTime' | 
 
   return `${date} ${slot.startTime}~${slot.endTime}`;
 }
+
+/**
+ * `8/21(금) 18:00~20:00` 을 다시 슬롯으로 되돌린다.
+ *
+ * 방의 일정 조율 투표는 후보를 라벨 문자열로만 들고 있어서, 추천을 돌리려면
+ * 날짜와 시각을 되찾아야 한다. 라벨에 연도가 없는 것이 문제인데, 후보는 늘
+ * 가까운 미래라 오늘을 기준으로 가장 가까운 해를 고르면 맞는다 — 12월에 1월
+ * 후보를 잡는 경우까지 덮인다.
+ */
+export function parseSlotLabel(label: string, today: Date = new Date()): CandidateSlot | null {
+  const match = /^(\d{1,2})\/(\d{1,2})\([^)]*\)\s*(\d{1,2}:\d{2})~(\d{1,2}:\d{2})$/.exec(
+    label.trim(),
+  );
+  if (!match) return null;
+
+  const [, monthText, dayText, startTime, endTime] = match;
+  const month = Number(monthText);
+  const day = Number(dayText);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+  const pad = (n: number) => String(n).padStart(2, '0');
+
+  /* 오늘 이전이면 내년 후보다 — 지난 날짜로 약속을 잡을 수는 없다 */
+  let year = today.getFullYear();
+  const candidate = new Date(year, month - 1, day);
+  const midnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  if (candidate.getTime() < midnight.getTime()) year += 1;
+
+  const date = `${year}-${pad(month)}-${pad(day)}`;
+
+  return {
+    id: `${date}-${startTime}-${endTime}`,
+    date,
+    startTime,
+    endTime,
+    label: label.trim(),
+  };
+}

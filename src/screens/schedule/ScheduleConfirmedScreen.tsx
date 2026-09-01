@@ -1,137 +1,101 @@
-import {
-  CalendarDays,
-  MapPin,
-  Sparkles,
-  Users,
-} from 'lucide-react-native';
+import { CalendarDays, MapPin, Users } from 'lucide-react-native';
 import { useState } from 'react';
-import {
-  Alert,
-  Image,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Alert, Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
 import { CompleteButton } from '../../components/ui/Button';
-import {
-  createRoom,
-  inviteFriendToRoom,
-} from '../../lib/rooms';
+import type { MyLocation } from '../../lib/myLocation';
+import { createRoom, inviteFriendToRoom } from '../../lib/rooms';
+import { seedVotingOptions } from '../../lib/voting';
 import { useNavigation } from '../../navigation/NavigationContext';
-import { formatSlotDate } from '../../lib/scheduleSlots';
 import { fs, s } from '../../theme/scale';
 import { colors, shadows } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
-import type { RecommendationPick } from './scheduleTypes';
+import type { CandidateSlot } from './scheduleTypes';
 
 const moa = require('../../../assets/brand/moa.png');
 
 type Params = {
-  pick?: RecommendationPick;
   name?: string;
   invitees?: string[];
+  /** STEP 1 에서 잡은 내 위치 */
+  origin?: MyLocation;
+  /** STEP 2 에서 고른 내가 가능한 시간 */
+  slots?: CandidateSlot[];
+  /** 뒤로 갈 때 STEP 2 에 돌려줄 격자 선택 */
+  picked?: string[];
 };
 
+/**
+ * STEP 3 — 방 만들기.
+ *
+ * 여기서 일정을 확정하지 않는다. 방을 만들고 메이트를 초대한 뒤, 방 안의
+ * 일정 조율 투표로 각자 가능한 시간을 모은다. AI 추천은 그 결과가 쌓인 뒤에
+ * 돌려야 의미가 있다 — 아무도 답하지 않은 상태에서 낸 추천은 참석 여부가
+ * 아니라 "저장된 개인 일정과 안 겹치는 후보" 일 뿐이다.
+ */
 export default function ScheduleConfirmedScreen() {
   const insets = useSafeAreaInsets();
 
-  const {
-    navigate,
-    current,
-  } = useNavigation();
+  const { navigate, goBackWith, current } = useNavigation();
 
   const { user } = useAuth();
 
-  const params =
-    current.params as Params | undefined;
+  const params = current.params as Params | undefined;
 
-  const pick =
-    params?.pick;
+  const title = params?.name || '새 밥약';
+  const invitees = params?.invitees ?? [];
+  const origin = params?.origin;
+  const slots = params?.slots ?? [];
+  const picked = params?.picked ?? [];
 
-  const title =
-    params?.name || '새 밥약';
+  const [creating, setCreating] = useState(false);
 
-  const invitees =
-    params?.invitees ?? [];
-
-  const [creating, setCreating] =
-    useState(false);
+  const goPrev = () => goBackWith({ name: title, invitees, origin, picked });
 
   const openRoom = async () => {
     if (!user?.id) {
-      Alert.alert(
-        '로그인 필요',
-        '로그인 정보를 확인해 주세요.',
-      );
-
+      Alert.alert('로그인 필요', '로그인 정보를 확인해 주세요.');
       return;
     }
 
-    if (!pick) {
-      Alert.alert(
-        '일정 정보 없음',
-        '확정할 일정 정보가 없습니다.',
-      );
-
+    if (slots.length === 0) {
+      Alert.alert('시간 정보 없음', '가능한 시간을 먼저 골라 주세요.');
       return;
     }
 
     setCreating(true);
 
     try {
-      const meetingDate =
-        pick.slot.date;
+      /*
+       * 아직 언제 만날지 정해지지 않았다. 방이 사라지는 기준으로 쓸 날짜가
+       * 필요해서 후보 중 가장 늦은 날을 쓴다 — 조율이 끝나기 전에 방이
+       * 없어지면 안 된다.
+       */
+      const lastDate = slots.reduce(
+        (latest, slot) => (slot.date > latest ? slot.date : latest),
+        slots[0].date,
+      );
 
-      const confirmedSlot =
-        `${pick.slot.date} ` +
-        `${pick.slot.startTime}~${pick.slot.endTime}` +
-        ` · ${pick.place.name}`;
-
-      const {
-        roomId,
-        error,
-      } = await createRoom({
+      const { roomId, error } = await createRoom({
         ownerId: user.id,
         title,
-        meetingDate,
-
-        expiresAt: new Date(
-          `${meetingDate}T23:59:59`,
-        ).toISOString(),
-
-        locationName:
-          pick.place.name,
-
-        confirmedSlot,
+        meetingDate: lastDate,
+        expiresAt: new Date(`${lastDate}T23:59:59`).toISOString(),
       });
 
       if (error || !roomId) {
-        Alert.alert(
-          '방 만들기 실패',
-          error?.message ??
-            '잠시 후 다시 시도해 주세요.',
-        );
-
+        Alert.alert('방 만들기 실패', error?.message ?? '잠시 후 다시 시도해 주세요.');
         return;
       }
 
       const failed: string[] = [];
 
       for (const friendId of invitees) {
-        const result =
-          await inviteFriendToRoom(
-            roomId,
-            friendId,
-          );
-
-        if (result.error) {
-          failed.push(friendId);
-        }
+        const result = await inviteFriendToRoom(roomId, friendId);
+        if (result.error) failed.push(friendId);
       }
 
       if (failed.length > 0) {
@@ -141,10 +105,17 @@ export default function ScheduleConfirmedScreen() {
         );
       }
 
-      navigate('ChatRoom', {
+      /*
+       * 내가 고른 시간을 일정 조율 투표의 첫 후보로 올린다. 빈 방에서 각자
+       * 후보를 만들어 넣게 두면 아무도 시작하지 않는다.
+       */
+      await seedVotingOptions(
         roomId,
-        title,
-      });
+        'time',
+        slots.map((slot) => slot.label),
+      );
+
+      navigate('ChatRoom', { roomId, title, openSheet: 'schedule' });
     } finally {
       setCreating(false);
     }
@@ -152,133 +123,64 @@ export default function ScheduleConfirmedScreen() {
 
   return (
     <View style={styles.screen}>
-      <View
-        style={{
-          height: insets.top,
-          backgroundColor: colors.surface,
-        }}
-      />
+      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
 
       <AppHeader />
 
-      <ScrollView
-        contentContainerStyle={styles.body}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <View style={styles.hero}>
-          <Image
-            source={moa}
-            style={styles.heroImage}
-            resizeMode="contain"
-          />
+          <Image source={moa} style={styles.heroImage} resizeMode="contain" />
         </View>
 
-        <Text style={styles.title}>
-          일정이 확정됐어요!
-        </Text>
+        <Text style={styles.title}>거의 다 됐어요!</Text>
 
-        <Text style={styles.subtitle}>
-          선택한 일정으로 채팅방을 만들 수 있어요
-        </Text>
+        <Text style={styles.subtitle}>방을 만들고 가능한 시간을 모아 볼까요</Text>
 
-        {pick ? (
-          <View style={styles.card}>
-            <View style={styles.cardHead}>
-              <Text style={styles.cardTitle}>
-                {title}
-              </Text>
-
-              <View style={styles.badge}>
-                <Text
-                  style={styles.badgeText}
-                >
-                  확정
-                </Text>
-              </View>
-            </View>
-
-            <InfoRow
-              icon={
-                <CalendarDays
-                  size={s(9)}
-                  color={colors.primary}
-                  strokeWidth={2}
-                />
-              }
-              text={formatSlotDate(pick.slot)}
-            />
-
-            <InfoRow
-              icon={
-                <MapPin
-                  size={s(9)}
-                  color={colors.primary}
-                  strokeWidth={2}
-                />
-              }
-              text={pick.place.name}
-            />
-
-            <InfoRow
-              icon={
-                <Users
-                  size={s(9)}
-                  color={colors.primary}
-                  strokeWidth={2}
-                />
-              }
-              text={
-                `${pick.availableCount} / ` +
-                `${pick.totalCount}명 참석 가능`
-              }
-            />
-
-            <InfoRow
-              icon={
-                <Sparkles
-                  size={s(9)}
-                  color={colors.primary}
-                  strokeWidth={2}
-                />
-              }
-              text={
-                `AI 적합도 ${Math.round(
-                  pick.score,
-                )}%`
-              }
-            />
-
-            <Text style={styles.reason}>
-              {pick.reason}
-            </Text>
+        <View style={styles.card}>
+          <View style={styles.cardHead}>
+            <Text style={styles.cardTitle}>{title}</Text>
           </View>
-        ) : (
-          <View style={styles.card}>
-            <Text style={styles.errorText}>
-              확정된 일정 정보를 찾을 수 없어요.
-            </Text>
-          </View>
-        )}
+
+          <InfoRow
+            icon={<CalendarDays size={s(9)} color={colors.primary} strokeWidth={2} />}
+            text={`내가 가능한 시간 ${slots.length}개`}
+          />
+
+          <InfoRow
+            icon={<Users size={s(9)} color={colors.primary} strokeWidth={2} />}
+            text={
+              invitees.length > 0
+                ? `메이트 ${invitees.length}명 초대`
+                : '초대 코드로 나중에 부를 수 있어요'
+            }
+          />
+
+          <InfoRow
+            icon={<MapPin size={s(9)} color={colors.primary} strokeWidth={2} />}
+            text={origin ? `내 출발지 · ${origin.name}` : '출발지 미설정'}
+          />
+
+          <Text style={styles.reason}>
+            식당은 메이트들이 시간을 고른 뒤 방에서 AI 추천을 받아요.
+          </Text>
+        </View>
 
         <Text style={styles.note}>
-          채팅방으로 이동하면 방을 생성하고 선택한 메이트를 초대해요.
+          방을 만들면 고른 시간이 일정 조율 투표에 올라가고, 메이트들이 가능한 시간을
+          고를 수 있어요.
         </Text>
 
         <CompleteButton
-          label={
-            creating
-              ? '방 만드는 중'
-              : '채팅방으로 이동'
-          }
+          label={creating ? '방 만드는 중' : '밥약 방 만들기'}
           showNext
           style={styles.cta}
-          disabled={
-            creating || !pick
-          }
-          onPress={() =>
-            void openRoom()
-          }
+          disabled={creating || slots.length === 0}
+          onPress={() => void openRoom()}
         />
+
+        <Text style={styles.backLink} onPress={goPrev}>
+          시간 다시 고르기
+        </Text>
       </ScrollView>
     </View>
   );
@@ -430,6 +332,15 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
 
+  /* 되돌아가는 길은 눈에 덜 띄게 — 주된 동작은 방 만들기다 */
+  backLink: {
+    marginTop: s(10),
+    textAlign: 'center',
+    fontFamily: fontFamily.body,
+    fontSize: fs(7),
+    lineHeight: fs(10),
+    color: colors.textMuted,
+  },
   cta: {
     marginTop: s(12),
     marginHorizontal: s(11.5),

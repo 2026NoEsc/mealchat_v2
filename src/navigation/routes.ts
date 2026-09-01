@@ -12,7 +12,6 @@ export type RouteName =
   | 'Schedule'
   | 'ScheduleDetail'
   | 'ScheduleTime'
-  | 'ScheduleRecommend'
   | 'ScheduleConfirmed'
   | 'Chat'
   | 'ChatRoom'
@@ -48,7 +47,6 @@ export const ROUTE_TO_TAB: Partial<Record<RouteName, TabKey>> = {
   // 일정 추가 3단계와 확정 화면도 하단 탭을 유지한다 (Figma 309:1065 / 160:733 / 159:491 / 160:827)
   ScheduleDetail: 'schedule',
   ScheduleTime: 'schedule',
-  ScheduleRecommend: 'schedule',
   ScheduleConfirmed: 'schedule',
   // 정산은 홈에서 들어가므로 홈 탭을 유지한다
   Settlements: 'home',

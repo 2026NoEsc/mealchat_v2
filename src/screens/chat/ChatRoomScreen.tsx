@@ -31,6 +31,8 @@ import { colors, shadows } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
 import { MembersSheet, SettlementSheet } from './ChatRoomSheets';
 import EmoticonPanel, { findSticker } from './EmoticonPanel';
+import RecommendSheet from './RecommendSheet';
+import ScheduleSheet from './ScheduleSheet';
 import VotingSheet from './VotingSheet';
 
 /** Figma 채팅방 색상 — 말풍선 시간 / 날짜 구분선 / 시스템 말풍선 글자 */
@@ -99,7 +101,7 @@ function toDisplayMessages(rows: RoomMessage[], myId: string | null): Message[] 
   return out;
 }
 
-type SheetKey = 'schedule' | 'menu' | 'settlement' | 'members' | null;
+type SheetKey = 'schedule' | 'recommend' | 'menu' | 'settlement' | 'members' | null;
 
 /**
  * Figma 채팅/채팅방 (315:4324) — 220 x 486
@@ -292,14 +294,18 @@ export default function ChatRoomScreen() {
         />
       ) : null}
 
-      <VotingSheet
+      <ScheduleSheet
         visible={sheet === 'schedule'}
         roomId={roomId}
-        kind="time"
-        title="일정 조율"
-        subtitle="가능한 시간대에 투표해 주세요"
-        placeholder="예: 12:30 – 13:30"
-        confirmMessage={(label) => `${label} 로 일정을 제안했어요`}
+        onClose={() => setSheet(null)}
+        onSubmitted={(text) => void notice(text)}
+        onAskRecommend={() => setSheet('recommend')}
+      />
+
+      <RecommendSheet
+        visible={sheet === 'recommend'}
+        roomId={roomId}
+        title={title}
         onClose={() => setSheet(null)}
         onConfirm={(text) => void notice(text)}
       />

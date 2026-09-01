@@ -17,6 +17,8 @@ export type Place = {
   address: string;
   lat: number;
   lng: number;
+  /** Tmap 업종 분류 — "한식", "갈비/고깃집" 처럼 온다. 없으면 빈 문자열 */
+  category: string;
 };
 
 export type WalkRoute = {
@@ -57,6 +59,9 @@ type PoiRow = {
   frontLon?: string;
   noorLat?: string;
   noorLon?: string;
+  middleBizName?: string;
+  lowerBizName?: string;
+  detailBizName?: string;
 };
 
 /** 시/구/동 + 도로명 + 건물번호를 사람이 읽는 한 줄로 합친다 */
@@ -65,6 +70,17 @@ export function formatPoiAddress(poi: PoiRow): string {
   const building = [poi.buildingNo1, poi.buildingNo2].filter((n) => n && n !== '0').join('-');
   const road = [poi.roadName, building].filter(Boolean).join(' ');
   return [area, road || poi.detailAddrName].filter(Boolean).join(' ').trim();
+}
+
+/**
+ * 업종을 한 줄로. 가장 구체적인 이름을 앞세운다.
+ *
+ * 취향 매칭에 쓰는 값이라 "음식점" 보다 "갈비/고깃집" 이 쓸모 있다.
+ */
+export function formatPoiCategory(poi: PoiRow): string {
+  /* Tmap 은 "갈비\/고깃집" 처럼 역슬래시를 섞어 보낸다 — 그대로 두면 화면에 보인다 */
+  const raw = poi.detailBizName || poi.lowerBizName || poi.middleBizName || '';
+  return raw.replace(/\\/g, '').trim();
 }
 
 /**
@@ -89,6 +105,7 @@ export function parsePoiSearch(body: unknown): Place[] {
         address: formatPoiAddress(poi),
         lat,
         lng,
+        category: formatPoiCategory(poi),
       },
     ];
   });
@@ -109,6 +126,16 @@ export function parseWalkRoute(body: unknown): WalkRoute | null {
     }
   }
   return null;
+}
+
+/** 같은 가게가 여러 검색어에 걸릴 수 있어 id 로 한 번 거른다. 먼저 나온 쪽을 남긴다. */
+export function dedupeById(places: Place[]): Place[] {
+  const seen = new Set<string>();
+  return places.filter((place) => {
+    if (seen.has(place.id)) return false;
+    seen.add(place.id);
+    return true;
+  });
 }
 
 /** 초 → "도보 8분" (1분 미만은 올려서 0분을 만들지 않는다) */
@@ -163,4 +190,31 @@ export async function walkRoute(
   });
 
   return parseWalkRoute(body);
+}
+
+/**
+ * 중간 지점 둘레에서 찾는다.
+ *
+ * `/pois/search/around` 는 searchKeyword 를 무시하고 반경 안의 모든 POI(버스정류장까지)
+ * 를 거리순으로 돌려준다. 그래서 같은 `/pois` 에 center 와 radius 를 얹는 쪽을 쓴다.
+ * radius 는 km 이고 Tmap 최대는 33 이다.
+ */
+export async function searchPlacesAround(
+  center: { lat: number; lng: number },
+  keyword: string,
+  { radiusKm = 2, count = 8 }: { radiusKm?: number; count?: number } = {},
+): Promise<Place[]> {
+  const query = keyword.trim();
+  if (!query) return [];
+
+  const params = new URLSearchParams({
+    version: '1',
+    searchKeyword: query,
+    centerLon: String(center.lng),
+    centerLat: String(center.lat),
+    radius: String(Math.min(Math.max(radiusKm, 1), 33)),
+    count: String(count),
+  });
+
+  return parsePoiSearch(await request(`/pois?${params}`, { method: 'GET' }));
 }

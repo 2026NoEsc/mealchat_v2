@@ -15,7 +15,6 @@ import ScheduleConfirmedScreen from '../screens/schedule/ScheduleConfirmedScreen
 import SettlementsScreen from '../screens/settlement/SettlementsScreen';
 import ScheduleDetailScreen from '../screens/schedule/ScheduleDetailScreen';
 import ScheduleHomeScreen from '../screens/schedule/ScheduleHomeScreen';
-import ScheduleRecommendScreen from '../screens/schedule/ScheduleRecommendScreen';
 import ScheduleTimeScreen from '../screens/schedule/ScheduleTimeScreen';
 import SignupCalendarScreen from '../screens/signup/SignupCalendarScreen';
 import SignupPersonalScreen from '../screens/signup/SignupPersonalScreen';
@@ -66,8 +65,6 @@ function renderScreen(name: RouteName) {
       return <ScheduleDetailScreen />;
     case 'ScheduleTime':
       return <ScheduleTimeScreen />;
-    case 'ScheduleRecommend':
-      return <ScheduleRecommendScreen />;
     case 'ScheduleConfirmed':
       return <ScheduleConfirmedScreen />;
     case 'Settlements':

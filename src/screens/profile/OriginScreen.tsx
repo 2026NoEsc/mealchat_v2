@@ -61,6 +61,8 @@ export default function OriginScreen() {
         address: saved.startLocationName,
         lat: saved.startLat,
         lng: saved.startLng,
+        /* 저장된 값에는 업종이 없다 — 사는 곳이라 애초에 쓸 일도 없다 */
+        category: '',
       });
     }
     setLoaded(true);

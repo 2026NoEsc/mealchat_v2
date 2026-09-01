@@ -1,3 +1,4 @@
+import { dedupeLabels } from './labels';
 import { supabase } from './supabase';
 
 export type VotingKind = 'menu' | 'time';
@@ -109,4 +110,29 @@ export async function toggleVote(roomId: string, itemId: string): Promise<Error 
     item_id: itemId,
   });
   return error;
+}
+
+/**
+ * 방을 만들 때 투표 후보를 미리 올려 둔다.
+ *
+ * 시간(`time`)은 방장이 고른 시간대를, 메뉴(`menu`)는 AI 가 추천한 식당을 심는다.
+ * 빈 방에서 각자 후보를 만들어 넣게 두면 아무도 시작하지 않아서, 첫 후보는
+ * 방을 만든 사람의 선택으로 채워 둔다.
+ *
+ * 한 건이 실패해도 나머지는 계속 심는다. 방은 이미 만들어졌고, 투표 후보가
+ * 덜 올라간 것 때문에 사용자가 방에 못 들어가면 그게 더 나쁘다.
+ */
+export async function seedVotingOptions(
+  roomId: string,
+  kind: VotingKind,
+  labels: string[],
+): Promise<{ failed: string[] }> {
+  const failed: string[] = [];
+
+  for (const label of dedupeLabels(labels)) {
+    const error = await addVotingItem(roomId, kind, label);
+    if (error) failed.push(label);
+  }
+
+  return { failed };
 }

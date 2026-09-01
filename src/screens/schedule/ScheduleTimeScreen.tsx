@@ -1,20 +1,19 @@
 import { useMemo, useState } from 'react';
 import {
-  Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppHeader from '../../components/AppHeader';
+import AvailabilityGrid from '../../components/AvailabilityGrid';
+import PickedSlotChips from '../../components/PickedSlotChips';
 import { CompleteButton } from '../../components/ui/Button';
 import { useNavigation } from '../../navigation/NavigationContext';
 import {
   buildNextDays,
   cellKey,
-  HOURS,
   isPastCell,
   toSlots,
 } from '../../lib/scheduleSlots';
@@ -22,12 +21,13 @@ import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
 import ScheduleStepHeader from './ScheduleStepHeader';
-import type { SchedulePlace } from './scheduleTypes';
+import type { MyLocation } from '../../lib/myLocation';
 
 type Params = {
   name?: string;
   invitees?: string[];
-  place?: SchedulePlace;
+  /** STEP 1 에서 잡은 내 위치 — 중간 지점 계산에 쓴다 */
+  origin?: MyLocation;
   /** STEP 3 에서 뒤로 돌아올 때 되돌려받는 선택 칸 */
   picked?: string[];
 };
@@ -40,7 +40,7 @@ export default function ScheduleTimeScreen() {
 
   const name = params?.name ?? '';
   const invitees = params?.invitees ?? [];
-  const place = params?.place;
+  const origin = params?.origin;
 
   const days = useMemo(() => buildNextDays(5), []);
 
@@ -69,24 +69,31 @@ export default function ScheduleTimeScreen() {
 
   const slots = toSlots(picked, days);
 
-  const goRecommend = () => {
-    if (!place || slots.length === 0) {
+  /*
+   * AI 추천은 여기서 돌리지 않는다.
+   *
+   * 이 시점에는 메이트에게 아무것도 물어보지 않은 상태라, 추천을 돌려 봐야
+   * "저장된 개인 일정과 안 겹치는 후보" 일 뿐 실제 참석 여부가 아니다. 방을
+   * 먼저 만들어 가능한 시간을 모으고, 그 결과로 추천을 받는다.
+   */
+  const goConfirm = () => {
+    if (!origin || slots.length === 0) {
       return;
     }
 
-    navigate('ScheduleRecommend', {
+    navigate('ScheduleConfirmed', {
       name,
       invitees,
-      place,
+      origin,
       slots,
-      // STEP 3 이 뒤로 올 때 그대로 돌려주면 격자 선택이 살아난다
+      // 확정 화면에서 뒤로 올 때 그대로 돌려주면 격자 선택이 살아난다
       picked: [...picked],
     });
   };
 
   /* 뒤로 갈 때 STEP 1 이 다시 채울 수 있게 입력값을 실어 보낸다 */
   const goPrev = () =>
-    goBackWith({ name, invitees, place });
+    goBackWith({ name, invitees, origin });
 
   return (
     <View style={styles.screen}>
@@ -110,98 +117,26 @@ export default function ScheduleTimeScreen() {
           onBack={goPrev}
         />
 
-        <View style={styles.card}>
-          <View style={styles.headRow}>
-            <View style={styles.hourLabel} />
-
-            {days.map((day) => (
-              <View key={day.date} style={styles.col}>
-                <Text
-                  style={[
-                    styles.headText,
-                    day.label === '일' &&
-                      styles.sunday,
-                  ]}
-                >
-                  {day.month}/{day.day}·{day.label}
-                </Text>
-              </View>
-            ))}
-          </View>
-
-          {HOURS.map((hour) => (
-            <View key={hour} style={styles.gridRow}>
-              <Text style={styles.hourLabel}>
-                {hour}
-              </Text>
-
-              {days.map((day) => {
-                const k = cellKey(
-                  day.date,
-                  hour,
-                );
-
-                const on = picked.has(k);
-                const disabled = isPastCell(
-                  day.date,
-                  hour,
-                );
-
-                return (
-                  <View
-                    key={day.date}
-                    style={styles.col}
-                  >
-                    <Pressable
-                      disabled={disabled}
-                      style={[
-                        styles.cell,
-                        on && styles.cellOn,
-                        disabled &&
-                          styles.cellDisabled,
-                      ]}
-                      onPress={() =>
-                        toggle(day.date, hour)
-                      }
-                    />
-                  </View>
-                );
-              })}
-            </View>
-          ))}
+        <View style={styles.gridWrap}>
+          <AvailabilityGrid
+            days={days}
+            picked={picked}
+            onToggle={toggle}
+          />
         </View>
 
-        <Text style={styles.pickedTitle}>
-          선택한 시간 {slots.length}개
-        </Text>
-
-        <View style={styles.chipRow}>
-          {slots.length === 0 ? (
-            <Text style={styles.emptyText}>
-              아직 선택한 시간이 없어요.
-            </Text>
-          ) : (
-            slots.map((slot) => (
-              <View
-                key={slot.id}
-                style={styles.chip}
-              >
-                <Text style={styles.chipText}>
-                  {slot.label}
-                </Text>
-              </View>
-            ))
-          )}
+        <View style={styles.chipsWrap}>
+          <PickedSlotChips slots={slots} />
         </View>
 
         <CompleteButton
-          label="AI 추천 받기"
+          label="밥약 방 만들기"
           showNext
           disabled={
-            slots.length === 0 || !place
+            slots.length === 0 || !origin
           }
           style={styles.cta}
-          onPress={goRecommend}
+          onPress={goConfirm}
         />
       </ScrollView>
     </View>
@@ -218,13 +153,14 @@ const styles = StyleSheet.create({
     paddingBottom: s(16),
   },
 
-  card: {
+  gridWrap: {
     marginTop: s(10),
     marginHorizontal: s(11.5),
-    borderRadius: s(10),
-    backgroundColor: colors.card,
-    paddingHorizontal: s(8),
-    paddingVertical: s(8),
+  },
+
+  chipsWrap: {
+    marginTop: s(8),
+    marginHorizontal: s(11.5),
   },
 
   headRow: {

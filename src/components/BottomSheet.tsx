@@ -43,6 +43,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.35)',
   },
   sheet: {
+    /*
+     * 화면을 넘지 않게 막아 둔다. 이 값이 없으면 시트가 콘텐츠 높이만큼
+     * 자라서 위쪽이 화면 밖으로 밀려 나간다.
+     */
+    maxHeight: '92%',
     backgroundColor: colors.card,
     borderTopLeftRadius: s(14),
     borderTopRightRadius: s(14),

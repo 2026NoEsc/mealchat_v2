@@ -1,6 +1,7 @@
 import {
   buildNextDays,
   cellKey,
+  parseSlotLabel,
   END_HOUR,
   formatSlotDate,
   hourText,
@@ -160,5 +161,40 @@ describe('formatSlotDate', () => {
     expect(
       formatSlotDate({ date: '2026/08/25', startTime: '12:00', endTime: '13:00' }),
     ).toBe('2026/08/25 12:00~13:00');
+  });
+});
+
+describe('parseSlotLabel', () => {
+  const today = new Date(2026, 7, 21); // 2026-08-21
+
+  it('라벨을 슬롯으로 되돌린다', () => {
+    expect(parseSlotLabel('8/21(금) 18:00~20:00', today)).toEqual({
+      id: '2026-08-21-18:00-20:00',
+      date: '2026-08-21',
+      startTime: '18:00',
+      endTime: '20:00',
+      label: '8/21(금) 18:00~20:00',
+    });
+  });
+
+  it('toSlots 가 만든 라벨을 그대로 되돌린다', () => {
+    const days = buildNextDays(3, today);
+    const slots = toSlots(new Set([cellKey(days[1].date, 12)]), days);
+    expect(slots).toHaveLength(1);
+    expect(parseSlotLabel(slots[0].label, today)).toEqual(slots[0]);
+  });
+
+  it('지난 날짜는 내년으로 본다 — 지난 날에 약속을 잡을 수는 없다', () => {
+    expect(parseSlotLabel('1/5(월) 12:00~13:00', today)?.date).toBe('2027-01-05');
+  });
+
+  it('오늘은 올해로 둔다', () => {
+    expect(parseSlotLabel('8/21(금) 12:00~13:00', today)?.date).toBe('2026-08-21');
+  });
+
+  it('형식이 어긋나면 null', () => {
+    expect(parseSlotLabel('점심 아무때나', today)).toBeNull();
+    expect(parseSlotLabel('13/40(?) 12:00~13:00', today)).toBeNull();
+    expect(parseSlotLabel('', today)).toBeNull();
   });
 });

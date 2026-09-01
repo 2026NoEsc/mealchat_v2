@@ -28,6 +28,11 @@ type Props = {
   confirmMessage: (label: string) => string;
   onClose: () => void;
   onConfirm: (text: string) => void;
+  /**
+   * 있으면 목록 아래에 한 줄 더 붙는다. 일정 조율에서 "모인 시간으로 추천 받기"
+   * 를 여는 용도라, 메뉴 투표에는 넘기지 않는다.
+   */
+  extraAction?: { label: string; onPress: (labels: string[]) => void };
 };
 
 /**
@@ -44,6 +49,7 @@ export default function VotingSheet({
   confirmMessage,
   onClose,
   onConfirm,
+  extraAction,
 }: Props) {
   const { user } = useAuth();
   const myId = user?.id ?? null;
@@ -167,11 +173,43 @@ export default function VotingSheet({
           onClose();
         }}
       />
+
+      {extraAction ? (
+        <Pressable
+          style={styles.extraAction}
+          disabled={options.length === 0}
+          onPress={() => {
+            extraAction.onPress(options.map((option) => option.label));
+            onClose();
+          }}>
+          <Text
+            style={[
+              styles.extraActionText,
+              options.length === 0 && styles.extraActionTextOff,
+            ]}>
+            {extraAction.label}
+          </Text>
+        </Pressable>
+      ) : null}
     </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
+  extraAction: {
+    marginTop: s(8),
+    alignItems: 'center',
+  },
+  extraActionText: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(7),
+    lineHeight: fs(10),
+    fontWeight: weight.bold,
+    color: colors.primary,
+  },
+  extraActionTextOff: {
+    color: colors.textMuted,
+  },
   notice: {
     marginTop: s(18),
     marginBottom: s(6),
