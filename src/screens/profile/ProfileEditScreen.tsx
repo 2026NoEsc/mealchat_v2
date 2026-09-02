@@ -25,7 +25,7 @@ import { useNavigation } from '../../navigation/NavigationContext';
 import { useMyProfile } from '../../profile/useMyProfile';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 /**
  * Figma 프로필/프로필 수정 (309:1086) — 220 x 486
@@ -328,10 +328,9 @@ const styles = StyleSheet.create({
     // y134
     marginTop: s(2),
     textAlign: 'center',
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(11),
     lineHeight: fs(15),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   label: {
@@ -349,9 +348,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     paddingHorizontal: s(8),
     paddingVertical: 0,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(8),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   accountRow: {
@@ -390,9 +388,8 @@ const styles = StyleSheet.create({
   birthValue: {
     flex: 1,
     minWidth: 0,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(9),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
     padding: 0,
   },
@@ -409,9 +406,8 @@ const styles = StyleSheet.create({
     gap: s(4),
   },
   avatarHint: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6.5),
-    fontWeight: weight.bold,
     color: colors.primary,
   },
   avatarRemove: {

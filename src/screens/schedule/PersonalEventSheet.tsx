@@ -6,7 +6,7 @@ import { CompleteButton, DangerButton } from '../../components/ui/Button';
 import { formatDateIn } from '../../lib/calendar';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 export type PersonalEvent = {
   id: string;
@@ -266,10 +266,9 @@ const styles = StyleSheet.create({
   label: {
     marginTop: s(12),
     marginBottom: s(3),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(7),
     lineHeight: fs(10),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   input: {

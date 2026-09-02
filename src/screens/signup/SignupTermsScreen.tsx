@@ -8,7 +8,7 @@ import { saveSignupPrivateProfile } from '../../lib/profile';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 import SignupIllustrationScreen from './SignupIllustrationScreen';
 
 const dudu = require('../../../assets/brand/dudu.png');
@@ -181,10 +181,9 @@ const styles = StyleSheet.create({
     paddingLeft: s(4),
   },
   allLabel: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(8),
     lineHeight: fs(11),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
 });

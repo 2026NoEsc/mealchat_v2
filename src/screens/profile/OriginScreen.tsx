@@ -21,7 +21,7 @@ import { useNavigation } from '../../navigation/NavigationContext';
 import { useMyProfile } from '../../profile/useMyProfile';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 /**
  * Figma 프로필/지도 위치 지정 (256:2333) — 220 x 486
@@ -225,10 +225,9 @@ const styles = StyleSheet.create({
     paddingBottom: s(20),
   },
   title: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(12),
     lineHeight: fs(16),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   sub: {
@@ -302,10 +301,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   searchButtonText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(7),
     lineHeight: fs(9),
-    fontWeight: weight.bold,
     color: colors.textOnAccent,
   },
   searchError: {
@@ -332,10 +330,9 @@ const styles = StyleSheet.create({
     borderTopColor: 'transparent',
   },
   resultName: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(7.5),
     lineHeight: fs(10),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   resultAddress: {
@@ -372,10 +369,9 @@ const styles = StyleSheet.create({
   },
   cardAddress: {
     marginTop: s(3),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(8),
     lineHeight: fs(11),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   cardDetail: {

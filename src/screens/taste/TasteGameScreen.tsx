@@ -12,7 +12,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 const thumb = require('../../../assets/brand/welling-thumb.png');
 
@@ -175,10 +175,9 @@ const styles = StyleSheet.create({
   },
   stepLabel: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(7),
     lineHeight: fs(11),
-    fontWeight: weight.bold,
     color: colors.primary,
   },
   counter: {
@@ -192,10 +191,9 @@ const styles = StyleSheet.create({
     marginTop: s(17),
     marginHorizontal: s(20),
     textAlign: 'center',
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(13),
     lineHeight: fs(18),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   card: {

@@ -18,7 +18,7 @@ import { useSignupDraft } from '../../auth/SignupDraftProvider';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 /**
  * Figma 회원가입/개인정보 입력 (150:121) — 220 x 486
@@ -188,9 +188,8 @@ const styles = StyleSheet.create({
     width: s(51),
   },
   bankText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(7),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   accountInput: {
@@ -226,9 +225,8 @@ const styles = StyleSheet.create({
     flex: 1,
     // 웹에서 input 의 기본 min-width 때문에 축소되지 않아 명시한다
     minWidth: 0,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(9),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
     padding: 0,
   },

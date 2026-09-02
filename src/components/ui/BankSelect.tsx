@@ -4,7 +4,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 /** Figma 은행 선택 드롭다운 (549:3366) — 항목 8개 */
 export const BANKS = [
@@ -82,13 +82,12 @@ const styles = StyleSheet.create({
   },
   triggerText: {
     flexShrink: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6.5),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   placeholder: {
-    fontWeight: weight.regular,
+    fontFamily: fontFamily.regular,
     color: '#5F5E5B',
   },
   backdrop: {
@@ -112,10 +111,9 @@ const styles = StyleSheet.create({
   },
   sheetTitle: {
     marginBottom: s(4),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(7),
     lineHeight: fs(10),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   option: {
@@ -133,7 +131,7 @@ const styles = StyleSheet.create({
     color: '#999999',
   },
   optionSelected: {
-    fontWeight: weight.bold,
+    fontFamily: fontFamily.bold,
     color: colors.primary,
   },
 });

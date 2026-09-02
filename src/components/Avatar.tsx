@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 
 import { colors } from '../theme/tokens';
-import { fontFamily, weight } from '../theme/typography';
+import { fontFamily } from '../theme/typography';
 
 type Props = {
   name: string;
@@ -68,8 +68,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   initial: {
-    fontFamily: fontFamily.body,
-    fontWeight: weight.bold,
+    fontFamily: fontFamily.bold,
     color: colors.textOnAccent,
   },
 });

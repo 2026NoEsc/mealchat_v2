@@ -26,7 +26,7 @@ import { useNavigation } from '../../navigation/NavigationContext';
 import { useMyRooms } from '../../rooms/useMyRooms';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 
 type ChipTone = 'active' | 'done' | 'open';
@@ -226,9 +226,7 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.wordmark,
     fontSize: fs(13),
     lineHeight: fs(19),
-    fontWeight: weight.extrabold,
     color: colors.primary,
-    letterSpacing: fs(-0.1),
   },
   plusButton: {
     width: s(20),
@@ -275,10 +273,9 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
   enterText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(7),
     lineHeight: fs(9),
-    fontWeight: weight.bold,
     color: colors.textOnAccent,
   },
   row: {
@@ -328,11 +325,10 @@ const styles = StyleSheet.create({
   },
   roomTitle: {
     flexShrink: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     // Figma 텍스트 박스 폭 기준: "오늘 점심팟" w37 / "동아리 뒤풀이" w44
     fontSize: fs(7.5),
     lineHeight: fs(11),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   chip: {
@@ -343,10 +339,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   chipText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(5.5),
     lineHeight: fs(8),
-    fontWeight: weight.bold,
   },
   preview: {
     marginTop: s(2),
@@ -410,10 +405,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   unreadText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6.5),
     lineHeight: fs(8),
-    fontWeight: weight.bold,
     color: colors.textOnAccent,
   },
   footer: {
@@ -436,15 +430,13 @@ const styles = StyleSheet.create({
   },
   /* 아바타 업로드 전까지 쓰는 이니셜 원 */
   avatarInitial: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(11),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   stackInitial: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(5.5),
-    fontWeight: weight.bold,
     color: colors.textOnAccent,
     textAlign: 'center',
   },

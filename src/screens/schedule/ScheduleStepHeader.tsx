@@ -4,7 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import BackButton from '../../components/BackButton';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 /**
  * Figma 일정 추가 STEP 1 (309:1065) / STEP 2 (160:733) 상단.
@@ -68,19 +68,17 @@ const styles = StyleSheet.create({
     marginTop: s(4),
     marginRight: s(11.5),
     textAlign: 'right',
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6.5),
     lineHeight: fs(9),
-    fontWeight: weight.bold,
     color: colors.primary,
   },
   title: {
     marginTop: s(4),
     marginLeft: s(11.5),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.extrabold,
     fontSize: fs(12),
     lineHeight: fs(16),
-    fontWeight: weight.extrabold,
     color: colors.textPrimary,
   },
   subtitle: {

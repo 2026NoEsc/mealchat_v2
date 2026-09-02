@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { fs, s } from '../theme/scale';
 import { colors, shadows } from '../theme/tokens';
-import { fontFamily, weight } from '../theme/typography';
+import { fontFamily } from '../theme/typography';
 import { CalendarIcon, ChatIcon, HomeIcon, ProfileIcon } from './icons';
 
 export type TabKey = 'home' | 'schedule' | 'chat' | 'profile';
@@ -89,10 +89,9 @@ const styles = StyleSheet.create({
   },
   label: {
     marginTop: s(3),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.regular,
     fontSize: fs(8),
     lineHeight: fs(10),
-    fontWeight: weight.regular,
     color: colors.textPrimary,
     textAlign: 'center',
   },

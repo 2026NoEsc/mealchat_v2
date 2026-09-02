@@ -3,7 +3,7 @@ import { ImageSourcePropType, Image, Pressable, StyleSheet, Text, View } from 'r
 import { normalizeStickerId } from '../../lib/emoticon';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 export type Sticker = { id: string; source: ImageSourcePropType };
 
@@ -71,10 +71,9 @@ const styles = StyleSheet.create({
   },
   title: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(7.5),
     lineHeight: fs(10),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   grid: {

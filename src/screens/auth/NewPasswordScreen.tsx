@@ -17,7 +17,7 @@ import ScreenHeader from '../../components/ScreenHeader';
 import { AccentButton } from '../../components/ui/Button';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 /** Supabase 기본 최소 길이 — Dashboard 에서 올리면 서버가 다시 거른다 */
 const MIN_LENGTH = 6;
@@ -140,10 +140,9 @@ const styles = StyleSheet.create({
   },
   label: {
     marginTop: s(4),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(7),
     lineHeight: fs(10),
-    fontWeight: weight.medium,
     color: colors.textPrimary,
   },
   labelSpacing: {
@@ -156,9 +155,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     paddingHorizontal: s(8),
     paddingVertical: 0,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(8),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   submit: {

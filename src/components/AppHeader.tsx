@@ -2,7 +2,7 @@ import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { fs, s } from '../theme/scale';
 import { colors, radii, shadows } from '../theme/tokens';
-import { fontFamily, weight } from '../theme/typography';
+import { fontFamily } from '../theme/typography';
 import { BellIcon } from './icons';
 import { useNotifications } from './NotificationsProvider';
 
@@ -64,9 +64,7 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.wordmark,
     fontSize: fs(12),
     lineHeight: fs(20),
-    fontWeight: weight.extrabold,
     color: colors.primary,
-    letterSpacing: fs(-0.1),
   },
   bell: {
     position: 'absolute',

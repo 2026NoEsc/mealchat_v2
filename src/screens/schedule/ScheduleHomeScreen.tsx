@@ -17,7 +17,7 @@ import { createEvent, deleteNote, saveMemo as saveMemoNote, updateEvent } from '
 import { groupNotes, useMonthNotes } from '../../schedule/useMonthNotes';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 import { EventSheet, MemoSheet, type PersonalEvent } from './PersonalEventSheet';
 
 /**
@@ -309,10 +309,9 @@ const styles = StyleSheet.create({
     // x14 y79 h24
     marginTop: s(7),
     marginLeft: s(14),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(14),
     lineHeight: fs(24),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   subRow: {
@@ -330,10 +329,9 @@ const styles = StyleSheet.create({
   },
   syncLabel: {
     marginRight: s(3),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6),
     lineHeight: fs(8),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   toggle: {
@@ -381,10 +379,9 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   navMonth: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(9),
     lineHeight: fs(11),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   weekRow: {
@@ -448,10 +445,9 @@ const styles = StyleSheet.create({
   },
   dayTitle: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(8.5),
     lineHeight: fs(11),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   addButton: {
@@ -465,10 +461,9 @@ const styles = StyleSheet.create({
     gap: s(3),
   },
   addText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6.5),
     lineHeight: fs(9),
-    fontWeight: weight.bold,
     color: colors.textOnAccent,
   },
   eventRow: {
@@ -488,10 +483,9 @@ const styles = StyleSheet.create({
     marginLeft: s(6),
   },
   eventTitle: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(7.5),
     lineHeight: fs(10),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   eventTimeRow: {

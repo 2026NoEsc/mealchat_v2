@@ -19,7 +19,7 @@ import { AccentButton } from '../components/ui/Button';
 import { useNavigation } from '../navigation/NavigationContext';
 import { fs, s } from '../theme/scale';
 import { colors } from '../theme/tokens';
-import { fontFamily, weight } from '../theme/typography';
+import { fontFamily } from '../theme/typography';
 
 const logo = require('../../assets/brand/logo-main.png');
 
@@ -153,9 +153,7 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.wordmark,
     fontSize: fs(10.8),
     lineHeight: fs(13),
-    fontWeight: weight.extrabold,
     color: colors.primary,
-    letterSpacing: fs(-0.1),
   },
   tagline: {
     marginTop: s(6),
@@ -166,10 +164,9 @@ const styles = StyleSheet.create({
   },
   label: {
     marginTop: s(4),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(7),
     lineHeight: fs(10),
-    fontWeight: weight.medium,
     color: colors.textPrimary,
   },
   labelSpacing: {
@@ -183,9 +180,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     paddingHorizontal: s(8),
     paddingVertical: 0,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(8),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   submit: {
@@ -206,10 +202,9 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   signupLink: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6.5),
     lineHeight: fs(10),
-    fontWeight: weight.bold,
     color: colors.primary,
   },
   findRow: {

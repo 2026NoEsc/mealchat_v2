@@ -2,7 +2,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { fs, s } from '../theme/scale';
 import { colors } from '../theme/tokens';
-import { fontFamily, weight } from '../theme/typography';
+import { fontFamily } from '../theme/typography';
 import BackButton from './BackButton';
 
 type Props = {
@@ -41,10 +41,9 @@ const styles = StyleSheet.create({
   },
   title: {
     marginLeft: s(9),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(11),
     lineHeight: fs(16),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   action: {

@@ -23,7 +23,7 @@ import {
 import Toggle from '../../components/ui/Toggle';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 /** friends.ts 의 검색 결과 행 */
 type SearchedProfile = { id: string; name: string; tag: string; avatar_color: string };
@@ -188,9 +188,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceSunken,
   },
   avatarInitial: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(11),
-    fontWeight: weight.bold,
     color: colors.textOnAccent,
   },
   searchRow: {
@@ -219,9 +218,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   searchButtonText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(7),
-    fontWeight: weight.bold,
     color: colors.textOnAccent,
   },
   body: {
@@ -230,10 +228,9 @@ const styles = StyleSheet.create({
     paddingBottom: s(20),
   },
   title: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(12),
     lineHeight: fs(16),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   sub: {
@@ -275,10 +272,9 @@ const styles = StyleSheet.create({
     marginLeft: s(8),
   },
   name: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(7.5),
     lineHeight: fs(10),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   status: {
@@ -316,10 +312,9 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: s(4),
   },
   inviteToggleText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.extrabold,
     fontSize: fs(9.5),
     lineHeight: fs(13),
-    fontWeight: weight.extrabold,
     color: colors.textOnAccent,
   },
   chevronOpen: {

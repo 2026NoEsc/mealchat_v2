@@ -27,7 +27,7 @@ import {
 import { pickActiveSettlement } from '../../lib/settlementSummary';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 
 /** 선택된 카드 배경 — 일정 조율 화면과 동일한 오렌지 틴트 */
@@ -202,9 +202,8 @@ const styles = StyleSheet.create({
   },
   amountInput: {
     paddingVertical: 0,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.extrabold,
     fontSize: fs(14),
-    fontWeight: weight.extrabold,
     color: colors.textPrimary,
   },
   settlementEmpty: {
@@ -226,9 +225,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   memberInitial: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(8),
-    fontWeight: weight.bold,
     color: colors.textOnAccent,
   },
   rowOn: {
@@ -260,10 +258,9 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
   },
   dayNum: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(10),
     lineHeight: fs(13),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   dayLabel: {
@@ -286,10 +283,9 @@ const styles = StyleSheet.create({
   },
   slotTime: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(8),
     lineHeight: fs(11),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   slotCount: {
@@ -314,10 +310,9 @@ const styles = StyleSheet.create({
   },
   menuName: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(8),
     lineHeight: fs(11),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   voteStack: {
@@ -382,10 +377,9 @@ const styles = StyleSheet.create({
   },
   amountTotal: {
     marginTop: s(1),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.extrabold,
     fontSize: fs(13),
     lineHeight: fs(17),
-    fontWeight: weight.extrabold,
     color: colors.textPrimary,
   },
   memberRow: {
@@ -407,10 +401,9 @@ const styles = StyleSheet.create({
   },
   memberName: {
     marginTop: s(1),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(6),
     lineHeight: fs(8),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   memberState: {
@@ -433,10 +426,9 @@ const styles = StyleSheet.create({
     gap: s(4),
   },
   receiptText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(6.5),
     lineHeight: fs(9),
-    fontWeight: weight.semibold,
     color: colors.primary,
   },
 });
@@ -565,10 +557,9 @@ const memberStyles = StyleSheet.create({
     marginLeft: s(7),
   },
   name: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(7),
     lineHeight: fs(9),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   status: {
@@ -584,10 +575,9 @@ const memberStyles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   badgeText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(5.5),
     lineHeight: fs(7),
-    fontWeight: weight.bold,
     color: colors.textOnAccent,
   },
   role: {

@@ -15,7 +15,7 @@ import type { RouteName } from '../../navigation/routes';
 import { useMyProfile } from '../../profile/useMyProfile';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 
 type InfoRow = { label: string; value: string; danger?: boolean };
@@ -195,10 +195,9 @@ const styles = StyleSheet.create({
     // ph 기준 y40
     marginTop: s(2),
     textAlign: 'center',
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(11),
     lineHeight: fs(14),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   bio: {
@@ -227,10 +226,9 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   infoValue: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(7),
     lineHeight: fs(10),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   infoValueDanger: {
@@ -242,10 +240,9 @@ const styles = StyleSheet.create({
   },
   completeTitle: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(8),
     lineHeight: fs(11),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   completeCount: {
@@ -284,7 +281,7 @@ const styles = StyleSheet.create({
   },
   stepMarkDone: {
     color: colors.primary,
-    fontWeight: weight.bold,
+    fontFamily: fontFamily.bold,
   },
   stepLabel: {
     flex: 1,
@@ -307,10 +304,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primarySoft,
   },
   badgeText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6),
     lineHeight: fs(9),
-    fontWeight: weight.bold,
   },
   badgeTextDone: {
     color: colors.textMuted,
@@ -359,10 +355,9 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   deleteAccount: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6.5),
     lineHeight: fs(9),
-    fontWeight: weight.bold,
     color: colors.danger,
   },
 });

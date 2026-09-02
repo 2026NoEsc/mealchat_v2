@@ -2,7 +2,7 @@ import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { fs, s } from '../theme/scale';
 import { colors } from '../theme/tokens';
-import { fontFamily, weight } from '../theme/typography';
+import { fontFamily } from '../theme/typography';
 
 type Props = {
   visible: boolean;
@@ -64,10 +64,9 @@ const styles = StyleSheet.create({
   },
   title: {
     marginTop: s(10),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.extrabold,
     fontSize: fs(11),
     lineHeight: fs(15),
-    fontWeight: weight.extrabold,
     color: colors.textPrimary,
   },
   subtitle: {

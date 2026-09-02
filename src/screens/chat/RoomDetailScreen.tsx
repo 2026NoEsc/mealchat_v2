@@ -11,7 +11,7 @@ import { useNavigation } from '../../navigation/NavigationContext';
 import { useRoom } from '../../rooms/useMyRooms';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 export default function RoomDetailScreen() {
   const insets = useSafeAreaInsets();
@@ -139,10 +139,9 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(9),
     lineHeight: fs(13),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   body: {
@@ -151,10 +150,9 @@ const styles = StyleSheet.create({
     paddingBottom: s(20),
   },
   title: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(12),
     lineHeight: fs(16),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   card: {
@@ -180,10 +178,9 @@ const styles = StyleSheet.create({
   },
   code: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.extrabold,
     fontSize: fs(11),
     lineHeight: fs(15),
-    fontWeight: weight.extrabold,
     letterSpacing: fs(1),
     color: colors.primary,
   },
@@ -194,10 +191,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primarySoft,
   },
   copyText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6.5),
     lineHeight: fs(9),
-    fontWeight: weight.bold,
     color: colors.primary,
   },
   placeHeader: {
@@ -206,25 +202,22 @@ const styles = StyleSheet.create({
   },
   placeTitle: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(8),
     lineHeight: fs(11),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   changeText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(6.5),
     lineHeight: fs(9),
-    fontWeight: weight.semibold,
     color: colors.primary,
   },
   placeName: {
     marginTop: s(6),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(7.5),
     lineHeight: fs(10),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   placeDetail: {
@@ -240,9 +233,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   avatarInitial: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(9),
-    fontWeight: weight.bold,
     color: colors.textOnAccent,
   },
   avatarBox: {
@@ -272,7 +264,7 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   memberRoleOwner: {
-    fontWeight: weight.bold,
+    fontFamily: fontFamily.bold,
     color: colors.primary,
   },
   leave: {

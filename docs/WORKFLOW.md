@@ -263,10 +263,22 @@ Figma 변수(`get_variable_defs`)로 나오는 건 그대로 쓰고, 나머지�
 
 ### 폰트
 
-디자인은 Pretendard / 42dot Sans / Iosevka Charon 을 쓰지만 원본 저장소에 `expo-font`
-가 없어 **웨이트만 맞춘 시스템 폰트**로 대체했다.
-번들링하려면 `expo-font` 추가 후 [typography.ts](../src/theme/typography.ts) 의
-`fontFamily` 만 바꾸면 된다.
+디자인은 42dot Sans 와 Iosevka Charon 을 쓴다. 둘 다 `expo-font` 로 번들해 뒀다
+([App.tsx](../App.tsx), [typography.ts](../src/theme/typography.ts)).
+
+| 패밀리 | 굵기 | 쓰임 | 출처 |
+|---|---|---|---|
+| 42dot Sans | 300·400·500·600·700·800 | 본문 전부 | Google Fonts |
+| Iosevka Charon | Bold | 로고 워드마크 (`fontFamily.wordmark`) | [jul-sh/iosevka-charon](https://github.com/jul-sh/iosevka-charon) (OFL) |
+
+굵기마다 파일이 다르므로 `fontWeight` 가 아니라 `fontFamily` 로 고른다. 또 CSS 식별자가
+숫자로 시작할 수 없어서 등록 이름을 `Dot42Sans-*` 로 뒤집었다 — `42dotSans-Regular` 로
+등록하면 React Native Web 이 따옴표 없이 내보내 웹에서 폰트 지정이 통째로 무시된다.
+
+> 폰트 파일이 assets 의 대부분(~20MB)을 차지한다. 특히 Iosevka Charon 4.4MB 는
+> 워드마크 8글자에만 쓰이므로, 배포 전에 `pyftsubset` 으로 줄일 여지가 크다.
+
+> Pretendard 도 쓴다고 적어 뒀었는데, 현재 Figma 파일에서는 확인되지 않는다.
 
 ### 에셋
 

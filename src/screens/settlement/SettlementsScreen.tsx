@@ -17,7 +17,7 @@ import { isSettled } from '../../lib/settlementSummary';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors, radii, shadows } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 type Status = 'loading' | 'ready' | 'error';
 
@@ -221,10 +221,9 @@ const styles = StyleSheet.create({
     gap: s(8),
   },
   title: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(9),
     lineHeight: fs(13),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   meta: {
@@ -238,10 +237,9 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   each: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.extrabold,
     fontSize: fs(11),
     lineHeight: fs(15),
-    fontWeight: weight.extrabold,
     color: colors.primary,
   },
   total: {
@@ -294,7 +292,7 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   memberStateDone: {
-    fontWeight: weight.bold,
+    fontFamily: fontFamily.bold,
     color: colors.primary,
   },
 });

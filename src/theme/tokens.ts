@@ -7,6 +7,8 @@
 export const colors = {
   /** 브랜드 메인 (#f90) */
   primary: '#FF9900',
+  /** 채운 배지("오늘", 채팅 필터 선택) — primary 보다 붉다 */
+  primaryVivid: '#FF8C3B',
 
   /** AccentButton 그라디언트 */
   accentGradient: ['#F66F3E', '#F6C53E'] as const,
@@ -21,6 +23,8 @@ export const colors = {
   textPrimary: '#000000',
   /** Figma 변수 text/muted */
   textMuted: '#9C9C9C',
+  /** 홈 "다가올 일정"의 날짜·D-day 배지 — textMuted 보다 한 단계 진하다 */
+  textSecondary: '#737373',
   /** Figma 변수 text/onAccent */
   textOnAccent: '#FFFFFF',
 
@@ -39,6 +43,10 @@ export const colors = {
   surfaceStrong: '#E6E6E6',
   /** 알림 벨 글리프 */
   iconMuted: '#8F8F8F',
+  /** 일정 격자에서 "다른 사람이 고른 칸" — 내 선택(주황)과 구분한다 */
+  cellOthers: '#7C7C7C',
+  /** 홈 정산 넛지 테두리 — 주황보다 옅어서 알림이 경고처럼 보이지 않는다 */
+  primaryBorder: '#FFD9B8',
 
   screen: '#FFFFFF',
 } as const;

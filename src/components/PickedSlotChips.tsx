@@ -3,7 +3,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { CandidateSlot } from '../screens/schedule/scheduleTypes';
 import { fs, s } from '../theme/scale';
 import { colors, shadows } from '../theme/tokens';
-import { fontFamily, weight } from '../theme/typography';
+import { fontFamily } from '../theme/typography';
 
 /**
  * Figma 채팅/일정 패널 (2111:16993) — 선택 요약 카드
@@ -63,17 +63,15 @@ const styles = StyleSheet.create({
   },
   title: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(8.5),
     lineHeight: fs(11.5),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   count: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(6),
     lineHeight: fs(8),
-    fontWeight: weight.semibold,
     color: colors.textMuted,
   },
   empty: {
@@ -99,10 +97,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primarySoft,
   },
   chipText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(6.2),
     lineHeight: fs(8.5),
-    fontWeight: weight.semibold,
     color: colors.primary,
   },
 });

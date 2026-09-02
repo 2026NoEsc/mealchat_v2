@@ -6,7 +6,7 @@ import { formatAmount, relativeTime } from '../lib/format';
 import type { RoomNotification } from '../lib/settlements';
 import { fs, s } from '../theme/scale';
 import { colors } from '../theme/tokens';
-import { fontFamily, weight } from '../theme/typography';
+import { fontFamily } from '../theme/typography';
 
 const FILTERS = ['전체', '일정', '정산', '메이트'] as const;
 type Filter = (typeof FILTERS)[number];
@@ -123,17 +123,15 @@ const styles = StyleSheet.create({
   },
   title: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(11),
     lineHeight: fs(16),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   readAll: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(6.5),
     lineHeight: fs(9),
-    fontWeight: weight.semibold,
     color: colors.primary,
   },
   filterRow: {
@@ -158,15 +156,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF6EC',
   },
   chipText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(6),
     lineHeight: fs(8),
-    fontWeight: weight.medium,
     color: colors.textMuted,
   },
   chipTextActive: {
     color: colors.primary,
-    fontWeight: weight.bold,
+    fontFamily: fontFamily.bold,
   },
   list: {
     paddingHorizontal: s(7),
@@ -193,10 +190,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   rowTitle: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(7.5),
     lineHeight: fs(12),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   rowSub: {

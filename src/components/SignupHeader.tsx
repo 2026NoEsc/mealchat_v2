@@ -2,7 +2,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { fs, s } from '../theme/scale';
 import { colors } from '../theme/tokens';
-import { fontFamily, weight } from '../theme/typography';
+import { fontFamily } from '../theme/typography';
 import ScreenHeader from './ScreenHeader';
 import StepProgress from './StepProgress';
 
@@ -46,17 +46,15 @@ const styles = StyleSheet.create({
     gap: s(8),
   },
   step: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.extrabold,
     fontSize: fs(6.5),
     lineHeight: fs(10),
-    fontWeight: weight.extrabold,
     color: colors.primary,
   },
   stepLabel: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6.5),
     lineHeight: fs(10),
-    fontWeight: weight.bold,
     color: colors.primary,
   },
 });

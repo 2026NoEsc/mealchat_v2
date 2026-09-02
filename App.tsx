@@ -1,4 +1,5 @@
 import type { Session } from '@supabase/supabase-js';
+import { useFonts } from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
 import { View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -14,6 +15,24 @@ import ReConsentScreen from './src/screens/auth/ReConsentScreen';
 import { colors } from './src/theme/tokens';
 
 export default function App() {
+  /*
+   * 폰트가 준비되기 전에 화면을 그리면 시스템 폰트로 한 번 그렸다가 바뀌면서
+   * 글자가 눈에 띄게 튄다. 로딩이 끝날 때까지 배경만 보여 준다.
+   */
+  const [fontsLoaded] = useFonts({
+    'Dot42Sans-Light': require('./assets/fonts/42dotSans-Light.ttf'),
+    'Dot42Sans-Regular': require('./assets/fonts/42dotSans-Regular.ttf'),
+    'Dot42Sans-Medium': require('./assets/fonts/42dotSans-Medium.ttf'),
+    'Dot42Sans-SemiBold': require('./assets/fonts/42dotSans-SemiBold.ttf'),
+    'Dot42Sans-Bold': require('./assets/fonts/42dotSans-Bold.ttf'),
+    'Dot42Sans-ExtraBold': require('./assets/fonts/42dotSans-ExtraBold.ttf'),
+    'IosevkaCharon-Bold': require('./assets/fonts/IosevkaCharon-Bold.ttf'),
+  });
+
+  if (!fontsLoaded) {
+    return <View style={{ flex: 1, backgroundColor: colors.surface }} />;
+  }
+
   return (
     <SafeAreaProvider>
       <AuthProvider>

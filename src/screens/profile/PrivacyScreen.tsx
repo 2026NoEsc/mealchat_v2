@@ -11,7 +11,7 @@ import { useMyProfile } from '../../profile/useMyProfile';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 type Field = { key: string; label: string; detail: string };
 
@@ -157,10 +157,9 @@ const styles = StyleSheet.create({
     paddingBottom: s(20),
   },
   title: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(12),
     lineHeight: fs(16),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   sub: {
@@ -182,10 +181,9 @@ const styles = StyleSheet.create({
     marginTop: s(7),
   },
   cardTitle: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(8),
     lineHeight: fs(11),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   cardTitleDanger: {
@@ -204,10 +202,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   rowLabel: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(7.5),
     lineHeight: fs(10),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   rowDetail: {
@@ -228,10 +225,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primarySoft,
   },
   noticeText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(6),
     lineHeight: fs(9),
-    fontWeight: weight.semibold,
     color: colors.primary,
   },
   cta: {
