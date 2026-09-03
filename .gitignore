@@ -71,6 +71,10 @@ tmp/
 *.orig
 *.orig.*
 
+# Local AI-assistant configuration. Never commit these directories.
+/.claude/
+/.codex/
+
 # Editor and operating-system files
 .vscode/
 .idea/
