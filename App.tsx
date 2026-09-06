@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from './src/auth/AuthProvider';
 import { SignupDraftProvider } from './src/auth/SignupDraftProvider';
 import { NotificationsProvider } from './src/components/NotificationsProvider';
 import { useConsentGate } from './src/consents/useConsentGate';
+import { AppLifecycleProvider } from './src/lifecycle/AppLifecycleContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import { NavigationProvider } from './src/navigation/NavigationContext';
 import NewPasswordScreen from './src/screens/auth/NewPasswordScreen';
@@ -70,7 +71,13 @@ function AppRoot() {
  */
 function ConsentGate() {
   const { session } = useAuth();
-  const { needsConsent, markConsented } = useConsentGate();
+  const { needsConsent, checked, markConsented } = useConsentGate();
+
+  // 동의 RPC가 아직 끝나지 않았으면 authenticated navigator/provider를 마운트하지
+  // 않는다. 이전 계정의 stale 검사 결과로 본문이 보이는 것도 막는다.
+  if (!checked) {
+    return <View style={{ flex: 1, backgroundColor: colors.surface }} />;
+  }
 
   if (needsConsent) {
     return (
@@ -87,13 +94,15 @@ function ConsentGate() {
 function AppBody({ session }: { session: Session | null }) {
   return (
     <SignupDraftProvider>
-      <NavigationProvider key={session ? 'authenticated' : 'anonymous'} initialRoute={session ? 'Home' : 'Login'}>
-        {/* 알림 패널이 하단 탭까지 덮어야 하므로 네비게이터 바깥에 둔다 */}
-        <NotificationsProvider>
-          <StatusBar style="dark" />
-          <AppNavigator />
-        </NotificationsProvider>
-      </NavigationProvider>
+      <AppLifecycleProvider>
+        <NavigationProvider key={session ? 'authenticated' : 'anonymous'} initialRoute={session ? 'Home' : 'Login'}>
+          {/* 알림 패널이 하단 탭까지 덮어야 하므로 네비게이터 바깥에 둔다 */}
+          <NotificationsProvider>
+            <StatusBar style="dark" />
+            <AppNavigator />
+          </NotificationsProvider>
+        </NavigationProvider>
+      </AppLifecycleProvider>
     </SignupDraftProvider>
   );
 }

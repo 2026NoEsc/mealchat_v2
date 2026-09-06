@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { StyleSheet, View } from 'react-native';
 
 import { useAuth } from '../auth/AuthProvider';
+import { useForegroundRefreshToken } from '../lifecycle/AppLifecycleContext';
 import { hasUnreadNotices } from '../lib/notificationsRead';
 import {
   fetchMyNotifications,
@@ -34,6 +35,7 @@ const NotificationsContext = createContext<NotificationsValue | null>(null);
 export function NotificationsProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const userId = user?.id ?? null;
+  const foregroundRefreshToken = useForegroundRefreshToken();
 
   const [visible, setVisible] = useState(false);
   const [notices, setNotices] = useState<RoomNotification[]>([]);
@@ -50,17 +52,24 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     void Promise.all([fetchMyNotifications(), fetchNotificationsReadAt()])
       .then(([noticeResult, readResult]) => {
         if (!active) return;
+        if (noticeResult.error || readResult.error) {
+          setNotices([]);
+          setReadAt(null);
+          return;
+        }
         setNotices(noticeResult.data ?? []);
-        setReadAt(readResult.data);
+        setReadAt(readResult.data ?? null);
       })
       .catch(() => {
-        if (active) setNotices([]);
+        if (!active) return;
+        setNotices([]);
+        setReadAt(null);
       });
 
     return () => {
       active = false;
     };
-  }, [userId]);
+  }, [userId, foregroundRefreshToken]);
 
   const open = useCallback(() => setVisible(true), []);
   const close = useCallback(() => setVisible(false), []);
@@ -76,9 +85,11 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     const now = new Date().toISOString();
     setReadAt(now);
 
-    void markNotificationsRead(userId).then((error) => {
-      if (error) setReadAt(previous);
-    });
+    void markNotificationsRead(userId)
+      .then((error) => {
+        if (error) setReadAt(previous);
+      })
+      .catch(() => setReadAt(previous));
   }, [userId, readAt]);
 
   const unread = hasUnreadNotices(notices, readAt);

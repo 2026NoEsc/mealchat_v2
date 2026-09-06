@@ -54,7 +54,7 @@ function votedIds(value: unknown): string[] {
 export async function fetchRoomVoting(
   roomId: string,
   myId: string | null,
-): Promise<{ data: VotingOption[] | null; error: Error | null }> {
+): Promise<{ data: VotingOption[] | null; memberCount: number; error: Error | null }> {
   const [roomResult, participantResult] = await Promise.all([
     supabase
       .from('rooms')
@@ -69,7 +69,7 @@ export async function fetchRoomVoting(
   ]);
 
   const error = roomResult.error ?? participantResult.error;
-  if (error) return { data: null, error };
+  if (error) return { data: null, memberCount: 0, error };
 
   const rawItems = Array.isArray(roomResult.data?.voting_items) ? roomResult.data.voting_items : [];
   const items = (rawItems as RawItem[]).map(toItem).filter((item): item is VotingItem => item !== null);
@@ -86,7 +86,12 @@ export async function fetchRoomVoting(
     };
   });
 
-  return { data: options, error: null };
+  // NULL profile_id는 레거시 표시 행일 수 있어 서버 정족수에서 제외한다.
+  const memberCount = (participantResult.data ?? []).filter(
+    (participant) => participant.profile_id !== null,
+  ).length;
+
+  return { data: options, memberCount, error: null };
 }
 
 /** 후보 추가. 방 참가자만, 같은 이름은 서버가 거절한다. */
@@ -148,4 +153,17 @@ export async function seedVotingOptions(
   }
 
   return { failed };
+}
+
+/**
+ * 가장 많은 표 후보를 실제 방 상태로 확정한다.
+ * 서버가 후보 존재·방 멤버십·최소 한 표를 확인하고, 고정 system event를 같은
+ * 트랜잭션으로 기록한다. 클라이언트는 임의 안내문을 보낼 수 없다.
+ */
+export async function confirmRoomVote(roomId: string, itemId: string): Promise<Error | null> {
+  const { error } = await supabase.rpc('confirm_room_vote', {
+    target_room: roomId,
+    item_id: itemId,
+  });
+  return error;
 }

@@ -84,59 +84,73 @@ export default function ScheduleHomeScreen() {
   /** 저장에 성공했을 때만 true — 실패하면 시트가 열린 채로 남는다 */
   const saveEvent = async (event: PersonalEvent): Promise<boolean> => {
     if (!userId) return false;
-    const [start, end] = event.time.split('~').map((part) => part.trim());
-    /* id 가 서버에 있는 것이면 수정, 시트가 만든 임시 id 면 새로 만든다 */
-    const existing = events.some((item) => item.id === event.id);
+    try {
+      const [start, end] = event.time.split('~').map((part) => part.trim());
+      /* id 가 서버에 있는 것이면 수정, 시트가 만든 임시 id 면 새로 만든다 */
+      const existing = events.some((item) => item.id === event.id);
 
-    const error = existing
-      ? await updateEvent(event.id, {
-          title: event.title,
-          time: start,
-          endTime: end,
-          color: event.color,
-        })
-      : (
-          await createEvent({
-            profileId: userId,
-            date: dateOf(selected),
+      const error = existing
+        ? await updateEvent(event.id, {
             title: event.title,
             time: start,
             endTime: end,
             color: event.color,
           })
-        ).error;
+        : (
+            await createEvent({
+              profileId: userId,
+              date: dateOf(selected),
+              title: event.title,
+              time: start,
+              endTime: end,
+              color: event.color,
+            })
+          ).error;
 
-    if (error) {
-      Alert.alert('저장 실패', error.message);
+      if (error) {
+        Alert.alert('저장 실패', error.message);
+        return false;
+      }
+      reload();
+      return true;
+    } catch {
+      Alert.alert('저장 실패', '일정을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.');
       return false;
     }
-    reload();
-    return true;
   };
 
   const deleteEvent = async (id: string) => {
-    const error = await deleteNote(id);
-    if (error) {
-      Alert.alert('삭제 실패', error.message);
-      return;
+    try {
+      const error = await deleteNote(id);
+      if (error) {
+        Alert.alert('삭제 실패', error.message);
+        return;
+      }
+      reload();
+    } catch {
+      Alert.alert('삭제 실패', '일정을 삭제하지 못했어요. 잠시 후 다시 시도해 주세요.');
     }
-    reload();
   };
 
   const saveMemo = async (next: string): Promise<boolean> => {
     if (!userId) return false;
-    const error = await saveMemoNote({
-      profileId: userId,
-      date: dateOf(selected),
-      existingId: memoIdByDay[selected] ?? null,
-      content: next,
-    });
-    if (error) {
-      Alert.alert('저장 실패', error.message);
+    try {
+      const error = await saveMemoNote({
+        profileId: userId,
+        date: dateOf(selected),
+        existingId: memoIdByDay[selected] ?? null,
+        content: next,
+      });
+      if (error) {
+        Alert.alert('저장 실패', error.message);
+        return false;
+      }
+      reload();
+      return true;
+    } catch {
+      Alert.alert('저장 실패', '메모를 저장하지 못했어요. 잠시 후 다시 시도해 주세요.');
       return false;
     }
-    reload();
-    return true;
   };
 
   return (
@@ -223,7 +237,12 @@ export default function ScheduleHomeScreen() {
             <Text style={styles.emptyText}>불러오는 중...</Text>
           ) : status === 'error' ? (
             /* 못 불러온 것을 "없다" 고 적으면 사용자가 자기 일정이 지워진 줄 안다 */
-            <Text style={styles.emptyText}>일정을 불러오지 못했어요</Text>
+            <View style={styles.retryBox}>
+              <Text style={styles.emptyText}>일정을 불러오지 못했어요</Text>
+              <Pressable style={styles.retryButton} onPress={reload}>
+                <Text style={styles.retryText}>다시 시도</Text>
+              </Pressable>
+            </View>
           ) : events.length === 0 ? (
             <Text style={styles.emptyText}>등록된 일정이 없어요</Text>
           ) : (
@@ -529,6 +548,23 @@ const styles = StyleSheet.create({
     fontSize: fs(6.5),
     lineHeight: fs(9),
     color: colors.textMuted,
+  },
+  retryBox: {
+    alignItems: 'center',
+  },
+  retryButton: {
+    marginTop: s(-4),
+    paddingHorizontal: s(8),
+    paddingVertical: s(3),
+    borderRadius: s(6),
+    backgroundColor: colors.primarySoft,
+  },
+  retryText: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(6),
+    lineHeight: fs(8),
+    fontWeight: weight.bold,
+    color: colors.primary,
   },
   memoTextFilled: {
     color: colors.textPrimary,

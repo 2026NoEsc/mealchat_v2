@@ -21,12 +21,10 @@ import { supabase } from '../../lib/supabase';
 import { useMyProfile } from '../../profile/useMyProfile';
 import type { ScheduleRecommendResponse } from '../schedule/scheduleTypes';
 import { parseEmoticonToken } from '../../lib/emoticon';
-import { parseRoomNotice, toRoomNoticeToken, type RoomNotice } from '../../lib/roomNotice';
+import { parseRoomNotice, type RoomNotice } from '../../lib/roomNotice';
 import { dayKey, dayLabel, roomTimerLabel, timeLabel } from '../../lib/roomFormat';
 import {
   advanceRoomStage,
-  postRoomSystemMessage,
-  setRoomLocation,
   sendRoomMessage,
   sendRoomSticker,
   type RoomMessage,
@@ -210,10 +208,6 @@ export default function ChatRoomScreen() {
   const scrollRef = useRef<ScrollView>(null);
 
   /*
-   * 방에서 일어난 일은 messages 에 kind='system' 으로 남는다. 예전에는 화면에만
-   * 붙였다가 새로고침하면 사라져서, 무슨 일이 있었는지가 남지 않았다.
-   */
-  /*
    * 식당 결정을 마치고 약속을 확정한다. 방장만 누를 수 있고, 되돌릴 수 없어서
    * 한 번 묻는다 — 확정하면 식당을 다시 고를 수 없다.
    */
@@ -231,8 +225,8 @@ export default function ChatRoomScreen() {
               Alert.alert('확정하지 못했어요', error.message);
               return;
             }
-            /* 확정된 시각을 카드 두 번째 줄에 싣는다 — 시안 2111:16087 */
-            await notice(toRoomNoticeToken('schedule', room?.confirmedSlot ?? ''));
+            reload();
+            void reloadRoom();
           })();
         },
       },
@@ -255,33 +249,6 @@ export default function ChatRoomScreen() {
     Alert.alert('아직 준비 중이에요', '캘린더 저장은 곧 붙일게요.');
   };
 
-  /*
-   * 식당 투표를 마무리한다. 채팅 문구만 남기던 걸 방에도 적는다 — 그래야
-   * 방 상세정보와 홈 "다가올 일정" 에 장소가 뜬다.
-   *
-   * rooms 업데이트는 방장만 통과한다(rooms_update_owner). 메이트가 마무리한
-   * 경우에는 채팅에만 남고, 방장이 "약속 확정" 을 누를 때까지 장소는 비어 있다.
-   */
-  const decidePlace = async (text: string, label: string) => {
-    if (roomId && isOwner) {
-      const error = await setRoomLocation(roomId, label);
-      if (error) Alert.alert('장소를 저장하지 못했어요', error.message);
-    }
-    await notice(text);
-  };
-
-  const notice = async (text: string) => {
-    if (!roomId) return;
-    const error = await postRoomSystemMessage(roomId, text);
-    if (error) {
-      Alert.alert('안내를 남기지 못했어요', error.message);
-      return;
-    }
-    reload();
-    /* 단계가 바뀌는 안내(확정·식당 결정)가 있어서 방도 다시 읽는다 */
-    void reloadRoom();
-  };
-
   /* 서버가 준 목록에 날짜 구분선을 끼워 화면용 배열로 만든다 */
   const messages = toDisplayMessages(remoteMessages, user?.id ?? null);
 
@@ -289,27 +256,51 @@ export default function ChatRoomScreen() {
     const text = draft.trim();
     if (!text || !roomId) return;
 
-    setSending(true);
-    const error = await sendRoomMessage(roomId, text);
-    setSending(false);
+    try {
+      setSending(true);
+      const error = await sendRoomMessage(roomId, text);
 
-    if (error) {
-      Alert.alert('전송 실패', error.message);
-      return;
+      if (error) {
+        Alert.alert('전송 실패', error.message);
+        return;
+      }
+
+      setDraft('');
+      reload();
+    } catch {
+      Alert.alert('전송 실패', '메시지를 보내지 못했어요. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      setSending(false);
     }
-
-    setDraft('');
-    reload();
   };
 
   const sendSticker = async (stickerId: string) => {
     if (!roomId) return;
-    const error = await sendRoomSticker(roomId, stickerId);
-    if (error) {
-      Alert.alert('전송 실패', error.message);
-      return;
+    try {
+      const error = await sendRoomSticker(roomId, stickerId);
+      if (error) {
+        Alert.alert('전송 실패', error.message);
+        return;
+      }
+      reload();
+    } catch {
+      Alert.alert('전송 실패', '이모티콘을 보내지 못했어요. 잠시 후 다시 시도해 주세요.');
     }
-    reload();
+  };
+
+  /** 초대 코드는 시스템 문장이 아니라 사용자가 보낸 일반 메시지로 남긴다. */
+  const shareInviteCode = async (code: string) => {
+    if (!roomId) return;
+    try {
+      const error = await sendRoomMessage(roomId, `초대 코드 ${code}를 메이트에게 알려 주세요.`);
+      if (error) {
+        Alert.alert('초대 코드를 보내지 못했어요', error.message);
+        return;
+      }
+      reload();
+    } catch {
+      Alert.alert('초대 코드를 보내지 못했어요', '잠시 후 다시 시도해 주세요.');
+    }
   };
 
   return (
@@ -356,7 +347,12 @@ export default function ChatRoomScreen() {
         {status === 'loading' ? (
           <Text style={styles.listNotice}>메시지를 불러오는 중...</Text>
         ) : status === 'error' ? (
-          <Text style={styles.listNotice}>메시지를 불러오지 못했어요</Text>
+          <View style={styles.retryBox}>
+            <Text style={styles.listNotice}>메시지를 불러오지 못했어요</Text>
+            <Pressable style={styles.retryButton} onPress={reload}>
+              <Text style={styles.retryText}>다시 시도</Text>
+            </Pressable>
+          </View>
         ) : messages.length === 0 ? (
           <Text style={styles.listNotice}>아직 대화가 없어요. 먼저 인사해 보세요!</Text>
         ) : null}
@@ -459,7 +455,10 @@ export default function ChatRoomScreen() {
         roomId={roomId}
         isOwner={isOwner}
         onClose={() => setSheet(null)}
-        onSubmitted={(text) => void notice(text)}
+        onStateChanged={() => {
+          reload();
+          void reloadRoom();
+        }}
       />
 
       <VotingSheet
@@ -469,18 +468,19 @@ export default function ChatRoomScreen() {
         title="식당 정하기"
         subtitle="가고 싶은 식당에 투표해 주세요"
         placeholder="예: 조선칼국수 하단점"
-        confirmMessage={(label) => toRoomNoticeToken('place', label)}
         suggestionTitle="AI 추천 식당"
         suggestions={suggestions}
         onClose={() => setSheet(null)}
-        onConfirm={(text, label) => void decidePlace(text, label)}
+        onConfirm={() => {
+          reload();
+          void reloadRoom();
+        }}
         onVoted={() => void reloadRoom()}
       />
       <SettlementSheet
         roomId={roomId}
         visible={sheet === 'settlement'}
         onClose={() => setSheet(null)}
-        onConfirm={(text) => void notice(text)}
       />
       <MembersSheet
         visible={sheet === 'members'}
@@ -490,11 +490,7 @@ export default function ChatRoomScreen() {
         onClose={() => setSheet(null)}
         onInvite={(code) => {
           setSheet(null);
-          /*
-           * 복사하지 않고 코드를 채팅에 남긴다. 클립보드 모듈이 없는데 "복사했어요"
-           * 라고 말하면 붙여넣기가 되는 줄 안다. 방에 남겨 두면 나중에 다시 찾을 수도 있다.
-           */
-          void notice(`초대 코드 ${code} 를 메이트에게 알려 주세요`);
+          void shareInviteCode(code);
         }}
       />
     </KeyboardAvoidingView>
@@ -999,5 +995,21 @@ const styles = StyleSheet.create({
     fontSize: fs(7),
     lineHeight: fs(10),
     color: SYS_TEXT,
+  },
+  retryBox: {
+    alignItems: 'center',
+  },
+  retryButton: {
+    marginTop: s(-10),
+    paddingHorizontal: s(8),
+    paddingVertical: s(3),
+    borderRadius: s(6),
+    backgroundColor: colors.primarySoft,
+  },
+  retryText: {
+    fontFamily: fontFamily.bold,
+    fontSize: fs(6),
+    lineHeight: fs(8),
+    color: colors.primary,
   },
 });

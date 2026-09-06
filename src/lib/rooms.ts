@@ -1,5 +1,6 @@
 import { toEmoticonToken } from './emoticon';
 import { randomRoomColor } from './roomTheme';
+import { effectiveInvitationStatus, type RoomInvitationStatus } from './roomInvitationState';
 import {
   toSettlementSummary,
   type SettlementBillRow,
@@ -54,6 +55,17 @@ export type RoomMessage = {
   kind: 'user' | 'system';
 };
 
+export type RoomInvitation = {
+  id: string;
+  roomId: string;
+  inviterId: string;
+  roomTitle: string;
+  /** pending 초대는 만료 시 클라이언트에서도 expired로 표시한다. */
+  status: RoomInvitationStatus;
+  expiresAt: string;
+  createdAt: string;
+};
+
 type ParticipantRow = {
   id: string;
   profile_id: string | null;
@@ -73,6 +85,7 @@ type RoomRow = {
   expires_at: string;
   meeting_date: string;
   location_name: string | null;
+  confirmed_menu: string | null;
   participants: ParticipantRow[] | null;
   messages: { message: string; sender_name: string; created_at: string }[] | null;
 };
@@ -99,6 +112,16 @@ function toStage(value: string | null): RoomStage {
     : 'scheduling';
 }
 
+type RoomInvitationRow = {
+  id: string;
+  room_id: string;
+  inviter_id: string;
+  room_title: string;
+  status: string;
+  expires_at: string;
+  created_at: string;
+};
+
 function toParticipant(row: ParticipantRow): RoomParticipant {
   return {
     id: row.id,
@@ -120,7 +143,7 @@ export async function fetchMyRooms(): Promise<{
   const { data, error } = await supabase
     .from('rooms')
     .select(
-      'id, code, title, color, stage, owner_id, is_confirmed, confirmed_slot, expires_at, meeting_date, location_name, ' +
+      'id, code, title, color, stage, owner_id, is_confirmed, confirmed_slot, expires_at, meeting_date, location_name, confirmed_menu, ' +
         'participants(id, profile_id, name, avatar_color), ' +
         'messages(message, sender_name, created_at)',
     )
@@ -145,7 +168,8 @@ export async function fetchMyRooms(): Promise<{
       confirmedSlot: row.confirmed_slot,
       expiresAt: row.expires_at,
       meetingDate: row.meeting_date,
-      locationName: row.location_name,
+      /* 메뉴 확정 RPC가 쓴 서버 상태를 표시한다. 클라이언트가 rooms 를 직접 갱신하지 않는다. */
+      locationName: row.location_name ?? row.confirmed_menu,
       participants: (row.participants ?? []).map(toParticipant),
       lastMessage: last
         ? { text: last.message, senderName: last.sender_name, createdAt: last.created_at }
@@ -164,7 +188,7 @@ export async function fetchRoom(roomId: string): Promise<{
   const { data, error } = await supabase
     .from('rooms')
     .select(
-      'id, code, title, color, stage, owner_id, is_confirmed, confirmed_slot, expires_at, meeting_date, location_name, ' +
+      'id, code, title, color, stage, owner_id, is_confirmed, confirmed_slot, expires_at, meeting_date, location_name, confirmed_menu, ' +
         'participants(id, profile_id, name, avatar_color), ' +
         'messages(message, sender_name, created_at)',
     )
@@ -187,7 +211,7 @@ export async function fetchRoom(roomId: string): Promise<{
       confirmedSlot: data.confirmed_slot,
       expiresAt: data.expires_at,
       meetingDate: data.meeting_date,
-      locationName: data.location_name,
+      locationName: data.location_name ?? data.confirmed_menu,
       participants: (data.participants ?? []).map(toParticipant),
       lastMessage: null,
     },
@@ -222,20 +246,6 @@ export async function fetchRoomMessages(roomId: string): Promise<{
     })),
     error: null,
   };
-}
-
-/**
- * 방에서 일어난 일을 채팅에 남긴다.
- *
- * messages 직접 INSERT 로는 kind 를 정할 수 없다 (권한이 room_id, message 뿐).
- * 서버가 참가자인지 확인하고 system 으로 넣어 준다.
- */
-export async function postRoomSystemMessage(roomId: string, text: string): Promise<Error | null> {
-  const { error } = await supabase.rpc('post_room_system_message', {
-    target_room: roomId,
-    body: text,
-  });
-  return error;
 }
 
 /**
@@ -278,24 +288,6 @@ export async function joinRoomByCode(code: string): Promise<{
  * 참가행만 지우면 방이 목록에 남을 수 있어 RPC 로 옮겼다. 참가자에서 빼고,
  * 마지막 사람이었으면 방까지 한 트랜잭션으로 지운다.
  */
-/**
- * 투표로 정해진 식당을 방에 남긴다.
- *
- * 예전에는 채팅 메시지에만 남아서, 방 상세정보와 홈 "다가올 일정" 은 계속
- * 비어 있었다. rooms_update_owner 정책상 방장만 쓸 수 있다.
- */
-export async function setRoomLocation(
-  roomId: string,
-  locationName: string,
-): Promise<Error | null> {
-  const { error } = await supabase
-    .from('rooms')
-    .update({ location_name: locationName.trim() || null })
-    .eq('id', roomId);
-
-  return error;
-}
-
 export async function leaveRoom(roomId: string): Promise<Error | null> {
   const { error } = await supabase.rpc('leave_room', { target_room: roomId });
   return error;
@@ -304,9 +296,9 @@ export async function leaveRoom(roomId: string): Promise<Error | null> {
 /**
  * 내가 만들었거나 내가 참가한 방의 정산.
  *
- * dutch_pay_bills 의 정책은 creator 와 방 참가자를 통과시키고, dutch_pay_members 도
- * 같은 기준으로 열려 있다 (`20260817200241_open_room_features.sql`). 그래서 누가
- * 아직 안 보냈는지까지 함께 읽는다.
+ * dutch_pay_bills 의 정책은 creator 와 생성 시점 수취인 snapshot만 통과시킨다.
+ * 새 방 참가자는 과거 정산을 받지 못하고, 방을 나간 수취인은 자기 정산을 계속
+ * 읽는다. 수취인은 누가 아직 안 보냈는지까지 함께 읽는다.
  */
 export type { SettlementSummary };
 
@@ -396,23 +388,72 @@ export async function createRoom(input: {
   return { roomId: null, code: null, error: new Error('초대 코드를 만들지 못했어요. 다시 시도해 주세요.') };
 }
 
+export { effectiveInvitationStatus } from './roomInvitationState';
+
+/** 내가 받은 대기 초대. 방 자체는 수락 전 RLS로 보이지 않으며 이 스냅샷만 보인다. */
+export async function fetchMyPendingRoomInvitations(): Promise<{
+  data: RoomInvitation[] | null;
+  error: Error | null;
+}> {
+  const { data, error } = await supabase
+    .from('room_invitations')
+    .select('id, room_id, inviter_id, room_title, status, expires_at, created_at')
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false })
+    .returns<RoomInvitationRow[]>();
+
+  if (error) return { data: null, error };
+
+  return {
+    data: (data ?? [])
+      .map((row) => ({
+        id: row.id,
+        roomId: row.room_id,
+        inviterId: row.inviter_id,
+        roomTitle: row.room_title,
+        status: effectiveInvitationStatus(row.status, row.expires_at),
+        expiresAt: row.expires_at,
+        createdAt: row.created_at,
+      }))
+      .filter((invitation) => invitation.status === 'pending'),
+    error: null,
+  };
+}
+
 /**
- * 방장이 메이트를 방에 넣는다. 서버가 부른 사람의 방 참가 여부와
- * 메이트 관계를 확인하므로 모르는 사람은 넣을 수 없다.
- *
- * added 가 false 면 이미 참가 중이라 아무것도 하지 않은 것이다.
- * 화면이 "초대했어요" 와 "이미 있어요" 를 구분할 수 있어야 한다.
+ * 메이트에게 수락형 초대를 만든다. 이 호출은 participants를 직접 만들지 않는다.
+ * 같은 요청을 재시도하면 서버는 기존 pending 초대 id를 돌려준다.
  */
-export async function inviteFriendToRoom(
+export async function createRoomInvitation(
   roomId: string,
   friendId: string,
-): Promise<{ added: boolean; error: Error | null }> {
-  const { data, error } = await supabase.rpc('invite_friend_to_room', {
+): Promise<{ invitationId: string | null; error: Error | null }> {
+  const { data, error } = await supabase.rpc('create_room_invitation', {
     target_room: roomId,
-    friend_id: friendId,
+    invitee_id: friendId,
   });
 
-  return { added: data === true, error };
+  return { invitationId: typeof data === 'string' ? data : null, error };
+}
+
+/** 대상자만 수락할 수 있다. null은 만료·거절된 초대라 방에 들어가지 못했다는 뜻이다. */
+export async function acceptRoomInvitation(invitationId: string): Promise<{
+  roomId: string | null;
+  error: Error | null;
+}> {
+  const { data, error } = await supabase.rpc('accept_room_invitation', {
+    target_invitation: invitationId,
+  });
+
+  return { roomId: typeof data === 'string' ? data : null, error };
+}
+
+/** 대상자만 거절할 수 있다. stale pending 초대는 서버가 expired로 바꾼다. */
+export async function declineRoomInvitation(invitationId: string): Promise<Error | null> {
+  const { error } = await supabase.rpc('decline_room_invitation', {
+    target_invitation: invitationId,
+  });
+  return error;
 }
 
 /**

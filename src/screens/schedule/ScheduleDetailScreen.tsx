@@ -16,7 +16,7 @@ import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
 import { CompleteButton } from '../../components/ui/Button';
 import { fetchMyFriends, type Friend } from '../../lib/friends';
-import { createRoom, inviteFriendToRoom } from '../../lib/rooms';
+import { createRoom, createRoomInvitation } from '../../lib/rooms';
 import { LocationDeniedError, locateMe, type MyLocation } from '../../lib/myLocation';
 import { searchPlaces, type Place } from '../../lib/tmap';
 import { useNavigation } from '../../navigation/NavigationContext';
@@ -186,14 +186,14 @@ export default function ScheduleDetailScreen() {
 
       const failed: string[] = [];
       for (const friendId of picked) {
-        const result = await inviteFriendToRoom(roomId, friendId);
+        const result = await createRoomInvitation(roomId, friendId);
         if (result.error) failed.push(friendId);
       }
 
       if (failed.length > 0) {
         Alert.alert(
           '일부 초대 실패',
-          `${failed.length}명을 넣지 못했어요. 방에서 초대 코드를 공유해 주세요.`,
+          `${failed.length}명에게 초대 요청을 보내지 못했어요. 방에서 초대 코드를 공유해 주세요.`,
         );
       }
 

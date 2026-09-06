@@ -1,6 +1,6 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { Plus } from 'lucide-react-native';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
   Pressable,
@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import AppHeader from '../../components/AppHeader';
+import { useAuth } from '../../auth/AuthProvider';
 import {
   ROOM_STATUS_LABEL,
   participantMeta,
@@ -21,7 +22,15 @@ import {
   type RoomStatus,
 } from '../../lib/roomFormat';
 import { previewText } from '../../lib/emoticon';
-import { joinRoomByCode, type RoomSummary } from '../../lib/rooms';
+import {
+  acceptRoomInvitation,
+  declineRoomInvitation,
+  fetchMyPendingRoomInvitations,
+  joinRoomByCode,
+  type RoomInvitation,
+  type RoomSummary,
+} from '../../lib/rooms';
+import { useForegroundRefreshToken } from '../../lifecycle/AppLifecycleContext';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useMyRooms } from '../../rooms/useMyRooms';
 import { fs, s } from '../../theme/scale';
@@ -34,27 +43,130 @@ type ChipTone = 'active' | 'done' | 'open';
 export default function ChatHomeScreen() {
   const insets = useSafeAreaInsets();
   const { navigate } = useNavigation();
+  const { user } = useAuth();
   const [code, setCode] = useState('');
   const [joining, setJoining] = useState(false);
+  const [invitations, setInvitations] = useState<RoomInvitation[]>([]);
+  const [invitationError, setInvitationError] = useState<string | null>(null);
+  const [invitationBusy, setInvitationBusy] = useState<string | null>(null);
   const { rooms, status, reload } = useMyRooms();
+  const userId = user?.id ?? null;
+  const foregroundRefreshToken = useForegroundRefreshToken();
+
+  useEffect(() => {
+    let active = true;
+
+    if (!userId) {
+      setInvitations([]);
+      setInvitationError(null);
+      return () => {
+        active = false;
+      };
+    }
+
+    void fetchMyPendingRoomInvitations()
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          setInvitations([]);
+          setInvitationError('초대 목록을 불러오지 못했어요.');
+          return;
+        }
+        setInvitations(data ?? []);
+        setInvitationError(null);
+      })
+      .catch(() => {
+        if (!active) return;
+        setInvitations([]);
+        setInvitationError('초대 목록을 불러오지 못했어요.');
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [userId, foregroundRefreshToken]);
+
+  const reloadInvitations = async () => {
+    try {
+      const { data, error } = await fetchMyPendingRoomInvitations();
+      if (error) {
+        setInvitationError('초대 목록을 불러오지 못했어요.');
+        return error;
+      }
+      setInvitations(data ?? []);
+      setInvitationError(null);
+      return null;
+    } catch {
+      const error = new Error('초대 목록을 불러오지 못했어요.');
+      setInvitationError(error.message);
+      return error;
+    }
+  };
 
   const enterRoom = (room: RoomSummary) =>
     navigate('ChatRoom', { roomId: room.id, title: room.title, color: room.color });
 
   const joinByCode = async () => {
-    setJoining(true);
-    const { roomId, error } = await joinRoomByCode(code);
-    setJoining(false);
+    try {
+      setJoining(true);
+      const { roomId, error } = await joinRoomByCode(code);
 
-    if (error) {
-      // RPC 가 잘못된 코드·만료를 구분해서 던진다
-      Alert.alert('입장할 수 없어요', error.message);
-      return;
+      if (error) {
+        // RPC 가 잘못된 코드·만료를 구분해서 던진다
+        Alert.alert('입장할 수 없어요', error.message);
+        return;
+      }
+
+      setCode('');
+      reload();
+      if (roomId) navigate('ChatRoom', { roomId });
+    } catch {
+      Alert.alert('입장할 수 없어요', '초대 코드를 처리하지 못했어요. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      setJoining(false);
     }
+  };
 
-    setCode('');
-    reload();
-    if (roomId) navigate('ChatRoom', { roomId });
+  const acceptInvitation = async (invitation: RoomInvitation) => {
+    try {
+      setInvitationBusy(invitation.id);
+      const { roomId, error } = await acceptRoomInvitation(invitation.id);
+
+      if (error) {
+        Alert.alert('초대를 수락할 수 없어요', error.message);
+        return;
+      }
+
+      await reloadInvitations();
+      if (!roomId) {
+        Alert.alert('초대가 만료됐어요', '새 초대를 받아 다시 시도해 주세요.');
+        return;
+      }
+
+      reload();
+      navigate('ChatRoom', { roomId, title: invitation.roomTitle });
+    } catch {
+      Alert.alert('초대를 수락할 수 없어요', '잠시 후 다시 시도해 주세요.');
+    } finally {
+      setInvitationBusy(null);
+    }
+  };
+
+  const declineInvitation = async (invitation: RoomInvitation) => {
+    try {
+      setInvitationBusy(invitation.id);
+      const error = await declineRoomInvitation(invitation.id);
+
+      if (error) {
+        Alert.alert('초대를 거절할 수 없어요', error.message);
+        return;
+      }
+      await reloadInvitations();
+    } catch {
+      Alert.alert('초대를 거절할 수 없어요', '잠시 후 다시 시도해 주세요.');
+    } finally {
+      setInvitationBusy(null);
+    }
   };
 
   return (
@@ -106,10 +218,57 @@ export default function ChatHomeScreen() {
             </Pressable>
           </View>
 
+          {invitationError ? (
+            <View style={styles.reloadBox}>
+              <Text style={styles.emptyText}>{invitationError}</Text>
+              <Pressable style={styles.retryButton} onPress={() => void reloadInvitations()}>
+                <Text style={styles.retryText}>다시 시도</Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {invitations.length > 0 ? (
+            <View style={styles.pendingInvitations}>
+              <Text style={styles.pendingTitle}>받은 초대</Text>
+              {invitations.map((invitation) => {
+                const busy = invitationBusy === invitation.id;
+                return (
+                  <View key={invitation.id} style={styles.pendingInvitationRow}>
+                    <Text style={styles.pendingInvitationName} numberOfLines={1}>
+                      {invitation.roomTitle}
+                    </Text>
+                    <Pressable
+                      style={[styles.acceptInvitationButton, busy && styles.invitationButtonDisabled]}
+                      disabled={busy}
+                      onPress={() => void acceptInvitation(invitation)}>
+                      <Text style={styles.invitationButtonText}>{busy ? '처리 중' : '수락'}</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.declineInvitationButton, busy && styles.invitationButtonDisabled]}
+                      disabled={busy}
+                      onPress={() => void declineInvitation(invitation)}>
+                      <Text style={styles.declineInvitationText}>거절</Text>
+                    </Pressable>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
+
           {status === 'loading' ? (
             <Text style={styles.emptyText}>방 목록을 불러오는 중...</Text>
           ) : status === 'error' ? (
-            <Text style={styles.emptyText}>방 목록을 불러오지 못했어요</Text>
+            <View style={styles.reloadBox}>
+              <Text style={styles.emptyText}>방 목록을 불러오지 못했어요</Text>
+              <Pressable
+                style={styles.retryButton}
+                onPress={() => {
+                  reload();
+                  void reloadInvitations();
+                }}>
+                <Text style={styles.retryText}>다시 시도</Text>
+              </Pressable>
+            </View>
           ) : rooms.length === 0 ? (
             <Text style={styles.emptyText}>아직 참여 중인 밥약이 없어요</Text>
           ) : (
@@ -260,6 +419,68 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.body,
     fontSize: fs(7),
     color: colors.textPrimary,
+  },
+  pendingInvitations: {
+    marginTop: s(10),
+    gap: s(5),
+  },
+  pendingTitle: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(6.5),
+    lineHeight: fs(9),
+    fontWeight: weight.bold,
+    color: colors.textMuted,
+  },
+  pendingInvitationRow: {
+    minHeight: s(27),
+    borderRadius: s(8),
+    backgroundColor: colors.primarySoft,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: s(4),
+    paddingHorizontal: s(7),
+  },
+  pendingInvitationName: {
+    flex: 1,
+    minWidth: 0,
+    fontFamily: fontFamily.body,
+    fontSize: fs(6.5),
+    lineHeight: fs(9),
+    fontWeight: weight.semibold,
+    color: colors.textPrimary,
+  },
+  acceptInvitationButton: {
+    minWidth: s(25),
+    height: s(16),
+    borderRadius: s(8),
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  declineInvitationButton: {
+    minWidth: s(25),
+    height: s(16),
+    borderRadius: s(8),
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  invitationButtonDisabled: {
+    opacity: 0.5,
+  },
+  invitationButtonText: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(5.5),
+    lineHeight: fs(7),
+    fontWeight: weight.bold,
+    color: colors.textOnAccent,
+  },
+  declineInvitationText: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(5.5),
+    lineHeight: fs(7),
+    fontWeight: weight.bold,
+    color: colors.textMuted,
   },
   enterButton: {
     width: s(34),
@@ -427,6 +648,23 @@ const styles = StyleSheet.create({
     fontSize: fs(7),
     lineHeight: fs(10),
     color: colors.textMuted,
+  },
+  reloadBox: {
+    alignItems: 'center',
+  },
+  retryButton: {
+    marginTop: s(4),
+    paddingHorizontal: s(8),
+    paddingVertical: s(3),
+    borderRadius: s(6),
+    backgroundColor: colors.primarySoft,
+  },
+  retryText: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(6),
+    lineHeight: fs(8),
+    fontWeight: weight.bold,
+    color: colors.primary,
   },
   /* 아바타 업로드 전까지 쓰는 이니셜 원 */
   avatarInitial: {

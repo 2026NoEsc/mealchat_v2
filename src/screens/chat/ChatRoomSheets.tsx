@@ -16,12 +16,12 @@ import { CompleteButton } from '../../components/ui/Button';
 
 import { formatAmount } from '../../lib/format';
 import type { RoomParticipant } from '../../lib/rooms';
-import { toRoomNoticeToken } from '../../lib/roomNotice';
 import {
+  canEditSettlement,
   createRoomSettlement,
   fetchRoomSettlements,
-  sendSettlementNotification,
   setSettlementCompleted,
+  settlementMutationErrorMessage,
   type Settlement,
   type SettlementMember,
 } from '../../lib/settlements';
@@ -37,8 +37,6 @@ const TINT = '#FFF5EB';
 type SheetProps = {
   visible: boolean;
   onClose: () => void;
-  /** 확정 시 채팅방에 남길 시스템 메시지 */
-  onConfirm: (message: string) => void;
 };
 
 /* ------------------------------------------------------------------ 일정 조율 */
@@ -51,7 +49,6 @@ export function SettlementSheet({
   visible,
   roomId,
   onClose,
-  onConfirm,
 }: SheetProps & { roomId: string | null }) {
   const { user } = useAuth();
   const [settlement, setSettlement] = useState<Settlement | null>(null);
@@ -82,32 +79,24 @@ export function SettlementSheet({
 
   const amount = Number(amountText.replace(/[^0-9]/g, '')) || 0;
   const members = settlement?.members ?? [];
+  const editable = canEditSettlement(settlement, user?.id ?? null);
   /* 아직 정산이 없으면 나눌 인원을 알 수 없어 1 로 둔다 */
   const splitCount = settlement?.splitCount ?? members.length ?? 1;
   const each = splitCount > 0 ? Math.ceil(amount / splitCount) : amount;
 
   const request = async () => {
-    if (!roomId || amount <= 0) return;
+    if (!roomId || amount <= 0 || !editable) return;
 
     setBusy(true);
     const { error } = await createRoomSettlement({ roomId, title: '식사 정산', amount });
-    if (!error) {
-      await sendSettlementNotification({
-        roomId,
-        title: 'N빵 정산 요청이 도착했어요!',
-        message: `1인당 ${formatAmount(each)}`,
-        amount: each,
-      });
-    }
     setBusy(false);
 
     if (error) {
-      Alert.alert('정산 요청 실패', error.message);
+      Alert.alert('정산 요청 실패', settlementMutationErrorMessage(error));
       return;
     }
 
     setReloadToken((token) => token + 1);
-    onConfirm(toRoomNoticeToken('settlement', `1인당 ${formatAmount(each)}`));
     onClose();
   };
 
@@ -136,6 +125,7 @@ export function SettlementSheet({
             style={styles.amountInput}
             value={amountText}
             onChangeText={setAmountText}
+            editable={editable}
             keyboardType="number-pad"
             placeholder="0"
             placeholderTextColor={colors.textMuted}
@@ -183,13 +173,17 @@ export function SettlementSheet({
         <Text style={styles.receiptText}>영수증 촬영하여 자동 입력</Text>
       </View>
 
-      <CompleteButton
-        label={busy ? '보내는 중' : '정산 요청 보내기'}
-        showNext
-        style={styles.cta}
-        disabled={busy || amount <= 0 || !roomId}
-        onPress={() => void request()}
-      />
+      {editable ? (
+        <CompleteButton
+          label={busy ? '보내는 중' : settlement ? '정산 내용 수정' : '정산 요청 보내기'}
+          showNext
+          style={styles.cta}
+          disabled={busy || amount <= 0 || !roomId}
+          onPress={() => void request()}
+        />
+      ) : (
+        <Text style={styles.settlementLocked}>정산 내용은 만든 사람만 수정할 수 있어요.</Text>
+      )}
     </BottomSheet>
   );
 }
@@ -212,6 +206,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontFamily: fontFamily.body,
     fontSize: fs(7),
+    color: colors.textMuted,
+  },
+  settlementLocked: {
+    marginTop: s(12),
+    textAlign: 'center',
+    fontFamily: fontFamily.body,
+    fontSize: fs(6.5),
     color: colors.textMuted,
   },
   memberDot: {

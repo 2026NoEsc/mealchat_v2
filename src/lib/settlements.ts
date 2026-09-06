@@ -1,4 +1,7 @@
 import { supabase } from './supabase';
+import { settlementCompletionRpcInput } from './settlementCompletionContract';
+
+export { canEditSettlement, settlementMutationErrorMessage } from './settlementAccess';
 
 export type SettlementMember = {
   id: string;
@@ -10,6 +13,7 @@ export type SettlementMember = {
 export type Settlement = {
   id: string;
   roomId: string | null;
+  creatorId: string | null;
   /** 방이 사라졌으면 null. 정산은 방보다 오래 남는다 */
   roomTitle: string | null;
   title: string;
@@ -32,6 +36,7 @@ type MemberRow = {
 type BillRow = {
   id: string;
   room_id: string | null;
+  creator_id: string | null;
   title: string;
   total_amount: number;
   split_count: number;
@@ -44,7 +49,7 @@ type BillRow = {
 };
 
 const SELECT =
-  'id, room_id, title, total_amount, split_count, bank_name, account_number, account_holder, ' +
+  'id, room_id, creator_id, title, total_amount, split_count, bank_name, account_number, account_holder, ' +
   'created_at, rooms(title), dutch_pay_members(id, profile_id, name, is_completed)';
 
 function toSettlement(row: BillRow): Settlement {
@@ -54,6 +59,7 @@ function toSettlement(row: BillRow): Settlement {
   return {
     id: row.id,
     roomId: row.room_id,
+    creatorId: row.creator_id,
     roomTitle: room?.title ?? null,
     title: row.title,
     totalAmount: row.total_amount,
@@ -71,11 +77,12 @@ function toSettlement(row: BillRow): Settlement {
   };
 }
 
-/** 방의 정산. 정책이 방 참가자로 제한하므로 room_id 만 걸면 된다. */
 /**
  * 방의 정산 전부, 최신순.
  *
- * 예전에는 `.limit(1)` 로 최신 한 건만 읽었다. 그러면 끝난 정산이 더 최근일 때
+ * 서버 정책은 creator 또는 생성 시점 수취인 snapshot으로 제한한다. 방에 새로
+ * 들어온 사람은 같은 room_id로 읽어도 과거 정산을 받지 못한다. 예전에는 `.limit(1)`
+ * 로 최신 한 건만 읽었다. 그러면 끝난 정산이 더 최근일 때
  * 아직 안 끝난 정산에 UI 로 갈 방법이 사라진다. 어느 것을 띄울지는
  * [pickActiveSettlement](./settlementSummary.ts) 가 정한다.
  */
@@ -106,13 +113,14 @@ export async function createRoomSettlement(input: {
   accountNumber?: string | null;
   accountHolder?: string | null;
 }): Promise<{ billId: string | null; error: Error | null }> {
-  const { data, error } = await supabase.rpc('create_room_settlement', {
+  const { data, error } = await supabase.rpc('create_room_settlement_v2', {
     target_room: input.roomId,
     bill_title: input.title,
     amount: input.amount,
-    bank_name: input.bankName ?? '',
-    account_number: input.accountNumber ?? '',
-    account_holder: input.accountHolder ?? '',
+    // 빈/누락 계좌값은 진행 중 정산의 기존 계좌 정보를 지우지 않는다.
+    bank_name: input.bankName ?? null,
+    account_number: input.accountNumber ?? null,
+    account_holder: input.accountHolder ?? null,
   });
 
   if (error) return { billId: null, error };
@@ -124,10 +132,8 @@ export async function setSettlementCompleted(
   memberId: string,
   completed: boolean,
 ): Promise<Error | null> {
-  const { error } = await supabase
-    .from('dutch_pay_members')
-    .update({ is_completed: completed })
-    .eq('id', memberId);
+  const rpc = settlementCompletionRpcInput(memberId, completed);
+  const { error } = await supabase.rpc(rpc.functionName, rpc.args);
   return error;
 }
 
@@ -142,7 +148,7 @@ export type RoomNotification = {
   createdAt: string;
 };
 
-/** 내가 속한 방들의 알림. 정책이 이미 방 참가자로 제한한다. */
+/** 생성 시점 정산 수취인(또는 creator)에게만 보이는 연결 알림. */
 export async function fetchMyNotifications(): Promise<{
   data: RoomNotification[] | null;
   error: Error | null;
@@ -181,26 +187,6 @@ export async function fetchMyNotifications(): Promise<{
     error: null,
   };
 }
-
-export async function sendSettlementNotification(input: {
-  roomId: string;
-  title: string;
-  message: string;
-  bankName?: string | null;
-  accountNumber?: string | null;
-  amount: number;
-}): Promise<Error | null> {
-  const { error } = await supabase.from('notifications').insert({
-    room_id: input.roomId,
-    title: input.title,
-    message: input.message,
-    bank_name: input.bankName ?? '',
-    account_number: input.accountNumber ?? '',
-    amount: input.amount,
-  });
-  return error;
-}
-
 
 /**
  * 내가 알림을 어디까지 읽었는지.

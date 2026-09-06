@@ -403,9 +403,15 @@ Figma 화면은 전부 옮겼다. 프로필 수정(`309:1086`)·은행 드롭다
 [BankSelect](../src/components/ui/BankSelect.tsx) 로 들어가 있다.
 화면별 구성은 [figma-specs.md](./figma-specs.md) 에 정리돼 있다.
 
-남은 것은 실제 앱의 비밀번호 재설정·딥링크, Gemini 정상 응답 이후 파싱·렌더링, RPC 역할
-결정, 로컬 함수 수정의 배포 여부다. Redirect URL은 등록됐고 유출 비밀번호 차단은 Pro
-플랜 변경 승인이 있어야 진행할 수 있다.
+현재 출시 게이트와 2026-08-23 후속 구현·검증 결과는
+[출시 준비 판정](./release-readiness-2026-08-23.md)을 우선해서 본다. 실제 앱의 비밀번호
+재설정은 첫 링크가 다른 기기에서 먼저 소비돼 재시도가 필요하고, 기능용 새 비밀번호 화면은
+있지만 Figma 노드·좌표 검수 기록은 없다. 추천 fixture와 RPC 권한 모델은 로컬에 구현됐지만
+운영 배포는 하지 않았다. 로컬 PostgreSQL 17.6에서 19개 fresh 적용, 16→19 단계 업그레이드,
+pgTAP 62/62, additive v1/v2 호환, 별도 두 세션 동시성은 통과했다. 현재 소스의 테스트용
+release APK도 Android 15 에뮬레이터에서 오프라인 콜드 스타트·background/resume·hardware
+back을 통과했지만 실제 실기기와 인증된 주요 화면은 남아 있다. Redirect URL은 등록됐고
+유출 비밀번호 차단은 Pro 플랜 변경 승인이 있어야 진행할 수 있다.
 
 ### 아직 눌러도 아무 일 없는 컨트롤
 

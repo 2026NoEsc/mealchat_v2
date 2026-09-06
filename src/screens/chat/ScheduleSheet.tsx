@@ -13,7 +13,6 @@ import {
   type AvailabilityStatus,
 } from '../../lib/availability';
 import { advanceRoomStage } from '../../lib/rooms';
-import { toRoomNoticeToken } from '../../lib/roomNotice';
 import { buildNextDays, cellKey, toSlots } from '../../lib/scheduleSlots';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
@@ -25,7 +24,8 @@ type Props = {
   /** 단계를 넘기는 건 방장만 할 수 있다 — advance_room_stage 가 서버에서 막는다 */
   isOwner: boolean;
   onClose: () => void;
-  onSubmitted: (text: string) => void;
+  /** 상태 RPC가 끝난 뒤 부모의 스냅샷을 갱신한다. 임의 시스템 메시지는 만들지 않는다. */
+  onStateChanged: () => void;
 };
 
 /**
@@ -43,7 +43,7 @@ export default function ScheduleSheet({
   roomId,
   isOwner,
   onClose,
-  onSubmitted,
+  onStateChanged,
 }: Props) {
   const { user } = useAuth();
   const myId = user?.id ?? null;
@@ -98,7 +98,7 @@ export default function ScheduleSheet({
       return;
     }
 
-    onSubmitted(`가능한 시간 ${slots.length}개를 등록했어요`);
+    onStateChanged();
     await load();
   };
 
@@ -123,7 +123,7 @@ export default function ScheduleSheet({
       return;
     }
 
-    onSubmitted(toRoomNoticeToken('schedule', '이제 식당을 정할 차례예요'));
+    onStateChanged();
     onClose();
   };
 

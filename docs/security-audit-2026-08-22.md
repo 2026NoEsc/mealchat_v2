@@ -163,14 +163,20 @@ AsyncStorage에 없으므로, 그 링크를 앱에서 열어도 올바른 E2E가
 - Security Advisor 재실행: `SECURITY DEFINER` RPC 10개와 유출 비밀번호 차단 1개가 유지됨
 - 원격 migration history 재실행: 16개, 로컬 16개와 일치
 - `deno check --config supabase/functions/schedule-recommend/deno.json .../index.ts`: 성공
-- `npm run quality` (2026-08-23 재실행): 성공
-  - 테스트 스위트 16개, 테스트 186개 통과
+- `npm run quality` (2026-08-23 최종 재실행): 성공
+  - 테스트 스위트 25개, 테스트 226개 통과
   - TypeScript·ESLint·Expo 의존성 검사 통과
   - 자산 검사 통과
   - 의존성 감사는 2026-09-30 만료되는 임시 예외 3개 안에서 통과
 - 실제 Auth 두 계정: 가입·이메일 확인·로그인·프로필 자동 생성 통과
 - 실제 두 세션 RLS: 방·메시지·참가자 격리와 교차 쓰기 차단 통과, 임시 방 0개로 정리
 - 실제 추천 호출: Auth·함수·Gemini 요청까지 통과, Gemini 503으로 파싱·렌더링 중단
+- 로컬 PostgreSQL 17.6: fresh 19개와 운영 기준 16개→containment→additive→cutover 적용 성공
+- 로컬 적대적 DB 검증: pgTAP 62/62와 별도 두 세션 초대·정산 동시성 성공
+- additive 호환: v1 연결 알림 1·표시되는 legacy 알림 0·legacy system 1,
+  v2 연결 알림 1·고정 event 1
+- Android 15 에뮬레이터: release APK 오프라인 콜드 스타트·background/resume·hardware back 성공
+  (실기기·인증된 주요 화면은 미검증)
 
 ## 다음 결정
 
@@ -183,3 +189,11 @@ AsyncStorage에 없으므로, 그 링크를 앱에서 열어도 올바른 E2E가
    별도 설계한다.
 7. 운영 version 7에서 고친 `requestBody` 네 줄을 독립 검토한 뒤 재배포할지 결정한다.
 8. Pro 플랜 변경을 승인할지 결정하고, 승인하면 유출 비밀번호 차단을 활성화한다.
+
+## 2026-08-23 후속
+
+위 목록의 제품 권한은 로컬 migration·클라이언트 구현과 독립 정적 검토까지 진행됐다.
+다만 운영 16개 migration에는 아직 적용되지 않았고, 모바일 최소 버전 전환도 끝나지 않았다.
+로컬 PostgreSQL/RLS/동시성 후보 gate는 통과했다. 최신 NO-GO 사유, 확정한 역할, 최종
+25 suites·226 tests 및 Deno 6 tests 결과는 [출시 준비 판정](./release-readiness-2026-08-23.md)에
+기록한다. 이 후속 문서는 2026-08-22 당시 원격 감사 사실을 소급 변경하지 않는다.

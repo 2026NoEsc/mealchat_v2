@@ -30,7 +30,7 @@ export default function HomeScreen() {
   const { navigate } = useNavigation();
   const insets = useSafeAreaInsets();
   const { bundle } = useMyProfile();
-  const { rooms, status } = useMyRooms();
+  const { rooms, status, reload } = useMyRooms();
   const settlements = useMySettlements();
 
   const name = bundle?.profile.name;
@@ -60,7 +60,7 @@ export default function HomeScreen() {
           {status === 'loading'
             ? '밥약을 불러오는 중이에요'
             : status === 'error'
-              ? '밥약을 불러오지 못했어요'
+              ? '밥약을 불러오지 못했어요. 다시 시도해 주세요'
               : activeRooms.length === 0 && openSettlements.length === 0
                 ? '아직 잡힌 밥약이 없어요. 하나 만들어 볼까요?'
                 : `현재 밥약 ${activeRooms.length}건, 정산 ${openSettlements.length}건이 기다리고 있어요~`}
@@ -89,7 +89,12 @@ export default function HomeScreen() {
           {status === 'loading' ? (
             <Text style={styles.empty}>밥약을 불러오는 중...</Text>
           ) : status === 'error' ? (
-            <Text style={styles.empty}>밥약을 불러오지 못했어요</Text>
+            <View style={styles.retryBox}>
+              <Text style={styles.empty}>밥약을 불러오지 못했어요</Text>
+              <Pressable style={styles.retryButton} onPress={reload}>
+                <Text style={styles.retryText}>다시 시도</Text>
+              </Pressable>
+            </View>
           ) : rooms.length === 0 ? (
             <Text style={styles.empty}>아직 참여 중인 밥약이 없어요</Text>
           ) : (
@@ -196,5 +201,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     ...shadows.button,
+  },
+  retryBox: {
+    alignItems: 'center',
+  },
+  retryButton: {
+    marginTop: s(-6),
+    paddingHorizontal: s(8),
+    paddingVertical: s(3),
+    borderRadius: s(6),
+    backgroundColor: colors.primarySoft,
+  },
+  retryText: {
+    fontFamily: fontFamily.bold,
+    fontSize: fs(6),
+    lineHeight: fs(8),
+    color: colors.primary,
   },
 });

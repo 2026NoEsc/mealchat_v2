@@ -1,5 +1,13 @@
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "@supabase/server";
+import {
+  buildScheduleRecommendResponse,
+  callGeminiWithRetry,
+  parseGeminiRecommendationText,
+  validateModelResult as validateModelResultPipeline,
+  validateRequest as validateRequestPipeline,
+  validateUserClaims,
+} from "./pipeline.ts";
 
 const MAX_BODY_BYTES = 32 * 1024;
 const MAX_SLOTS = 30;
@@ -101,61 +109,6 @@ type ModelPlacePick = {
   reason: string;
 };
 
-/**
- * Gemini 호출. 일시적 실패만 다시 시도한다.
- *
- * 503(과부하)과 네트워크 오류는 잠시 뒤 대개 성공한다.
- * 그대로 502 로 돌려주면 사용자는 아무 잘못 없이 "추천 실패"를 보게 된다.
- *
- * 400 같은 요청 자체의 문제는 다시 보내도 같은 답이라 즉시 포기한다.
- */
-/*
- * 429 는 넣지 않는다. 한도를 넘긴 상태라 다시 보내도 같은 답이 오고, 한 번
- * 누를 때마다 세 번씩 호출해 남은 쿼터를 더 빨리 태운다.
- */
-const RETRY_STATUSES = new Set([500, 502, 503, 504]);
-const MAX_ATTEMPTS = 3;
-// 응답 없이 매달린 호출은 실패로 치지 않아 재시도조차 못 하고 그대로 멈춘다.
-// 성공한 호출이 20 초를 넘긴 적은 없어 그 선에서 끊고 다음 시도로 넘긴다.
-const ATTEMPT_TIMEOUT_MS = 20_000;
-
-async function callGeminiWithRetry(
-  url: string,
-  init: RequestInit,
-  // deno 의 json() 은 any 라, 호출부가 기존처럼 옵셔널 체이닝으로 읽게 그대로 흘린다
-): Promise<{ response: Response; data: any }> {
-  let lastError: unknown = null;
-
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-    try {
-      const response = await fetch(url, {
-        ...init,
-        signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS),
-      });
-      const data = await response.json();
-
-      if (response.ok || !RETRY_STATUSES.has(response.status)) {
-        return { response, data };
-      }
-
-      if (attempt === MAX_ATTEMPTS) return { response, data };
-
-      console.warn(
-        `Gemini ${response.status}, retrying (${attempt}/${MAX_ATTEMPTS})`,
-      );
-    } catch (error) {
-      lastError = error;
-      if (attempt === MAX_ATTEMPTS) throw error;
-      console.warn(`Gemini fetch failed, retrying (${attempt}/${MAX_ATTEMPTS})`);
-    }
-
-    // 400ms, 800ms — 사용자가 기다리는 요청이라 길게 끌지 않는다
-    await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
-  }
-
-  throw lastError ?? new Error("Gemini request failed");
-}
-
 export default {
   fetch: withSupabase(
     { auth: "user" },
@@ -236,7 +189,7 @@ export default {
         }
 
         const validation =
-          validateRequest(body);
+          validateRequestPipeline(body);
 
         if (!validation.ok) {
           return Response.json(
@@ -254,26 +207,34 @@ export default {
           validation.data;
 
         /*
-         * Supabase의 로그인 JWT에서
-         * 현재 사용자의 profile id를 가져온다.
+         * withSupabase가 검증한 raw JWT는 jwtClaims에 있고, userClaims는 정규화된
+         * 사용자 객체다. 둘을 같은 사용자로 대조해야 userClaims를 JWT처럼 읽거나
+         * 다른 주체의 방을 admin client로 읽는 실수를 피할 수 있다.
          */
-        const claims =
-          ctx.userClaims as
-            | {
-                sub?: string;
-                id?: string;
-              }
-            | undefined;
+        const requestContext = ctx as unknown as {
+          jwtClaims?: unknown;
+          userClaims?: { id?: unknown };
+        };
+        const jwtValidation = validateUserClaims(
+          requestContext.jwtClaims,
+          Deno.env.get("SUPABASE_URL"),
+        );
 
-        const callerId =
-          claims?.sub ??
-          claims?.id;
+        if (!jwtValidation.ok) {
+          return Response.json(
+            { error: jwtValidation.error },
+            { status: jwtValidation.status },
+          );
+        }
 
-        if (!callerId) {
+        const callerId = requestContext.userClaims?.id;
+        if (
+          typeof callerId !== "string" ||
+          callerId !== jwtValidation.data.userId
+        ) {
           return Response.json(
             {
-              error:
-                "Authenticated user not found",
+              error: "Authenticated user claim does not match the token",
             },
             {
               status: 401,
@@ -330,7 +291,7 @@ export default {
          */
         const weather =
           await loadWeather(
-            body.placeCandidates[0],
+            requestBody.placeCandidates[0],
             candidateFacts,
           );
 
@@ -347,7 +308,7 @@ export default {
         const placeCount =
           Math.min(
             PLACE_RECOMMENDATION_COUNT,
-            body.placeCandidates
+            requestBody.placeCandidates
               .length,
           );
 
@@ -424,7 +385,7 @@ export default {
                               ),
 
                             placeCandidates:
-                              body
+                              requestBody
                                 .placeCandidates,
                           },
                         ),
@@ -516,104 +477,17 @@ export default {
           );
         }
 
-        /*
-         * 예산이 모자라 잘린 경우를 먼저 가려낸다. 그냥 두면 "JSON 이 깨졌다" 로만
-         * 보여서, 모델이 이상한 것인지 한도가 모자란 것인지 구분할 수 없다.
-         */
-        const finishReason =
-          geminiData
-            ?.candidates?.[0]
-            ?.finishReason;
-
-        if (
-          finishReason ===
-            "MAX_TOKENS"
-        ) {
-          console.error(
-            "Gemini hit the output token limit:",
-            geminiData?.usageMetadata,
-          );
-
-          return Response.json(
-            {
-              error:
-                "Gemini response was truncated",
-            },
-            {
-              status: 502,
-            },
-          );
-        }
-
-        const parts =
-          geminiData
-            ?.candidates?.[0]
-            ?.content?.parts;
-
-        const text =
-          Array.isArray(parts)
-            ? parts
-                .map(
-                  (
-                    part: {
-                      text?: string;
-                    },
-                  ) =>
-                    part?.text ??
-                    "",
-                )
-                .join("\n")
-                .trim()
-            : "";
-
-        if (!text) {
-          console.error(
-            "Gemini returned no text:",
-            geminiData,
-          );
-
-          return Response.json(
-            {
-              error:
-                "Gemini returned no text",
-            },
-            {
-              status: 502,
-            },
-          );
-        }
-
-        let parsed:
-          | {
-              recommendations?: unknown;
-            }
-          | undefined;
-
-        try {
-          parsed =
-            JSON.parse(text);
-        } catch {
-          console.error(
-            "Gemini returned invalid JSON:",
-            text,
-          );
-
-          return Response.json(
-            {
-              error:
-                "Gemini returned invalid JSON",
-            },
-            {
-              status: 502,
-            },
-          );
+        const parsed = parseGeminiRecommendationText(geminiData);
+        if (!parsed.ok) {
+          console.error("Gemini recommendation response invalid:", parsed.error);
+          return Response.json({ error: parsed.error }, { status: 502 });
         }
 
         const modelValidation =
-          validateModelResult(
-            parsed,
+          validateModelResultPipeline(
+            parsed.data,
             candidateFacts,
-            body.placeCandidates,
+            requestBody.placeCandidates,
             slotCount,
             placeCount,
           );
@@ -622,7 +496,7 @@ export default {
           console.error(
             "Gemini recommendation validation failed:",
             modelValidation.error,
-            parsed,
+            parsed.data,
           );
 
           return Response.json(
@@ -636,130 +510,15 @@ export default {
           );
         }
 
-        const factMap =
-          new Map(
-            candidateFacts.map(
-              (fact) => [
-                fact.slotId,
-                fact,
-              ],
-            ),
-          );
-
-        const placeMap =
-          new Map(
-            body.placeCandidates
-              .map((place) => [
-                place.id,
-                place,
-              ]),
-          );
-
-        const byRank = (
-          a: { rank: number },
-          b: { rank: number },
-        ) => a.rank - b.rank;
-
-        const trimReason = (
-          reason: string,
-        ) =>
-          reason.trim().slice(
-            0,
-            160,
-          );
-
-        /*
-         * Gemini가 참석 인원 숫자를 마음대로 만들지 못하도록
-         * availableCount/attendanceRate는 서버 계산값으로 덮어쓴다.
-         */
-        const slotRecommendations =
-          modelValidation.slots
-            .sort(byRank)
-            .map((pick) => {
-              const fact =
-                factMap.get(
-                  pick.slotId,
-                )!;
-
-              return {
-                /* 후보를 서버가 만들었으므로 날짜·시각까지 함께 보낸다 */
-                slot: {
-                  id: fact.slotId,
-                  date: fact.date,
-                  startTime:
-                    fact.startTime,
-                  endTime:
-                    fact.endTime,
-                  label: fact.label,
-                },
-
-                rainChance:
-                  weather[
-                    pick.slotId
-                  ] ?? null,
-
-                rank: pick.rank,
-
-                score: Math.round(
-                  pick.score,
-                ),
-
-                reason: trimReason(
-                  pick.reason,
-                ),
-
-                availableCount:
-                  fact.availableCount,
-
-                totalCount:
-                  fact.totalCount,
-
-                attendanceRate:
-                  fact.attendanceRate,
-              };
-            });
-
-        const placeRecommendations =
-          modelValidation.places
-            .sort(byRank)
-            .map((pick) => ({
-              /* 서버가 들고 있는 원본을 실어 보낸다 — 이름이 바뀔 여지를 없앤다 */
-              place:
-                placeMap.get(
-                  pick.placeId,
-                )!,
-
-              rank: pick.rank,
-
-              score: Math.round(
-                pick.score,
-              ),
-
-              reason: trimReason(
-                pick.reason,
-              ),
-
-              /*
-               * 아직 길찾기 API가 없으므로
-               * 값을 만들어내지 않는다.
-               */
-              averageTravelMinutes:
-                null,
-            }));
-
-        return Response.json({
-          slotRecommendations,
-
-          placeRecommendations,
-
-          modelVersion:
-            geminiData?.modelVersion ??
-            null,
-
-          usage:
-            geminiData?.usageMetadata ??
-            null,
-        });
+        return Response.json(
+          buildScheduleRecommendResponse(
+            modelValidation.data,
+            candidateFacts,
+            requestBody.placeCandidates,
+            geminiData,
+            weather,
+          ),
+        );
       } catch (error) {
         console.error(
           "schedule-recommend error:",

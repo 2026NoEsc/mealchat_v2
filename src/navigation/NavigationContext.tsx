@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { BackHandler, Platform } from 'react-native';
 
 import type { Route, RouteName } from './routes';
 import { popStack } from './stack';
@@ -21,6 +22,16 @@ type NavigationValue = {
 };
 
 const NavigationContext = createContext<NavigationValue | null>(null);
+
+/**
+ * Android hardware back은 우리가 쌓은 route stack만 소비한다. root에서 false를
+ * 돌려야 Android가 평소처럼 Activity를 종료할 수 있다.
+ */
+export function handleHardwareBackPress(canGoBack: boolean, goBack: () => void): boolean {
+  if (!canGoBack) return false;
+  goBack();
+  return true;
+}
 
 export function NavigationProvider({
   initialRoute,
@@ -51,17 +62,28 @@ export function NavigationProvider({
     setStack([{ name }]);
   }, []);
 
+  const canGoBack = stack.length > 1;
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () =>
+      handleHardwareBackPress(canGoBack, goBack),
+    );
+    return () => subscription.remove();
+  }, [canGoBack, goBack]);
+
   const value = useMemo<NavigationValue>(
     () => ({
       current: stack[stack.length - 1],
-      canGoBack: stack.length > 1,
+      canGoBack,
       navigate,
       replace,
       goBack,
       goBackWith,
       resetTo,
     }),
-    [stack, navigate, replace, goBack, goBackWith, resetTo],
+    [stack, canGoBack, navigate, replace, goBack, goBackWith, resetTo],
   );
 
   return <NavigationContext.Provider value={value}>{children}</NavigationContext.Provider>;

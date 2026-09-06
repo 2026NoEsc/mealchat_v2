@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { useAuth } from '../auth/AuthProvider';
+import { useForegroundRefreshToken } from '../lifecycle/AppLifecycleContext';
 import {
   fetchMyRooms,
   fetchMySettlements,
@@ -16,6 +17,7 @@ type Status = 'loading' | 'ready' | 'error';
 export function useMyRooms() {
   const { user } = useAuth();
   const userId = user?.id ?? null;
+  const foregroundRefreshToken = useForegroundRefreshToken();
 
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [status, setStatus] = useState<Status>('loading');
@@ -55,12 +57,13 @@ export function useMyRooms() {
     return () => {
       active = false;
     };
-  }, [userId, reloadToken]);
+  }, [userId, reloadToken, foregroundRefreshToken]);
 
   return { rooms, status, error, reload };
 }
 
 export function useRoomMessages(roomId: string | null) {
+  const foregroundRefreshToken = useForegroundRefreshToken();
   const [messages, setMessages] = useState<RoomMessage[]>([]);
   const [status, setStatus] = useState<Status>('loading');
   const [error, setError] = useState<Error | null>(null);
@@ -99,7 +102,7 @@ export function useRoomMessages(roomId: string | null) {
     return () => {
       active = false;
     };
-  }, [roomId, reloadToken]);
+  }, [roomId, reloadToken, foregroundRefreshToken]);
 
   return { messages, status, error, reload };
 }
@@ -111,33 +114,41 @@ export function useRoomMessages(roomId: string | null) {
  * 바뀌어도 액션 행이 계속 예전 단계로 그려졌다. 앱을 다시 켜야 반영됐다.
  */
 export function useRoom(roomId: string | null) {
+  const foregroundRefreshToken = useForegroundRefreshToken();
   const [room, setRoom] = useState<RoomSummary | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
 
-  const load = useCallback(async () => {
+  const reload = useCallback(() => setReloadToken((token) => token + 1), []);
+
+  useEffect(() => {
     if (!roomId) {
       setRoom(null);
       return;
     }
 
-    try {
-      const { data } = await fetchRoom(roomId);
-      setRoom(data);
-    } catch {
-      setRoom(null);
-    }
-  }, [roomId]);
+    let active = true;
+    void fetchRoom(roomId)
+      .then(({ data, error }) => {
+        if (!active) return;
+        setRoom(error ? null : data);
+      })
+      .catch(() => {
+        if (active) setRoom(null);
+      });
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+    return () => {
+      active = false;
+    };
+  }, [roomId, reloadToken, foregroundRefreshToken]);
 
-  return { room, reload: load };
+  return { room, reload };
 }
 
 /** 내가 볼 수 있는 정산 목록. 홈의 정산 넛지가 쓴다. */
 export function useMySettlements() {
   const { user } = useAuth();
   const userId = user?.id ?? null;
+  const foregroundRefreshToken = useForegroundRefreshToken();
   const [settlements, setSettlements] = useState<SettlementSummary[]>([]);
 
   useEffect(() => {
@@ -158,7 +169,7 @@ export function useMySettlements() {
     return () => {
       active = false;
     };
-  }, [userId]);
+  }, [userId, foregroundRefreshToken]);
 
   return settlements;
 }

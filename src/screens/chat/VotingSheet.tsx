@@ -8,11 +8,13 @@ import { CompleteButton } from '../../components/ui/Button';
 import {
   addVotingItem,
   removeVotingItem,
+  confirmRoomVote,
   fetchRoomVoting,
   toggleVote,
   type VotingKind,
   type VotingOption,
 } from '../../lib/voting';
+import { hasStrictVoteMajority, pickLeadingVoteOption } from '../../lib/votingLeader';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
@@ -26,11 +28,9 @@ type Props = {
   title: string;
   subtitle: string;
   placeholder: string;
-  /** 확정했을 때 채팅에 남길 문구를 만든다 */
-  confirmMessage: (label: string) => string;
   onClose: () => void;
-  /** 채팅에 남길 문구와, 저장에 쓸 원래 라벨을 함께 준다 */
-  onConfirm: (text: string, label: string) => void;
+  /** 서버가 실제 상태와 system event를 기록한 뒤 채팅을 새로 고친다. */
+  onConfirm: () => void;
   /*
    * 표가 하나 오갈 때마다 부른다. 마지막 한 표로 서버가 방을 '확정' 으로
    * 넘겨 버리므로, 화면이 그걸 알아채려면 방을 다시 읽어야 한다.
@@ -55,7 +55,6 @@ export default function VotingSheet({
   title,
   subtitle,
   placeholder,
-  confirmMessage,
   onClose,
   onConfirm,
   onVoted,
@@ -66,6 +65,7 @@ export default function VotingSheet({
   const myId = user?.id ?? null;
 
   const [options, setOptions] = useState<VotingOption[]>([]);
+  const [memberCount, setMemberCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
@@ -109,8 +109,9 @@ export default function VotingSheet({
 
   const load = useCallback(async () => {
     if (!roomId) return;
-    const { data } = await fetchRoomVoting(roomId, myId);
+    const { data, memberCount: fetchedMemberCount } = await fetchRoomVoting(roomId, myId);
     setOptions((data ?? []).filter((option) => option.kind === kind));
+    setMemberCount(fetchedMemberCount);
     setLoading(false);
   }, [roomId, myId, kind]);
 
@@ -152,10 +153,8 @@ export default function VotingSheet({
   };
 
   /* 표가 가장 많은 후보. 동률이면 먼저 추가된 쪽이 앞에 온다. */
-  const leader = options.reduce<VotingOption | null>(
-    (best, option) => (best === null || option.voters.length > best.voters.length ? option : best),
-    null,
-  );
+  const leader = pickLeadingVoteOption(options);
+  const leaderHasMajority = leader !== null && hasStrictVoteMajority(leader.voters.length, memberCount);
 
   return (
     <BottomSheet visible={visible} title={title} onClose={onClose}>
@@ -255,12 +254,19 @@ export default function VotingSheet({
       <CompleteButton
         label="이걸로 정하기"
         style={styles.cta}
-        disabled={busy || !leader || leader.voters.length === 0}
-        onPress={() => {
-          if (!leader) return;
-          onConfirm(confirmMessage(leader.label), leader.label);
+        disabled={busy || !leader || !leaderHasMajority}
+        onPress={() => void (async () => {
+          if (!leader || !roomId) return;
+          setBusy(true);
+          const error = await confirmRoomVote(roomId, leader.id);
+          setBusy(false);
+          if (error) {
+            Alert.alert('확정 실패', error.message);
+            return;
+          }
+          onConfirm();
           onClose();
-        }}
+        })()}
       />
 
     </BottomSheet>

@@ -8,6 +8,13 @@ const scanRoot = resolve(process.argv[2] ?? projectRoot);
 
 const blockedExtensions = new Set(['.avif', '.heic', '.heif', '.icns', '.jxl']);
 const blockedHeifBrands = new Set(['avif', 'heic', 'heix', 'hevc', 'hevx', 'mif1', 'msf1']);
+const expectedImageFormats = new Map([
+  ['.gif', 'GIF'],
+  ['.jpeg', 'JPEG'],
+  ['.jpg', 'JPEG'],
+  ['.png', 'PNG'],
+  ['.webp', 'WEBP'],
+]);
 const ignoredRootDirectories = new Set([
   '.expo',
   '.git',
@@ -20,12 +27,9 @@ const ignoredRootDirectories = new Set([
 ]);
 
 const blockedFiles = [];
+const mismatchedFiles = [];
 
-function detectBlockedFormat(filePath, extension) {
-  if (blockedExtensions.has(extension)) {
-    return extension.slice(1).toUpperCase();
-  }
-
+function readHeader(filePath) {
   const header = Buffer.alloc(32);
   const descriptor = openSync(filePath, 'r');
   let bytesRead;
@@ -34,6 +38,43 @@ function detectBlockedFormat(filePath, extension) {
   } finally {
     closeSync(descriptor);
   }
+  return { bytesRead, header };
+}
+
+function detectCommonImageFormat(header, bytesRead) {
+  if (
+    bytesRead >= 8 &&
+    header.subarray(0, 8).equals(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    )
+  ) {
+    return 'PNG';
+  }
+  if (bytesRead >= 3 && header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff) {
+    return 'JPEG';
+  }
+  if (
+    bytesRead >= 6 &&
+    ['GIF87a', 'GIF89a'].includes(header.toString('ascii', 0, 6))
+  ) {
+    return 'GIF';
+  }
+  if (
+    bytesRead >= 12 &&
+    header.toString('ascii', 0, 4) === 'RIFF' &&
+    header.toString('ascii', 8, 12) === 'WEBP'
+  ) {
+    return 'WEBP';
+  }
+  return null;
+}
+
+function detectBlockedFormat(filePath, extension) {
+  if (blockedExtensions.has(extension)) {
+    return extension.slice(1).toUpperCase();
+  }
+
+  const { bytesRead, header } = readHeader(filePath);
 
   if (bytesRead >= 4 && header.toString('ascii', 0, 4) === 'icns') {
     return 'ICNS';
@@ -66,6 +107,20 @@ function detectBlockedFormat(filePath, extension) {
   return null;
 }
 
+function detectExtensionMismatch(filePath, extension) {
+  const expectedFormat = expectedImageFormats.get(extension);
+  if (!expectedFormat) {
+    return null;
+  }
+
+  const { bytesRead, header } = readHeader(filePath);
+  const detectedFormat = detectCommonImageFormat(header, bytesRead);
+  if (detectedFormat === expectedFormat) {
+    return null;
+  }
+  return detectedFormat ?? 'unknown data';
+}
+
 function scanDirectory(directory) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const entryPath = resolve(directory, entry.name);
@@ -95,19 +150,37 @@ function scanDirectory(directory) {
       if (format) {
         blockedFiles.push({ file: relativePath, format });
       }
+      const detectedFormat = detectExtensionMismatch(entryPath, extension);
+      if (detectedFormat) {
+        mismatchedFiles.push({
+          detectedFormat,
+          expectedFormat: expectedImageFormats.get(extension),
+          file: relativePath,
+        });
+      }
     }
   }
 }
 
 scanDirectory(scanRoot);
 
-if (blockedFiles.length > 0) {
-  console.error('Blocked image formats detected:');
-  for (const finding of blockedFiles.sort((left, right) => left.file.localeCompare(right.file))) {
-    console.error(`- ${finding.file} (${finding.format})`);
+if (blockedFiles.length > 0 || mismatchedFiles.length > 0) {
+  if (blockedFiles.length > 0) {
+    console.error('Blocked image formats detected:');
+    for (const finding of blockedFiles.sort((left, right) => left.file.localeCompare(right.file))) {
+      console.error(`- ${finding.file} (${finding.format})`);
+    }
+    console.error('ICNS, JXL, HEIF/HEIC, and AVIF assets are not allowed while the Metro image-size advisory is active.');
   }
-  console.error('ICNS, JXL, HEIF/HEIC, and AVIF assets are not allowed while the Metro image-size advisory is active.');
+  if (mismatchedFiles.length > 0) {
+    console.error('Image extensions do not match their file headers:');
+    for (const finding of mismatchedFiles.sort((left, right) => left.file.localeCompare(right.file))) {
+      console.error(
+        `- ${finding.file} (expected ${finding.expectedFormat}, detected ${finding.detectedFormat})`,
+      );
+    }
+  }
   process.exit(1);
 }
 
-console.log('Asset security check passed: no ICNS, JXL, HEIF/HEIC, or AVIF files found.');
+console.log('Asset security check passed: blocked formats are absent and common image extensions match their headers.');
