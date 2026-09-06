@@ -20,7 +20,7 @@ export default function RoomDetailScreen() {
   const params = current.params as { roomId?: string; title?: string } | undefined;
   const roomId = params?.roomId ?? null;
 
-  const room = useRoom(roomId);
+  const { room } = useRoom(roomId);
   const title = params?.title ?? room?.title ?? '밥약';
 
   const [copied, setCopied] = useState(false);
@@ -28,20 +28,46 @@ export default function RoomDetailScreen() {
 
   const members = room?.participants ?? [];
 
+  /*
+   * 나가기는 "방장이 방을 닫는" 행위다. 방장이 나가면 방이 통째로 사라지므로
+   * 다른 사람에게는 버튼을 보여 주지 않는다. 서버(leave_room)도 같은 조건으로
+   * 막지만, 누를 수 있게 두고 거절하면 왜 안 되는지가 전달되지 않는다.
+   */
+  const isOwner = Boolean(user?.id && room?.ownerId && user.id === room.ownerId);
+  /* 돈이 오가는 중에 방이 사라지면 얼마를 보내야 하는지 확인할 자리가 없어진다 */
+  const settling = room?.stage === 'settling';
+
   /* expo-clipboard 를 아직 넣지 않아 실제 복사는 못 한다. 코드를 그대로 보여준다. */
   const copyCode = () => setCopied(true);
 
-  const leave = async () => {
+  const leave = () => {
     if (!roomId || !user?.id) return;
-    setLeaving(true);
-    const error = await leaveRoom(roomId);
-    setLeaving(false);
 
-    if (error) {
-      Alert.alert('나가기 실패', error.message);
-      return;
-    }
-    resetTo('Chat');
+    /* 되돌릴 수 없고 남은 사람들에게서도 방이 사라진다 — 한 번 묻는다 */
+    Alert.alert(
+      '방을 없앨까요?',
+      '메이트 모두에게서 방이 사라져요. 정산 내역은 남아 있어요.',
+      [
+        { text: '그대로 둘게요', style: 'cancel' },
+        {
+          text: '없애기',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setLeaving(true);
+              const error = await leaveRoom(roomId);
+              setLeaving(false);
+
+              if (error) {
+                Alert.alert('없애지 못했어요', error.message);
+                return;
+              }
+              resetTo('Chat');
+            })();
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -113,12 +139,23 @@ export default function RoomDetailScreen() {
           })}
         </View>
 
-        <DangerButton
-          label={leaving ? '나가는 중' : '방 나가기'}
-          style={styles.leave}
-          disabled={leaving}
-          onPress={() => void leave()}
-        />
+        {isOwner ? (
+          <>
+            <DangerButton
+              label={leaving ? '없애는 중' : '방 없애기'}
+              style={styles.leave}
+              disabled={leaving || settling}
+              onPress={leave}
+            />
+            <Text style={styles.leaveHint}>
+              {settling
+                ? '정산이 끝나면 없앨 수 있어요.'
+                : '없애면 메이트 모두에게서 방이 사라져요.'}
+            </Text>
+          </>
+        ) : (
+          <Text style={styles.leaveHint}>방은 방장만 없앨 수 있어요.</Text>
+        )}
       </ScrollView>
     </View>
   );
@@ -269,5 +306,13 @@ const styles = StyleSheet.create({
   },
   leave: {
     marginTop: s(12),
+  },
+  leaveHint: {
+    marginTop: s(6),
+    textAlign: 'center',
+    fontFamily: fontFamily.body,
+    fontSize: fs(6.5),
+    lineHeight: fs(9),
+    color: colors.textMuted,
   },
 });

@@ -1,4 +1,5 @@
 import { toEmoticonToken } from './emoticon';
+import { randomRoomColor } from './roomTheme';
 import {
   toSettlementSummary,
   type SettlementBillRow,
@@ -13,11 +14,25 @@ export type RoomParticipant = {
   avatarColor: string;
 };
 
+/** 약속이 어디까지 왔는지. 방 화면이 이 값에 따라 갈린다. */
+export type RoomStage = 'scheduling' | 'place' | 'confirmed' | 'settling' | 'done';
+
+export const STAGE_LABEL: Record<RoomStage, string> = {
+  scheduling: '일정 조율 중',
+  place: '식당 정하는 중',
+  confirmed: '확정',
+  settling: '정산 중',
+  done: '정산 완료',
+};
+
 export type RoomSummary = {
   id: string;
   code: string;
   title: string;
   color: string;
+  stage: RoomStage;
+  /** 방장만 단계를 넘길 수 있다 */
+  ownerId: string | null;
   isConfirmed: boolean;
   confirmedSlot: string | null;
   expiresAt: string;
@@ -51,6 +66,8 @@ type RoomRow = {
   code: string;
   title: string;
   color: string;
+  stage: string | null;
+  owner_id: string | null;
   is_confirmed: boolean;
   confirmed_slot: string | null;
   expires_at: string;
@@ -70,6 +87,17 @@ type MessageRow = {
   created_at: string;
   kind: string | null;
 };
+
+/** 예전에 만들어진 방에는 stage 가 없을 수 있다 — 기본값으로 읽는다 */
+function toStage(value: string | null): RoomStage {
+  return value === 'scheduling' ||
+    value === 'place' ||
+    value === 'confirmed' ||
+    value === 'settling' ||
+    value === 'done'
+    ? value
+    : 'scheduling';
+}
 
 function toParticipant(row: ParticipantRow): RoomParticipant {
   return {
@@ -92,7 +120,7 @@ export async function fetchMyRooms(): Promise<{
   const { data, error } = await supabase
     .from('rooms')
     .select(
-      'id, code, title, color, is_confirmed, confirmed_slot, expires_at, meeting_date, location_name, ' +
+      'id, code, title, color, stage, owner_id, is_confirmed, confirmed_slot, expires_at, meeting_date, location_name, ' +
         'participants(id, profile_id, name, avatar_color), ' +
         'messages(message, sender_name, created_at)',
     )
@@ -111,6 +139,8 @@ export async function fetchMyRooms(): Promise<{
       code: row.code,
       title: row.title,
       color: row.color,
+      stage: toStage(row.stage),
+      ownerId: row.owner_id,
       isConfirmed: row.is_confirmed,
       confirmedSlot: row.confirmed_slot,
       expiresAt: row.expires_at,
@@ -134,7 +164,7 @@ export async function fetchRoom(roomId: string): Promise<{
   const { data, error } = await supabase
     .from('rooms')
     .select(
-      'id, code, title, color, is_confirmed, confirmed_slot, expires_at, meeting_date, location_name, ' +
+      'id, code, title, color, stage, owner_id, is_confirmed, confirmed_slot, expires_at, meeting_date, location_name, ' +
         'participants(id, profile_id, name, avatar_color), ' +
         'messages(message, sender_name, created_at)',
     )
@@ -151,6 +181,8 @@ export async function fetchRoom(roomId: string): Promise<{
       code: data.code,
       title: data.title,
       color: data.color,
+      stage: toStage(data.stage),
+      ownerId: data.owner_id,
       isConfirmed: data.is_confirmed,
       confirmedSlot: data.confirmed_slot,
       expiresAt: data.expires_at,
@@ -246,6 +278,24 @@ export async function joinRoomByCode(code: string): Promise<{
  * 참가행만 지우면 방이 목록에 남을 수 있어 RPC 로 옮겼다. 참가자에서 빼고,
  * 마지막 사람이었으면 방까지 한 트랜잭션으로 지운다.
  */
+/**
+ * 투표로 정해진 식당을 방에 남긴다.
+ *
+ * 예전에는 채팅 메시지에만 남아서, 방 상세정보와 홈 "다가올 일정" 은 계속
+ * 비어 있었다. rooms_update_owner 정책상 방장만 쓸 수 있다.
+ */
+export async function setRoomLocation(
+  roomId: string,
+  locationName: string,
+): Promise<Error | null> {
+  const { error } = await supabase
+    .from('rooms')
+    .update({ location_name: locationName.trim() || null })
+    .eq('id', roomId);
+
+  return error;
+}
+
 export async function leaveRoom(roomId: string): Promise<Error | null> {
   const { error } = await supabase.rpc('leave_room', { target_room: roomId });
   return error;
@@ -325,7 +375,8 @@ export async function createRoom(input: {
       location_name: input.locationName ?? null,
       confirmed_slot: input.confirmedSlot ?? null,
       is_confirmed: Boolean(input.confirmedSlot),
-      color: input.color ?? '#FF9900',
+      /* 색을 안 주면 팔레트에서 고른다 — 예전에는 늘 주황이라 방이 다 같아 보였다 */
+      color: input.color ?? randomRoomColor(),
     });
 
     if (!error) {
@@ -362,4 +413,23 @@ export async function inviteFriendToRoom(
   });
 
   return { added: data === true, error };
+}
+
+/**
+ * 약속 단계를 다음으로 넘긴다.
+ *
+ * 방장만 가능하고 되돌아가지 않는다 — 그 판단은 서버가 한다. 앱은 결과 단계만
+ * 받아서 화면을 다시 그린다.
+ */
+export async function advanceRoomStage(
+  roomId: string,
+  next: RoomStage,
+): Promise<{ stage: RoomStage | null; error: Error | null }> {
+  const { data, error } = await supabase.rpc('advance_room_stage', {
+    target_room: roomId,
+    next_stage: next,
+  });
+
+  if (error) return { stage: null, error };
+  return { stage: typeof data === 'string' ? toStage(data) : null, error: null };
 }

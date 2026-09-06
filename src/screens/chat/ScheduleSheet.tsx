@@ -1,29 +1,31 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '../../auth/AuthProvider';
-import Avatar from '../../components/Avatar';
 import AvailabilityGrid from '../../components/AvailabilityGrid';
 import BottomSheet from '../../components/BottomSheet';
 import PickedSlotChips from '../../components/PickedSlotChips';
+import SubmissionStatus from '../../components/SubmissionStatus';
 import { CompleteButton } from '../../components/ui/Button';
 import {
   fetchRoomAvailability,
   saveMyAvailability,
   type AvailabilityStatus,
 } from '../../lib/availability';
+import { advanceRoomStage } from '../../lib/rooms';
+import { toRoomNoticeToken } from '../../lib/roomNotice';
 import { buildNextDays, cellKey, toSlots } from '../../lib/scheduleSlots';
 import { fs, s } from '../../theme/scale';
-import { colors, shadows } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { colors } from '../../theme/tokens';
+import { fontFamily } from '../../theme/typography';
 
 type Props = {
   visible: boolean;
   roomId: string | null;
+  /** 단계를 넘기는 건 방장만 할 수 있다 — advance_room_stage 가 서버에서 막는다 */
+  isOwner: boolean;
   onClose: () => void;
   onSubmitted: (text: string) => void;
-  /** 제출이 모이면 여기서 결과 시트로 넘어간다 */
-  onAskRecommend: () => void;
 };
 
 /**
@@ -39,9 +41,9 @@ type Props = {
 export default function ScheduleSheet({
   visible,
   roomId,
+  isOwner,
   onClose,
   onSubmitted,
-  onAskRecommend,
 }: Props) {
   const { user } = useAuth();
   const myId = user?.id ?? null;
@@ -101,7 +103,29 @@ export default function ScheduleSheet({
   };
 
   const members = status?.members ?? [];
-  const submitted = members.filter((member) => member.submitted).length;
+  /*
+   * 모두 냈다고 방이 알아서 넘어가지는 않는다. 단계를 올리는 RPC 가 방장만
+   * 통과시키기 때문에, 마지막 사람이 낸 순간 자동으로 넘기면 그 사람이 방장이
+   * 아닐 때 그냥 실패한다. 그래서 방장이 마무리를 눌러 넘긴다.
+   */
+  const allSubmitted = members.length > 0 && members.every((member) => member.submitted);
+  const [advancing, setAdvancing] = useState(false);
+
+  const advance = async () => {
+    if (!roomId) return;
+
+    setAdvancing(true);
+    const { error } = await advanceRoomStage(roomId, 'place');
+    setAdvancing(false);
+
+    if (error) {
+      Alert.alert('넘어가지 못했어요', error.message);
+      return;
+    }
+
+    onSubmitted(toRoomNoticeToken('schedule', '이제 식당을 정할 차례예요'));
+    onClose();
+  };
 
   return (
     <BottomSheet
@@ -127,39 +151,16 @@ export default function ScheduleSheet({
           <>
             <View style={styles.gap} />
 
-            <View style={styles.statusCard}>
-              <View style={styles.statusHead}>
-                <Text style={styles.statusTitle}>제출 완료</Text>
-                <Text style={styles.statusCount}>
-                  {submitted} / {members.length} 명
-                </Text>
-              </View>
+            <SubmissionStatus members={members} />
 
-              {/*
-                아직 안 낸 사람은 흐리게 둔다. 시안에는 이 구분이 없지만, 누가
-                아직인지 보이지 않으면 "제출 현황" 카드가 숫자 하나로만 남는다.
-              */}
-              <View style={styles.memberRow}>
-                {members.map((member) => (
-                  <View key={member.id} style={styles.member}>
-                    <Avatar
-                      name={member.name}
-                      color={member.avatarColor}
-                      size={s(20)}
-                      radius={s(5)}
-                      style={!member.submitted ? styles.waiting : undefined}
-                    />
-                    <Text
-                      style={[styles.memberName, !member.submitted && styles.waitingText]}
-                      numberOfLines={1}>
-                      {member.name}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            </View>
+            {allSubmitted && !isOwner ? (
+              <Text style={styles.waiting}>
+                모두 냈어요. 방장이 마치면 식당 정하기로 넘어가요.
+              </Text>
+            ) : null}
           </>
         ) : null}
+
       </ScrollView>
 
       {editing ? (
@@ -170,6 +171,14 @@ export default function ScheduleSheet({
           disabled={saving || slots.length === 0}
           onPress={() => void submit()}
         />
+      ) : allSubmitted && isOwner ? (
+        <CompleteButton
+          label={advancing ? '넘어가는 중' : '식당 정하기로 넘어가기'}
+          showNext
+          style={styles.cta}
+          disabled={advancing}
+          onPress={() => void advance()}
+        />
       ) : (
         <CompleteButton
           label="일정 수정"
@@ -179,20 +188,6 @@ export default function ScheduleSheet({
         />
       )}
 
-      {/*
-        내 일정을 낸 뒤에만 보인다. 격자를 고치는 중에 추천으로 빠지면 하던
-        선택이 사라지고, 아직 아무도 안 낸 상태에서는 추천할 근거도 없다.
-      */}
-      {!editing && submitted > 0 ? (
-        <Pressable
-          style={styles.askRow}
-          onPress={() => {
-            onClose();
-            onAskRecommend();
-          }}>
-          <Text style={styles.askText}>모인 일정으로 AI 추천 받기 ({submitted}명) →</Text>
-        </Pressable>
-      ) : null}
     </BottomSheet>
   );
 }
@@ -209,72 +204,15 @@ const styles = StyleSheet.create({
   gap: {
     height: s(6),
   },
-  statusCard: {
-    // card y123 w197 h63 radius8 pad 9/8
-    backgroundColor: colors.card,
-    borderRadius: s(8),
-    paddingHorizontal: s(9),
-    paddingVertical: s(8),
-    borderWidth: s(0.6),
-    borderColor: colors.border,
-    ...shadows.button,
-  },
-  statusHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statusTitle: {
-    flex: 1,
-    fontFamily: fontFamily.body,
-    fontSize: fs(8.5),
-    lineHeight: fs(11.5),
-    fontWeight: weight.semibold,
-    color: colors.textPrimary,
-  },
-  /* 선택한 시간 카드의 개수 표기와 같은 값을 쓴다 — 두 카드가 나란히 놓인다 */
-  statusCount: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(8),
-    fontWeight: weight.semibold,
-    color: colors.textMuted,
-  },
-  memberRow: {
-    // mr y23, 아바타 20 간격 5
-    marginTop: s(5),
-    flexDirection: 'row',
-    gap: s(5),
-  },
-  member: {
-    width: s(20),
-    alignItems: 'center',
-  },
-  memberName: {
-    marginTop: s(5),
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(8),
-    fontWeight: weight.semibold,
-    color: colors.textPrimary,
-  },
-  waiting: {
-    opacity: 0.3,
-  },
-  waitingText: {
-    color: colors.textMuted,
-  },
   cta: {
     marginTop: s(8),
   },
-  askRow: {
-    marginTop: s(7),
-    alignItems: 'center',
-  },
-  askText: {
+  waiting: {
+    marginTop: s(6),
+    textAlign: 'center',
     fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    lineHeight: fs(10),
-    fontWeight: weight.bold,
-    color: colors.primary,
+    fontSize: fs(6.5),
+    lineHeight: fs(9),
+    color: colors.textMuted,
   },
 });

@@ -16,6 +16,8 @@ export type AvailabilityStatus = {
   }[];
   /** 내가 앞서 낸 답 — 격자에 되살려서 이어 고칠 수 있게 한다 */
   mySlots: string[];
+  /** 다른 사람이 고른 칸. 누가 골랐는지는 오지 않는다 */
+  othersSlots: string[];
 };
 
 type StatusRow = {
@@ -33,13 +35,14 @@ export async function fetchRoomAvailability(roomId: string): Promise<{
   data: AvailabilityStatus | null;
   error: Error | null;
 }> {
-  const { data, error } = await supabase.rpc('room_availability_status', {
-    target_room: roomId,
-  });
+  const [status, cells] = await Promise.all([
+    supabase.rpc('room_availability_status', { target_room: roomId }),
+    supabase.rpc('room_availability_cells', { target_room: roomId }),
+  ]);
 
-  if (error) return { data: null, error };
+  if (status.error) return { data: null, error: status.error };
 
-  const rows = (data ?? []) as StatusRow[];
+  const rows = (status.data ?? []) as StatusRow[];
 
   return {
     data: {
@@ -51,6 +54,8 @@ export async function fetchRoomAvailability(roomId: string): Promise<{
       })),
       /* 내 행에만 my_slots 가 채워져 온다 */
       mySlots: toStringArray(rows.find((row) => toStringArray(row.my_slots).length > 0)?.my_slots),
+      /* 겹쳐 보여 줄 칸은 없어도 그만이다 — 실패해도 화면은 그린다 */
+      othersSlots: cells.error ? [] : toStringArray(cells.data),
     },
     error: null,
   };

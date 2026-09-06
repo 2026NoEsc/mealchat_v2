@@ -32,7 +32,6 @@ export type Route = {
 export const TAB_ROUTES: Record<TabKey, RouteName> = {
   home: 'Home',
   schedule: 'Schedule',
-  chat: 'Chat',
   profile: 'Profile',
 };
 
@@ -50,6 +49,7 @@ export const ROUTE_TO_TAB: Partial<Record<RouteName, TabKey>> = {
   ScheduleConfirmed: 'schedule',
   // 정산은 홈에서 들어가므로 홈 탭을 유지한다
   Settlements: 'home',
-  Chat: 'chat',
+  /* 채팅방 목록은 홈으로 합쳤다. 예전 경로로 들어와도 홈 탭이 켜져 있어야 한다 */
+  Chat: 'home',
   Profile: 'profile',
 };

@@ -103,6 +103,19 @@ export async function addVotingItem(
   return error;
 }
 
+/**
+ * 후보를 지운다. 올린 사람이나 방장만 가능하다.
+ *
+ * 그 후보에 던진 표도 서버가 함께 지운다 — 남겨 두면 득표수가 어긋난다.
+ */
+export async function removeVotingItem(roomId: string, itemId: string): Promise<Error | null> {
+  const { error } = await supabase.rpc('remove_voting_item', {
+    target_room: roomId,
+    item_id: itemId,
+  });
+  return error;
+}
+
 /** 표를 켜고 끈다. 내 참가행만 바뀐다. */
 export async function toggleVote(roomId: string, itemId: string): Promise<Error | null> {
   const { error } = await supabase.rpc('toggle_vote', {

@@ -6,7 +6,11 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "platforms": ["ios", "android", "web"],
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
     "plugins": [
       [
         "expo-calendar",
@@ -16,9 +20,12 @@
       ],
       "expo-image-picker",
       "expo-location",
-      "expo-notifications"
+      "expo-notifications",
+      "expo-font"
     ],
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.mealchat.app",

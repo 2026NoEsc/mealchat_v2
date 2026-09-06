@@ -11,6 +11,8 @@
  * supabase 를 import 하지 않는다 — 네이티브 모듈 없이 테스트할 수 있어야 한다.
  */
 
+import { noticePreviewText } from './roomNotice';
+
 const TOKEN = /^\s*\[emoticon:([A-Za-z0-9_-]+)\]\s*$/;
 
 /** 메시지 전체가 이모티콘 하나면 그 이름을, 아니면 null 을 준다. */
@@ -30,7 +32,9 @@ export function isEmoticonMessage(text: string): boolean {
 
 /** 목록 미리보기에서는 토큰 대신 사람이 읽을 수 있는 말로 바꾼다. */
 export function previewText(text: string): string {
-  return isEmoticonMessage(text) ? '이모티콘을 보냈어요' : text;
+  if (isEmoticonMessage(text)) return '이모티콘을 보냈어요';
+  /* 알림 카드도 토큰이라, 그대로 두면 목록에 `[notice:...]` 가 그대로 보인다 */
+  return noticePreviewText(text);
 }
 
 export function toEmoticonToken(stickerId: string): string {

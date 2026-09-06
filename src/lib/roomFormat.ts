@@ -49,12 +49,30 @@ export function remainingLabel(expiresAt: string, now: Date = new Date()): strin
  * 채팅방 헤더에 쓰는 한 문장.
  * 목록용 표기를 그대로 문장에 넣으면 "종료됨 방이 사라져요" 처럼 어색해진다.
  */
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** 시안(2111:16114) 의 `11:47:22` — 두 자리씩 끊어 붙인다 */
+function clockText(ms: number): string {
+  const total = Math.floor(ms / 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(Math.floor(total / 3600))}:${pad(Math.floor(total / 60) % 60)}:${pad(total % 60)}`;
+}
+
+/**
+ * 방이 사라지기까지 남은 시간.
+ *
+ * 정산을 마친 방은 24시간만 남으므로, 하루 안쪽이면 시안처럼 초까지 세어 준다.
+ * 그보다 많이 남았을 때까지 `168:00:00` 로 보여 주면 읽히지 않아서, 그때는
+ * 예전처럼 일·시간 단위로 뭉뚱그린다.
+ */
 export function roomTimerLabel(expiresAt: string, now: Date = new Date()): string {
   const expires = new Date(expiresAt);
   if (Number.isNaN(expires.getTime())) return '';
 
   const ms = expires.getTime() - now.getTime();
   if (ms <= 0) return '이미 종료된 밥약이에요';
+
+  if (ms < DAY_MS) return `${clockText(ms)} 후 방이 사라져요.`;
 
   return `${durationText(ms)} 뒤 방이 사라져요`;
 }

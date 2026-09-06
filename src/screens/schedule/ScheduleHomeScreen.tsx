@@ -4,7 +4,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../auth/AuthProvider';
-import AppHeader from '../../components/AppHeader';
+import PageHeader from '../../components/PageHeader';
 import {
   buildWeeksOf,
   columnOfIn,
@@ -142,13 +142,12 @@ export default function ScheduleHomeScreen() {
   return (
     <View style={styles.screen}>
       <View style={{ height: insets.top, backgroundColor: colors.surface }} />
-      <AppHeader />
+      {/* 시안 2159:895 — 화면 이름이 헤더 자리에 들어간다 */}
+      <PageHeader title="실시간 캘린더 조율" />
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        <Text style={styles.title}>실시간 캘린더 조율</Text>
-
+        {/* 부제는 시안(2159:763)에서 빠졌다 — 화면 이름이 헤더로 올라가며 자리가 겹쳤다 */}
         <View style={styles.subRow}>
-          <Text style={styles.sub}>구체적인 약속 일정을 정해주세요</Text>
           <Text style={styles.syncLabel}>자동 연동</Text>
           <Pressable
             style={[styles.toggle, autoSync && styles.toggleOn]}
@@ -305,27 +304,14 @@ const styles = StyleSheet.create({
   body: {
     paddingBottom: s(16),
   },
-  title: {
-    // x14 y79 h24
-    marginTop: s(7),
-    marginLeft: s(14),
-    fontFamily: fontFamily.bold,
-    fontSize: fs(14),
-    lineHeight: fs(24),
-    color: colors.textPrimary,
-  },
+  /* 자동 연동 토글 — 시안 2159:892 (x194 y83.5). 헤더 하단(y72)에서 11 */
   subRow: {
+    marginTop: s(11),
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'flex-end',
     marginLeft: s(15),
-    marginRight: s(15),
-  },
-  sub: {
-    flex: 1,
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(9),
-    color: colors.textMuted,
+    marginRight: s(12),
   },
   syncLabel: {
     marginRight: s(3),
@@ -355,9 +341,9 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
   },
   card: {
-    // x8 y116 w206
+    // x7 y96 w206 — 시안 2159:767
     marginTop: s(5),
-    marginHorizontal: s(8),
+    marginHorizontal: s(7),
     borderRadius: s(12),
     backgroundColor: colors.card,
     paddingHorizontal: s(7.2),

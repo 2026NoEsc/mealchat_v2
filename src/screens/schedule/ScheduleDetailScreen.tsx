@@ -2,6 +2,7 @@ import { Crosshair, MapPin, Plus, Search } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,13 +16,14 @@ import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
 import { CompleteButton } from '../../components/ui/Button';
 import { fetchMyFriends, type Friend } from '../../lib/friends';
+import { createRoom, inviteFriendToRoom } from '../../lib/rooms';
 import { LocationDeniedError, locateMe, type MyLocation } from '../../lib/myLocation';
 import { searchPlaces, type Place } from '../../lib/tmap';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useMyProfile } from '../../profile/useMyProfile';
 import { fs, s } from '../../theme/scale';
 import { colors, shadows } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 import ScheduleStepHeader from './ScheduleStepHeader';
 
 const toMyLocation = (place: Place): MyLocation => ({
@@ -71,6 +73,7 @@ export default function ScheduleDetailScreen() {
   const [results, setResults] = useState<Place[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
 
   /** 늦게 도착한 응답이 최신 결과를 덮지 않게 한다 */
   const requestId = useRef(0);
@@ -151,6 +154,59 @@ export default function ScheduleDetailScreen() {
     setPicked((prev) =>
       prev.includes(profileId) ? prev.filter((id) => id !== profileId) : [...prev, profileId],
     );
+
+  /*
+   * 여기서 방을 만든다.
+   *
+   * 메이트의 가능한 시간은 방이 있어야 모을 수 있다 — 초대도 참가행도 전부
+   * 방에 매달려 있다. 그래서 STEP 2 는 "만들어진 방의 조율 화면" 이 되고,
+   * 일정을 확정하면 그때 식당 결정 단계로 넘어간다.
+   */
+  const goNext = async () => {
+    if (!origin || !user?.id) return;
+
+    setCreating(true);
+    try {
+      /* 조율이 끝나기 전에는 언제 만날지 모른다 — 넉넉히 잡고 확정 때 좁힌다 */
+      const until = new Date();
+      until.setDate(until.getDate() + 7);
+      const meetingDate = until.toISOString().slice(0, 10);
+
+      const { roomId, error } = await createRoom({
+        ownerId: user.id,
+        title: name.trim() || '새 밥약',
+        meetingDate,
+        expiresAt: new Date(`${meetingDate}T23:59:59`).toISOString(),
+      });
+
+      if (error || !roomId) {
+        Alert.alert('방 만들기 실패', error?.message ?? '잠시 후 다시 시도해 주세요.');
+        return;
+      }
+
+      const failed: string[] = [];
+      for (const friendId of picked) {
+        const result = await inviteFriendToRoom(roomId, friendId);
+        if (result.error) failed.push(friendId);
+      }
+
+      if (failed.length > 0) {
+        Alert.alert(
+          '일부 초대 실패',
+          `${failed.length}명을 넣지 못했어요. 방에서 초대 코드를 공유해 주세요.`,
+        );
+      }
+
+      navigate('ScheduleTime', {
+        roomId,
+        name: name.trim(),
+        invitees: picked,
+        origin,
+      });
+    } finally {
+      setCreating(false);
+    }
+  };
 
   return (
     <View style={styles.screen}>
@@ -323,17 +379,11 @@ export default function ScheduleDetailScreen() {
         </View>
 
         <CompleteButton
-          label="다음"
+          label={creating ? '방 만드는 중' : '다음'}
           showNext
-          disabled={!origin}
+          disabled={!origin || creating}
           style={styles.cta}
-          onPress={() =>
-            navigate('ScheduleTime', {
-              name: name.trim(),
-              invitees: picked,
-              origin: origin ?? undefined,
-            })
-          }
+          onPress={() => void goNext()}
         />
       </ScrollView>
     </View>
@@ -378,10 +428,9 @@ const styles = StyleSheet.create({
   },
   cardTitle: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(8.5),
     lineHeight: fs(11),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   mateRow: {
@@ -405,9 +454,8 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
   },
   mateInitial: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(13),
-    fontWeight: weight.bold,
     color: colors.textOnAccent,
   },
   mateName: {
@@ -420,7 +468,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   mateNameOn: {
-    fontWeight: weight.bold,
+    fontFamily: fontFamily.bold,
     color: colors.primary,
   },
   mateEmpty: {
@@ -437,10 +485,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primarySoft,
   },
   mapChipText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(6),
     lineHeight: fs(8),
-    fontWeight: weight.semibold,
     color: colors.primary,
   },
   searchBox: {
@@ -474,10 +521,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   searchButtonText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6.5),
     lineHeight: fs(9),
-    fontWeight: weight.bold,
     color: colors.textOnAccent,
   },
   gpsRow: {
@@ -493,10 +539,9 @@ const styles = StyleSheet.create({
     gap: s(5),
   },
   gpsText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(7),
     lineHeight: fs(10),
-    fontWeight: weight.bold,
     color: colors.primary,
   },
   /* 고르지 않은 추천은 테두리를 죽여서, 지금 잡힌 한 곳이 드러나게 한다 */
@@ -536,10 +581,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   placeName: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(7.5),
     lineHeight: fs(10),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   placeMeta: {

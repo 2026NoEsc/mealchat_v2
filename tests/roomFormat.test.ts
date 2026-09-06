@@ -109,9 +109,15 @@ describe('participantMeta', () => {
 });
 
 describe('roomTimerLabel', () => {
-  it('남았으면 문장으로 자연스럽게 이어진다', () => {
-    expect(roomTimerLabel('2026-08-18T20:00:00', NOW)).toBe('8시간 뒤 방이 사라져요');
-    expect(roomTimerLabel('2026-08-18T12:30:00', NOW)).toBe('30분 뒤 방이 사라져요');
+  it('하루 안쪽이면 시안처럼 초까지 센다', () => {
+    expect(roomTimerLabel('2026-08-18T20:00:00', NOW)).toBe('08:00:00 후 방이 사라져요.');
+    expect(roomTimerLabel('2026-08-18T12:30:00', NOW)).toBe('00:30:00 후 방이 사라져요.');
+    expect(roomTimerLabel('2026-08-18T23:47:22', NOW)).toBe('11:47:22 후 방이 사라져요.');
+  });
+
+  it('하루보다 많이 남았으면 뭉뚱그린다 — 168:00:00 은 읽히지 않는다', () => {
+    expect(roomTimerLabel('2026-08-25T12:00:00', NOW)).toBe('7일 뒤 방이 사라져요');
+    expect(roomTimerLabel('2026-08-20T12:00:00', NOW)).toBe('2일 뒤 방이 사라져요');
   });
 
   it('이미 지났으면 카운트다운이 아니라 종료를 알린다', () => {

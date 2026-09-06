@@ -33,10 +33,14 @@ export default function ScheduleStepHeader({
         />
       </View>
 
-      {onBack ? <BackButton onPress={onBack} style={styles.back} /> : null}
-
       <Text style={styles.step}>STEP {step}</Text>
-      <Text style={styles.title}>{title}</Text>
+
+      {/* 뒤로가기는 타이틀 왼쪽에 붙는다 — 무엇에서 돌아가는지가 바로 읽힌다 */}
+      <View style={styles.titleRow}>
+        {onBack ? <BackButton onPress={onBack} /> : null}
+        <Text style={styles.title}>{title}</Text>
+      </View>
+
       <Text style={styles.subtitle}>{subtitle}</Text>
     </View>
   );
@@ -55,15 +59,6 @@ const styles = StyleSheet.create({
     height: s(5),
     borderRadius: s(3),
   },
-  back: {
-    /*
-     * 진행바(y8~13) 아래 STEP 라벨과 같은 줄에 놓되 흐름에서 빼둔다.
-     * 줄 안에 넣으면 칩 높이 13 이 라벨 높이 9 를 밀어내 아래 전체가 4 만큼 내려간다.
-     */
-    position: 'absolute',
-    left: s(11.5),
-    top: s(17),
-  },
   step: {
     marginTop: s(4),
     marginRight: s(11.5),
@@ -73,9 +68,18 @@ const styles = StyleSheet.create({
     lineHeight: fs(9),
     color: colors.primary,
   },
-  title: {
+  /*
+   * 타이틀 줄. 칩(13)이 글자 줄(16)보다 낮아 줄 높이를 밀지 않으므로,
+   * 뒤로가기가 있든 없든 시안(2111:15252) 의 y 좌표가 그대로 유지된다.
+   */
+  titleRow: {
     marginTop: s(4),
     marginLeft: s(11.5),
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: s(5),
+  },
+  title: {
     fontFamily: fontFamily.extrabold,
     fontSize: fs(12),
     lineHeight: fs(16),

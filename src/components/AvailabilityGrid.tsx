@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { cellKey, HOURS, isPastCell, type DayItem } from '../lib/scheduleSlots';
 import { fs, s } from '../theme/scale';
 import { colors, shadows } from '../theme/tokens';
-import { fontFamily, weight } from '../theme/typography';
+import { fontFamily } from '../theme/typography';
 
 /**
  * Figma 채팅/일정 패널 (2111:16888) 안의 격자 — 220 프레임 기준
@@ -15,10 +15,13 @@ import { fontFamily, weight } from '../theme/typography';
 export default function AvailabilityGrid({
   days,
   picked,
+  others,
   onToggle,
 }: {
   days: DayItem[];
   picked: Set<string>;
+  /** 다른 사람이 고른 칸 — 회색으로 겹쳐 보인다 */
+  others?: Set<string>;
   onToggle: (date: string, hour: number) => void;
 }) {
   return (
@@ -41,7 +44,10 @@ export default function AvailabilityGrid({
           <Text style={styles.label}>{hour}</Text>
 
           {days.map((day) => {
-            const on = picked.has(cellKey(day.date, hour));
+            const key = cellKey(day.date, hour);
+            const on = picked.has(key);
+            /* 내 선택이 우선이다 — 겹치면 주황으로 보여야 내가 골랐다는 걸 안다 */
+            const shared = !on && Boolean(others?.has(key));
             /* 지난 시각은 고를 수 없다 — 눌러도 반응하지 않는다 */
             const past = isPastCell(day.date, hour);
 
@@ -49,7 +55,12 @@ export default function AvailabilityGrid({
               <View key={day.date} style={styles.col}>
                 <Pressable
                   disabled={past}
-                  style={[styles.cell, on && styles.cellOn, past && styles.cellPast]}
+                  style={[
+                    styles.cell,
+                    shared && styles.cellShared,
+                    on && styles.cellOn,
+                    past && styles.cellPast,
+                  ]}
                   onPress={() => onToggle(day.date, hour)}
                 />
               </View>
@@ -94,10 +105,9 @@ const styles = StyleSheet.create({
   },
   head: {
     textAlign: 'center',
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(5.6),
     lineHeight: fs(8),
-    fontWeight: weight.semibold,
     color: colors.textMuted,
   },
   sunday: {
@@ -109,6 +119,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderWidth: s(0.5),
     borderColor: colors.border,
+  },
+  cellShared: {
+    backgroundColor: colors.cellOthers,
+    borderColor: colors.cellOthers,
   },
   cellOn: {
     backgroundColor: colors.primary,

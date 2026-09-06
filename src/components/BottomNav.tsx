@@ -3,14 +3,14 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { fs, s } from '../theme/scale';
 import { colors, shadows } from '../theme/tokens';
 import { fontFamily } from '../theme/typography';
-import { CalendarIcon, ChatIcon, HomeIcon, ProfileIcon } from './icons';
+import { CalendarIcon, HomeIcon, ProfileIcon } from './icons';
 
-export type TabKey = 'home' | 'schedule' | 'chat' | 'profile';
+export type TabKey = 'home' | 'schedule' | 'profile';
 
+/* 채팅방은 홈에 합쳤다 — 시안 2154:584 부터 탭이 셋이다 */
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'home', label: '홈' },
   { key: 'schedule', label: '일정 조율' },
-  { key: 'chat', label: '채팅방' },
   { key: 'profile', label: '프로필' },
 ];
 
@@ -23,16 +23,14 @@ function TabIcon({ tab, active }: { tab: TabKey; active: boolean }) {
       return <HomeIcon size={size} color={color} />;
     case 'schedule':
       return <CalendarIcon size={size} color={color} />;
-    case 'chat':
-      return <ChatIcon size={size} color={color} />;
     case 'profile':
       return <ProfileIcon size={s(13)} color={color} />;
   }
 }
 
 /**
- * Figma BottomNav (83:403) — 220 x 38
- * 탭 4개 균등 배치, 활성 탭 하단에 25% 폭 오렌지 인디케이터
+ * Figma BottomNav1 (2154:584) — 220 x 38
+ * 탭 3개 균등 배치, 활성 탭 하단에 1/3 폭 오렌지 인디케이터
  */
 export default function BottomNav({
   active,
@@ -62,7 +60,7 @@ export default function BottomNav({
       <View
         style={[
           styles.indicator,
-          { left: `${activeIndex * 25}%` },
+          { left: `${(activeIndex * 100) / TABS.length}%` },
         ]}
       />
     </View>
@@ -101,7 +99,7 @@ const styles = StyleSheet.create({
   indicator: {
     position: 'absolute',
     bottom: 0,
-    width: '25%',
+    width: `${100 / TABS.length}%`,
     height: s(2),
     borderRadius: s(3),
     backgroundColor: colors.primary,

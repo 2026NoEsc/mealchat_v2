@@ -16,6 +16,7 @@ import { CompleteButton } from '../../components/ui/Button';
 
 import { formatAmount } from '../../lib/format';
 import type { RoomParticipant } from '../../lib/rooms';
+import { toRoomNoticeToken } from '../../lib/roomNotice';
 import {
   createRoomSettlement,
   fetchRoomSettlements,
@@ -106,7 +107,7 @@ export function SettlementSheet({
     }
 
     setReloadToken((token) => token + 1);
-    onConfirm(`1인당 ${formatAmount(each)} 정산 요청을 보냈어요`);
+    onConfirm(toRoomNoticeToken('settlement', `1인당 ${formatAmount(each)}`));
     onClose();
   };
 

@@ -1,3 +1,4 @@
+import { X } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -6,6 +7,7 @@ import BottomSheet from '../../components/BottomSheet';
 import { CompleteButton } from '../../components/ui/Button';
 import {
   addVotingItem,
+  removeVotingItem,
   fetchRoomVoting,
   toggleVote,
   type VotingKind,
@@ -13,7 +15,7 @@ import {
 } from '../../lib/voting';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 const TINT = '#FFF5EB';
 
@@ -27,12 +29,19 @@ type Props = {
   /** 확정했을 때 채팅에 남길 문구를 만든다 */
   confirmMessage: (label: string) => string;
   onClose: () => void;
-  onConfirm: (text: string) => void;
-  /**
-   * 있으면 목록 아래에 한 줄 더 붙는다. 일정 조율에서 "모인 시간으로 추천 받기"
-   * 를 여는 용도라, 메뉴 투표에는 넘기지 않는다.
+  /** 채팅에 남길 문구와, 저장에 쓸 원래 라벨을 함께 준다 */
+  onConfirm: (text: string, label: string) => void;
+  /*
+   * 표가 하나 오갈 때마다 부른다. 마지막 한 표로 서버가 방을 '확정' 으로
+   * 넘겨 버리므로, 화면이 그걸 알아채려면 방을 다시 읽어야 한다.
    */
-  extraAction?: { label: string; onPress: (labels: string[]) => void };
+  onVoted?: () => void;
+  /**
+   * AI 가 고른 후보들. 목록 위에 순위와 취향 일치율로 보여 주고, 눌러서 투표
+   * 후보로 올릴 수 있다 — 흐름도의 "AI 식당 추천을 후보로 추가".
+   */
+  suggestions?: { label: string; matchPercent: number }[];
+  suggestionTitle?: string;
 };
 
 /**
@@ -49,7 +58,9 @@ export default function VotingSheet({
   confirmMessage,
   onClose,
   onConfirm,
-  extraAction,
+  onVoted,
+  suggestions,
+  suggestionTitle,
 }: Props) {
   const { user } = useAuth();
   const myId = user?.id ?? null;
@@ -58,6 +69,43 @@ export default function VotingSheet({
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+
+  /*
+   * 이미 투표 후보에 오른 것은 추천에서 뺀다. 남겨 두면 같은 이름이 위아래로
+   * 두 번 보이고, 무엇을 눌러야 하는지 헷갈린다.
+   */
+  const openSuggestions = (suggestions ?? []).filter(
+    (item) => !options.some((option) => option.label.trim() === item.label.trim()),
+  );
+
+  /* AI 가 고른 것을 투표 후보로 올린다 */
+  const addSuggestion = async (label: string) => {
+    if (!roomId) return;
+
+    setBusy(true);
+    const error = await addVotingItem(roomId, kind, label);
+    setBusy(false);
+
+    if (error) {
+      Alert.alert('추가하지 못했어요', error.message);
+      return;
+    }
+    await load();
+  };
+
+  const discard = async (option: VotingOption) => {
+    if (!roomId) return;
+
+    setBusy(true);
+    const error = await removeVotingItem(roomId, option.id);
+    setBusy(false);
+
+    if (error) {
+      Alert.alert('지우지 못했어요', error.message);
+      return;
+    }
+    await load();
+  };
 
   const load = useCallback(async () => {
     if (!roomId) return;
@@ -83,6 +131,7 @@ export default function VotingSheet({
       return;
     }
     void load();
+    onVoted?.();
   };
 
   const add = async () => {
@@ -109,7 +158,38 @@ export default function VotingSheet({
   );
 
   return (
-    <BottomSheet visible={visible} title={title} subtitle={subtitle} onClose={onClose}>
+    <BottomSheet visible={visible} title={title} onClose={onClose}>
+      {openSuggestions.length > 0 ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>{suggestionTitle ?? 'AI 추천'}</Text>
+
+          {openSuggestions.map((item, i) => (
+            <View key={item.label} style={styles.suggestRow}>
+              <Text style={styles.suggestRank}>{i + 1}.</Text>
+
+              <Text style={styles.suggestLabel} numberOfLines={1}>
+                {item.label}
+              </Text>
+
+              <Text style={styles.suggestMatch} numberOfLines={1}>
+                메이트들의 취향과 {item.matchPercent}% 일치합니다!
+              </Text>
+
+              <Pressable
+                disabled={busy}
+                hitSlop={s(6)}
+                onPress={() => void addSuggestion(item.label)}>
+                <Text style={styles.suggestAdd}>＋ 추가</Text>
+              </Pressable>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      <View style={styles.section}>
+        <Text style={styles.sectionLabel}>{subtitle}</Text>
+      </View>
+
       {loading ? (
         <Text style={styles.notice}>불러오는 중...</Text>
       ) : options.length === 0 ? (
@@ -142,6 +222,15 @@ export default function VotingSheet({
             <Text style={[styles.count, option.mine && styles.accent]}>
               {option.voters.length}표
             </Text>
+
+            {/* 올린 사람과 방장만 지울 수 있다 — 아니면 서버가 막는다 */}
+            <Pressable
+              style={styles.remove}
+              disabled={busy}
+              hitSlop={s(6)}
+              onPress={() => void discard(option)}>
+              <X size={s(8)} color={colors.textMuted} strokeWidth={2.5} />
+            </Pressable>
           </Pressable>
         ))
       )}
@@ -169,28 +258,11 @@ export default function VotingSheet({
         disabled={busy || !leader || leader.voters.length === 0}
         onPress={() => {
           if (!leader) return;
-          onConfirm(confirmMessage(leader.label));
+          onConfirm(confirmMessage(leader.label), leader.label);
           onClose();
         }}
       />
 
-      {extraAction ? (
-        <Pressable
-          style={styles.extraAction}
-          disabled={options.length === 0}
-          onPress={() => {
-            extraAction.onPress(options.map((option) => option.label));
-            onClose();
-          }}>
-          <Text
-            style={[
-              styles.extraActionText,
-              options.length === 0 && styles.extraActionTextOff,
-            ]}>
-            {extraAction.label}
-          </Text>
-        </Pressable>
-      ) : null}
     </BottomSheet>
   );
 }
@@ -201,10 +273,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   extraActionText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(7),
     lineHeight: fs(10),
-    fontWeight: weight.bold,
     color: colors.primary,
   },
   extraActionTextOff: {
@@ -236,9 +307,8 @@ const styles = StyleSheet.create({
   },
   label: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(8),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   accent: {
@@ -260,10 +330,56 @@ const styles = StyleSheet.create({
     marginLeft: s(-4),
   },
   voterInitial: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(5.5),
-    fontWeight: weight.bold,
     color: colors.textOnAccent,
+  },
+  section: {
+    marginTop: s(8),
+    gap: s(5),
+  },
+  sectionLabel: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(6.5),
+    lineHeight: fs(9),
+    color: colors.textMuted,
+  },
+  /* 시안 Option 행 — h30 radius7, 주황 테두리 */
+  suggestRow: {
+    height: s(30),
+    borderRadius: s(7),
+    borderWidth: s(0.8),
+    borderColor: colors.primary,
+    backgroundColor: colors.card,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: s(6),
+    gap: s(5),
+  },
+  suggestRank: {
+    fontFamily: fontFamily.semibold,
+    fontSize: fs(7),
+    color: colors.primary,
+  },
+  suggestLabel: {
+    fontFamily: fontFamily.semibold,
+    fontSize: fs(7),
+    color: colors.textPrimary,
+  },
+  suggestMatch: {
+    flex: 1,
+    fontFamily: fontFamily.body,
+    fontSize: fs(6),
+    color: colors.textMuted,
+  },
+  suggestAdd: {
+    fontFamily: fontFamily.semibold,
+    fontSize: fs(6.5),
+    color: colors.primary,
+  },
+  remove: {
+    marginLeft: s(4),
+    padding: s(2),
   },
   count: {
     minWidth: s(22),
@@ -301,9 +417,8 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
   addButtonText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(7.5),
-    fontWeight: weight.bold,
     color: colors.textOnAccent,
   },
   cta: {

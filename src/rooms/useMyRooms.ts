@@ -105,30 +105,33 @@ export function useRoomMessages(roomId: string | null) {
 }
 
 /** 채팅방 헤더가 쓰는 방 한 건 */
+/*
+ * 방 하나를 읽는다. reload 를 함께 준다 — 단계(stage)는 방에 있는데 예전에는
+ * 처음 한 번만 읽어서, 방장이 "식당 정하기로 넘어가기" 를 눌러 서버 단계가
+ * 바뀌어도 액션 행이 계속 예전 단계로 그려졌다. 앱을 다시 켜야 반영됐다.
+ */
 export function useRoom(roomId: string | null) {
   const [room, setRoom] = useState<RoomSummary | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!roomId) {
       setRoom(null);
       return;
     }
 
-    let active = true;
-    void fetchRoom(roomId)
-      .then(({ data }) => {
-        if (active) setRoom(data);
-      })
-      .catch(() => {
-        if (active) setRoom(null);
-      });
-
-    return () => {
-      active = false;
-    };
+    try {
+      const { data } = await fetchRoom(roomId);
+      setRoom(data);
+    } catch {
+      setRoom(null);
+    }
   }, [roomId]);
 
-  return room;
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return { room, reload: load };
 }
 
 /** 내가 볼 수 있는 정산 목록. 홈의 정산 넛지가 쓴다. */
