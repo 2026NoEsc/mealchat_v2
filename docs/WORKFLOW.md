@@ -17,7 +17,7 @@ Figma 디자인(`xBf3b09D6Bj1dTiCixt25e`)을 React Native 앱으로 옮기는 �
 | 언어 | TypeScript 5.9 (strict) |
 | 아이콘 | `lucide-react-native` + `react-native-svg` |
 | 네비게이션 | **라이브러리 없음** — 원본에 react-navigation 계열이 없어 Context 기반으로 직접 구현 |
-| 백엔드 | Supabase Auth·RLS 마이그레이션 16개 운영 적용, 실제 Auth E2E 진행 중 |
+| 백엔드 | Supabase Auth·RLS 마이그레이션은 로컬 29개 기준이며, 운영 적용 상태는 linked CLI로 재확인 필요 |
 
 `.npmrc` 에 `legacy-peer-deps=true` 가 필요하다.
 `lucide-react-native@0.300.0` 이 React 19 를 peer 로 허용하지 않아서 없으면 설치가 실패한다.
@@ -82,7 +82,13 @@ Docker Desktop 이 있으면 `npx supabase start` 로 로컬 스택을 띄우고
 (`terms_reconsent_rpc` · `open_room_features` · `room_voting` · `invite_friend_to_room` ·
 `leave_room_rpc` · `avatar_storage` · `toggle_vote_legacy_items` ·
 `drop_pre_rpc_settlement` · `one_open_settlement_per_room` · `notifications_read_at` ·
-`system_messages`), **2026-08-22 원격 조회 기준 열여섯 건 전부 운영에 적용돼 있다.**
+`system_messages`)이 추가됐다. 이후 방 상태·추천·정산 보정까지 포함하면
+현재 로컬 `supabase/migrations/`에는 29개가 있다. 원격 적용 개수는 이 문서의 숫자를
+복사하지 말고 `npx supabase migration list --linked`로 현재 linked 프로젝트에서 확인한다.
+
+`20260823091028_rpc_hardening_cutover.sql`은 구버전 앱의 호출을 차단하는 단계라서
+일반 `db push` 경로에 두지 않고 `supabase/deferred_migrations/`에 보관한다. 신버전
+최소 지원 버전 전환과 구버전 호출 0건을 확인한 뒤 별도 승인으로 적용한다.
 
 같은 날의 RPC·RLS·Edge Function 재검토 결과와 미해결 위험은
 [보안 감사 기록](./security-audit-2026-08-22.md)에 남겼다.
@@ -407,7 +413,7 @@ Figma 화면은 전부 옮겼다. 프로필 수정(`309:1086`)·은행 드롭다
 [출시 준비 판정](./release-readiness-2026-08-23.md)을 우선해서 본다. 실제 앱의 비밀번호
 재설정은 첫 링크가 다른 기기에서 먼저 소비돼 재시도가 필요하고, 기능용 새 비밀번호 화면은
 있지만 Figma 노드·좌표 검수 기록은 없다. 추천 fixture와 RPC 권한 모델은 로컬에 구현됐지만
-운영 배포는 하지 않았다. 로컬 PostgreSQL 17.6에서 19개 fresh 적용, 16→19 단계 업그레이드,
+운영 배포는 하지 않았다. 로컬 PostgreSQL 17.6에서 당시 19개 fresh 적용, 16→19 단계 업그레이드,
 pgTAP 62/62, additive v1/v2 호환, 별도 두 세션 동시성은 통과했다. 현재 소스의 테스트용
 release APK도 Android 15 에뮬레이터에서 오프라인 콜드 스타트·background/resume·hardware
 back을 통과했지만 실제 실기기와 인증된 주요 화면은 남아 있다. Redirect URL은 등록됐고

@@ -6,6 +6,8 @@ export type ValidPlace = {
   id: string;
   name: string;
   address: string;
+  latitude?: number;
+  longitude?: number;
   category: string;
 };
 
@@ -209,6 +211,17 @@ export function validateRequest(value: unknown): Validation<RequestBody> {
     ) {
       return { ok: false, error: 'placeCandidates[].category is invalid' };
     }
+    const latitude = candidate.latitude;
+    const longitude = candidate.longitude;
+    if (
+      (latitude !== undefined &&
+        (typeof latitude !== 'number' || !Number.isFinite(latitude) || latitude < -90 || latitude > 90)) ||
+      (longitude !== undefined &&
+        (typeof longitude !== 'number' || !Number.isFinite(longitude) || longitude < -180 || longitude > 180)) ||
+      (latitude === undefined) !== (longitude === undefined)
+    ) {
+      return { ok: false, error: 'placeCandidates coordinates are invalid' };
+    }
     places.push({
       id: candidate.id,
       name: candidate.name.trim(),
@@ -220,6 +233,9 @@ export function validateRequest(value: unknown): Validation<RequestBody> {
         typeof candidate.category === 'string'
           ? candidate.category.trim().slice(0, 60)
           : '',
+      ...(typeof latitude === 'number' && typeof longitude === 'number'
+        ? { latitude, longitude }
+        : {}),
     });
   }
 
@@ -399,7 +415,7 @@ export function buildScheduleRecommendResponse(
   candidates: CandidateFact[],
   places: ValidPlace[],
   providerData: unknown,
-  weather: Record<string, number> = {},
+  weather: Record<string, number | null> = {},
 ) {
   const factMap = new Map(candidates.map((fact) => [fact.slotId, fact]));
   const placeMap = new Map(places.map((place) => [place.id, place]));

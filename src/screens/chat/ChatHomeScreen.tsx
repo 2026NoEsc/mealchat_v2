@@ -35,7 +35,7 @@ import { useNavigation } from '../../navigation/NavigationContext';
 import { useMyRooms } from '../../rooms/useMyRooms';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily } from '../../theme/typography';
+import { fontFamily, weight } from '../../theme/typography';
 
 
 type ChipTone = 'active' | 'done' | 'open';

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const migrations = join(process.cwd(), 'supabase', 'migrations');
+const deferredMigrations = join(process.cwd(), 'supabase', 'deferred_migrations');
 const containmentSql = readFileSync(
   join(migrations, '20260823072700_contain_meeting_midpoint.sql'),
   'utf8',
@@ -10,8 +11,12 @@ const hardeningSql = readFileSync(
   join(migrations, '20260823072701_harden_settlement_invitation_events.sql'),
   'utf8',
 );
+const rehardeningSql = readFileSync(
+  join(migrations, '20260906134305_rpc_concurrency_rehardening.sql'),
+  'utf8',
+);
 const cutoverSql = readFileSync(
-  join(migrations, '20260823091028_rpc_hardening_cutover.sql'),
+  join(deferredMigrations, '20260823091028_rpc_hardening_cutover.sql'),
   'utf8',
 );
 
@@ -22,7 +27,7 @@ describe('RPC hardening migration contract', () => {
     expect(containmentSql).not.toMatch(/create table|create or replace function/i);
   });
 
-  it('closes direct writes in additive while keeping only explicit stale-client paths for cutover', () => {
+  it('keeps additive hardening deployable while deferring stale-client cutover', () => {
     expect(hardeningSql).not.toMatch(/revoke all on function public\.invite_friend_to_room/i);
     expect(hardeningSql).not.toMatch(/revoke all on function public\.post_room_system_message/i);
     expect(cutoverSql).toMatch(/revoke all on function public\.invite_friend_to_room/i);
@@ -98,7 +103,7 @@ describe('RPC hardening migration contract', () => {
     );
     const serverEvents = settlementHelper.slice(
       settlementHelper.indexOf('if emit_server_events then'),
-      settlementHelper.indexOf('  end if;\n\n  -- 새 정산과 수정 정산 모두 연결 알림'),
+      settlementHelper.indexOf('-- 새 정산과 수정 정산 모두 연결 알림'),
     );
     const linkedNotification = settlementHelper.slice(
       settlementHelper.indexOf('-- 새 정산과 수정 정산 모두 연결 알림'),
@@ -156,5 +161,23 @@ describe('RPC hardening migration contract', () => {
     expect(createInvitation).not.toMatch(/target_room::text \|\| ':' \|\| invitee_id::text/i);
     expect(createInvitation).not.toMatch(/invitation\.invitee_id\s*=\s*invitee_id/i);
     expect(createInvitation).toMatch(/invitation\.invitee_id\s*=\s*\$2/i);
+  });
+
+  it('restores the shared lock order after later migrations redefined the RPCs', () => {
+    for (const functionName of ['remove_voting_item', 'toggle_vote', 'leave_room']) {
+      const functionSql = rehardeningSql.slice(
+        rehardeningSql.indexOf(`create or replace function public.${functionName}`),
+        rehardeningSql.indexOf('$$;', rehardeningSql.indexOf(`create or replace function public.${functionName}`)) + 3,
+      );
+      expect(functionSql).toMatch(/security definer/i);
+      expect(functionSql).toMatch(/set search_path = ''/i);
+      expect(functionSql).toMatch(/pg_catalog\.pg_advisory_xact_lock/i);
+    }
+
+    expect(rehardeningSql).toMatch(/from public\.rooms\s+where id = target_room\s+for update/i);
+    expect(rehardeningSql).toMatch(/revoke all on function public\.toggle_vote\(uuid, uuid\) from public, anon, authenticated/i);
+    expect(rehardeningSql).toMatch(/grant execute on function public\.leave_room\(uuid\) to authenticated/i);
+    expect(rehardeningSql).toMatch(/Cannot change options after confirmation/i);
+    expect(rehardeningSql).toMatch(/Voting is already confirmed/i);
   });
 });

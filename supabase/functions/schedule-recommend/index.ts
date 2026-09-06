@@ -25,6 +25,8 @@ type ValidPlace = {
   id: string;
   name: string;
   address: string;
+  latitude?: number;
+  longitude?: number;
   category: string;
 };
 
@@ -710,6 +712,27 @@ function validateRequest(
       };
     }
 
+    const latitude = candidate.latitude;
+    const longitude = candidate.longitude;
+    if (
+      (latitude !== undefined &&
+        (typeof latitude !== "number" ||
+          !Number.isFinite(latitude) ||
+          latitude < -90 ||
+          latitude > 90)) ||
+      (longitude !== undefined &&
+        (typeof longitude !== "number" ||
+          !Number.isFinite(longitude) ||
+          longitude < -180 ||
+          longitude > 180)) ||
+      (latitude === undefined) !== (longitude === undefined)
+    ) {
+      return {
+        ok: false,
+        error: "placeCandidates coordinates are invalid",
+      };
+    }
+
     places.push({
       id: candidate.id,
       name: candidate.name
@@ -730,6 +753,13 @@ function validateRequest(
             .trim()
             .slice(0, 60)
           : "",
+      ...(typeof latitude === "number" &&
+      typeof longitude === "number"
+        ? {
+            latitude,
+            longitude,
+          }
+        : {}),
     });
   }
 
@@ -955,10 +985,8 @@ async function loadRoomAvailability(
 
         shared = shared === null
           ? new Set(set)
-          : new Set(
-            [...shared].filter((
-              i,
-            ) => set.has(i)),
+          : new Set<number>(
+            [...shared].filter((i: number) => set.has(i)),
           );
       }
 

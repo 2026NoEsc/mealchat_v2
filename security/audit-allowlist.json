@@ -2,6 +2,12 @@
   "schemaVersion": 1,
   "advisories": [
     {
+      "id": "GHSA-6GMQ-8VP8-GCM6",
+      "package": "@xmldom/xmldom",
+      "reason": "Expo CLI and native build tooling only; the vulnerable serializer is not imported by the app runtime. Revisit after the next Expo SDK upgrade.",
+      "expiresOn": "2026-09-30"
+    },
+    {
       "id": "GHSA-w3rx-r6r6-pgpr",
       "package": "image-size",
       "reason": "Metro build-time asset inspection only. The repository blocks ICNS, JXL, HEIF/HEIC, and AVIF files by extension and file signature, and currently contains only PNG and SVG assets.",

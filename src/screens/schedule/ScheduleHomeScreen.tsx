@@ -17,7 +17,7 @@ import { createEvent, deleteNote, saveMemo as saveMemoNote, updateEvent } from '
 import { groupNotes, useMonthNotes } from '../../schedule/useMonthNotes';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily } from '../../theme/typography';
+import { fontFamily, weight } from '../../theme/typography';
 import { EventSheet, MemoSheet, type PersonalEvent } from './PersonalEventSheet';
 
 /**
