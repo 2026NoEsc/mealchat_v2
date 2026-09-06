@@ -4,7 +4,7 @@ import { join } from 'node:path';
 const migrations = join(process.cwd(), 'supabase', 'migrations');
 const deferredMigrations = join(process.cwd(), 'supabase', 'deferred_migrations');
 const containmentSql = readFileSync(
-  join(migrations, '20260823072700_contain_meeting_midpoint.sql'),
+  join(migrations, '20260906141801_contain_meeting_midpoint.sql'),
   'utf8',
 );
 const hardeningSql = readFileSync(
