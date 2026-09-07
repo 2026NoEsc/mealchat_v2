@@ -1,7 +1,8 @@
 import { Clock, Lock, Pencil, Plus } from 'lucide-react-native';
 import { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useTopInset } from '../../theme/insets';
 
 import { useAuth } from '../../auth/AuthProvider';
 import PageHeader from '../../components/PageHeader';
@@ -26,7 +27,8 @@ import { EventSheet, MemoSheet, type PersonalEvent } from './PersonalEventSheet'
  * 주 행 y37.4 부터 28.83 간격 / 구분선 y181.6 / 일정 행 y208.2 부터 28.8 간격
  */
 export default function ScheduleHomeScreen() {
-  const insets = useSafeAreaInsets();
+  /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
+  const topInset = useTopInset();
   const { user } = useAuth();
   const userId = user?.id ?? null;
   /* 상수로 박아 두면 다음 달에 앱을 열어도 지난 달이 나온다 */
@@ -155,7 +157,10 @@ export default function ScheduleHomeScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
+      {/* 상태바 자리. 배경을 칠하지 않아 화면 배경이 그대로 비친다 —
+          헤더와 같은 색으로 칠하면 둘이 한 덩어리로 보여서 헤더가
+          어디서 시작하는지 알 수 없다 */}
+      <View style={{ height: topInset }} />
       {/* 시안 2159:895 — 화면 이름이 헤더 자리에 들어간다 */}
       <PageHeader title="실시간 캘린더 조율" />
 

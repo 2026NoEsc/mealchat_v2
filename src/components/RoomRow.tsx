@@ -145,7 +145,7 @@ export default function RoomRow({
             ))}
           </View>
           <Text style={[styles.meta, { color: tone.meta }]} numberOfLines={1}>
-            {participantMeta(room.participants.length, room.expiresAt)}
+            {participantMeta(room.participants.length, room.expiresAt, room.stage === 'done')}
           </Text>
         </View>
       </View>

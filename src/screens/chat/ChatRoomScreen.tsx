@@ -21,6 +21,7 @@ import { supabase } from '../../lib/supabase';
 import { useMyProfile } from '../../profile/useMyProfile';
 import type { ScheduleRecommendResponse } from '../schedule/scheduleTypes';
 import { parseEmoticonToken } from '../../lib/emoticon';
+import { confirmAction, notify } from '../../lib/confirm';
 import { parseRoomNotice, type RoomNotice } from '../../lib/roomNotice';
 import { dayKey, dayLabel, roomTimerLabel, timeLabel } from '../../lib/roomFormat';
 import {
@@ -214,23 +215,24 @@ export default function ChatRoomScreen() {
   const confirmPlan = async () => {
     if (!roomId) return;
 
-    Alert.alert('약속을 확정할까요?', '확정하면 식당을 다시 고를 수 없어요.', [
-      { text: '더 볼게요', style: 'cancel' },
-      {
-        text: '확정',
-        onPress: () => {
-          void (async () => {
-            const { error } = await advanceRoomStage(roomId, 'confirmed');
-            if (error) {
-              Alert.alert('확정하지 못했어요', error.message);
-              return;
-            }
-            reload();
-            void reloadRoom();
-          })();
-        },
+    /* Alert.alert 의 버튼 콜백은 react-native-web 에서 불리지 않는다 */
+    confirmAction({
+      title: '약속을 확정할까요?',
+      message: '확정하면 식당을 다시 고를 수 없어요.',
+      cancelLabel: '더 볼게요',
+      confirmLabel: '확정',
+      onConfirm: () => {
+        void (async () => {
+          const { error } = await advanceRoomStage(roomId, 'confirmed');
+          if (error) {
+            notify('확정하지 못했어요', error.message);
+            return;
+          }
+          reload();
+          void reloadRoom();
+        })();
       },
-    ]);
+    });
   };
 
   /*
@@ -325,7 +327,11 @@ export default function ChatRoomScreen() {
               <Text style={styles.countText}>{room ? room.participants.length : '-'}</Text>
             </View>
           </View>
-          {room ? <RoomTimer expiresAt={room.expiresAt} /> : <Text style={styles.timer}> </Text>}
+          {room ? (
+            <RoomTimer expiresAt={room.expiresAt} settled={room.stage === 'done'} />
+          ) : (
+            <Text style={styles.timer}> </Text>
+          )}
         </View>
 
         <Pressable hitSlop={s(8)} onPress={() => navigate('RoomDetail', { roomId, title })}>
@@ -481,6 +487,10 @@ export default function ChatRoomScreen() {
         roomId={roomId}
         visible={sheet === 'settlement'}
         onClose={() => setSheet(null)}
+        onStateChanged={() => {
+          reload();
+          void reloadRoom();
+        }}
       />
       <MembersSheet
         visible={sheet === 'members'}
@@ -501,14 +511,17 @@ export default function ChatRoomScreen() {
  * 헤더 타이머. 정산을 마친 방은 24시간만 남아 초까지 세는데, 화면 전체를 1초마다
  * 다시 그리면 채팅 목록까지 딸려 들어간다. 그래서 이 줄만 따로 떼어 낸다.
  */
-function RoomTimer({ expiresAt }: { expiresAt: string }) {
-  const [label, setLabel] = useState(() => roomTimerLabel(expiresAt));
+function RoomTimer({ expiresAt, settled }: { expiresAt: string; settled: boolean }) {
+  const [label, setLabel] = useState(() => roomTimerLabel(expiresAt, settled));
 
   useEffect(() => {
-    setLabel(roomTimerLabel(expiresAt));
-    const id = setInterval(() => setLabel(roomTimerLabel(expiresAt)), 1000);
+    setLabel(roomTimerLabel(expiresAt, settled));
+    /* 정산 전에는 문구가 고정이라 셀 것이 없다 */
+    if (!settled) return;
+
+    const id = setInterval(() => setLabel(roomTimerLabel(expiresAt, settled)), 1000);
     return () => clearInterval(id);
-  }, [expiresAt]);
+  }, [expiresAt, settled]);
 
   return <Text style={styles.timer}>{label}</Text>;
 }

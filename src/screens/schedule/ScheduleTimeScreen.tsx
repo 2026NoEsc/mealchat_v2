@@ -5,7 +5,8 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useTopInset } from '../../theme/insets';
 
 import AppHeader from '../../components/AppHeader';
 import AvailabilityGrid from '../../components/AvailabilityGrid';
@@ -49,7 +50,8 @@ type Params = {
  */
 
 export default function ScheduleTimeScreen() {
-  const insets = useSafeAreaInsets();
+  /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
+  const topInset = useTopInset();
   const { navigate, goBackWith, current } = useNavigation();
 
   const params = current.params as Params | undefined;
@@ -138,7 +140,7 @@ export default function ScheduleTimeScreen() {
     <View style={styles.screen}>
       <View
         style={{
-          height: insets.top,
+          height: topInset,
           backgroundColor: colors.surface,
         }}
       />

@@ -1,7 +1,6 @@
 import { Camera } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import {
-  Alert,
   Pressable,
   StyleSheet,
   Text,
@@ -14,7 +13,9 @@ import Avatar from '../../components/Avatar';
 import BottomSheet from '../../components/BottomSheet';
 import { CompleteButton } from '../../components/ui/Button';
 
+import { notify } from '../../lib/confirm';
 import { formatAmount } from '../../lib/format';
+import { useMyProfile } from '../../profile/useMyProfile';
 import type { RoomParticipant } from '../../lib/rooms';
 import {
   canEditSettlement,
@@ -37,6 +38,12 @@ const TINT = '#FFF5EB';
 type SheetProps = {
   visible: boolean;
   onClose: () => void;
+  /**
+   * 방의 상태가 바뀌었을 때. 전원이 정산을 마치면 서버 트리거가 방을 'done'
+   * 으로 넘기는데, 앱이 방을 다시 읽지 않으면 단계가 바뀐 줄 모른 채 예전
+   * 화면을 그대로 그린다.
+   */
+  onStateChanged?: () => void;
 };
 
 /* ------------------------------------------------------------------ 일정 조율 */
@@ -49,8 +56,10 @@ export function SettlementSheet({
   visible,
   roomId,
   onClose,
+  onStateChanged,
 }: SheetProps & { roomId: string | null }) {
   const { user } = useAuth();
+  const { bundle } = useMyProfile();
   const [settlement, setSettlement] = useState<Settlement | null>(null);
   const [amountText, setAmountText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -80,6 +89,14 @@ export function SettlementSheet({
   const amount = Number(amountText.replace(/[^0-9]/g, '')) || 0;
   const members = settlement?.members ?? [];
   const editable = canEditSettlement(settlement, user?.id ?? null);
+
+  /*
+   * 전원이 보내고 나면 완료를 되돌릴 수 없다. 마지막 한 명이 완료하는 순간
+   * 서버 트리거가 방을 '정산 완료' 로 넘기고 24시간 카운트다운을 시작하는데,
+   * 여기서 되돌려도 그 방은 done 인 채로 남는다 — 화면은 미완료인데 방은
+   * 사라지는 중인, 서로 어긋난 상태가 된다.
+   */
+  const finished = members.length > 0 && members.every((member) => member.isCompleted);
   /* 아직 정산이 없으면 나눌 인원을 알 수 없어 1 로 둔다 */
   const splitCount = settlement?.splitCount ?? members.length ?? 1;
   const each = splitCount > 0 ? Math.ceil(amount / splitCount) : amount;
@@ -87,16 +104,40 @@ export function SettlementSheet({
   const request = async () => {
     if (!roomId || amount <= 0 || !editable) return;
 
+    /*
+     * 계좌가 없으면 요청을 만들지 않는다. 계좌는 profile_private 에 있고 본인만
+     * 읽을 수 있어서, 여기서 비워 두면 받는 사람들은 어디로 보낼지 영영 알 수
+     * 없는 정산을 받는다. 나중에 채울 방법도 없다.
+     */
+    const bankName = bundle?.privateProfile.bankName ?? null;
+    const accountNumber = bundle?.privateProfile.accountNumber ?? null;
+    if (!bankName || !accountNumber) {
+      notify(
+        '계좌를 먼저 등록해 주세요',
+        '프로필 → 내 정보에서 계좌를 넣으면 메이트가 바로 보낼 수 있어요.',
+      );
+      return;
+    }
+
     setBusy(true);
-    const { error } = await createRoomSettlement({ roomId, title: '식사 정산', amount });
+    /* 계좌를 정산표에 옮겨 적는다 — 토스 송금 링크가 이 값을 쓴다 */
+    const { error } = await createRoomSettlement({
+      roomId,
+      title: '식사 정산',
+      amount,
+      bankName,
+      accountNumber,
+      accountHolder: bundle?.profile.name ?? null,
+    });
     setBusy(false);
 
     if (error) {
-      Alert.alert('정산 요청 실패', settlementMutationErrorMessage(error));
+      notify('정산 요청 실패', settlementMutationErrorMessage(error));
       return;
     }
 
     setReloadToken((token) => token + 1);
+    onStateChanged?.();
     onClose();
   };
 
@@ -106,10 +147,12 @@ export function SettlementSheet({
     setBusy(false);
 
     if (error) {
-      Alert.alert('변경 실패', error.message);
+      notify('변경 실패', settlementMutationErrorMessage(error));
       return;
     }
     setReloadToken((token) => token + 1);
+    /* 마지막 한 명이 완료하면 서버가 방을 '정산 완료' 로 넘긴다 */
+    onStateChanged?.();
   };
 
   return (
@@ -149,7 +192,7 @@ export function SettlementSheet({
               <Pressable
                 key={member.id}
                 style={styles.memberCard}
-                disabled={busy || !mine}
+                disabled={busy || !mine || finished}
                 onPress={() => void toggleMine(member)}>
                 <View style={[styles.memberDot, member.isCompleted && styles.memberDotDone]}>
                   <Text style={styles.memberInitial}>
@@ -172,6 +215,10 @@ export function SettlementSheet({
         <Camera size={s(9)} color={colors.primary} strokeWidth={2} />
         <Text style={styles.receiptText}>영수증 촬영하여 자동 입력</Text>
       </View>
+
+      {finished ? (
+        <Text style={styles.settlementLocked}>정산이 끝났어요. 되돌릴 수 없어요.</Text>
+      ) : null}
 
       {editable ? (
         <CompleteButton

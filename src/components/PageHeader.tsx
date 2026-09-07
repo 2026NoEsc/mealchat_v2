@@ -45,6 +45,8 @@ export default function PageHeader({
 
 const styles = StyleSheet.create({
   header: {
+    /* 상태바와 붙어 보이지 않게 한 칸 띄운다 */
+    marginTop: s(8),
     height: s(42),
     flexDirection: 'row',
     alignItems: 'center',

@@ -1,4 +1,5 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { fs, s } from '../theme/scale';
 import { colors, shadows } from '../theme/tokens';
@@ -40,9 +41,14 @@ export default function BottomNav({
   onChange: (tab: TabKey) => void;
 }) {
   const activeIndex = TABS.findIndex((t) => t.key === active);
+  /*
+   * 갤럭시의 제스처 바가 탭 위에 겹쳐 앉는다. 탭 높이(38)는 그대로 두고 아래에
+   * 시스템 바만큼 덧대서, 글자와 아이콘이 가려지지 않게 한다.
+   */
+  const insets = useSafeAreaInsets();
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingBottom: insets.bottom }]}>
       {TABS.map((tab) => {
         const isActive = tab.key === active;
         return (
@@ -57,10 +63,11 @@ export default function BottomNav({
         );
       })}
 
+      {/* 인디케이터는 탭 아래에 붙는다 — 덧댄 시스템 바 영역보다 위 */}
       <View
         style={[
           styles.indicator,
-          { left: `${(activeIndex * 100) / TABS.length}%` },
+          { left: `${(activeIndex * 100) / TABS.length}%`, bottom: insets.bottom },
         ]}
       />
     </View>
@@ -70,13 +77,14 @@ export default function BottomNav({
 const styles = StyleSheet.create({
   container: {
     width: '100%',
-    height: s(38),
+    /* 높이 대신 아이템으로 38 을 채운다 — 아래 인셋이 더 붙을 수 있어서다 */
     flexDirection: 'row',
     backgroundColor: colors.surface,
     ...shadows.bar,
   },
   tab: {
     flex: 1,
+    height: s(38),
     alignItems: 'center',
   },
   iconSlot: {
@@ -98,7 +106,6 @@ const styles = StyleSheet.create({
   },
   indicator: {
     position: 'absolute',
-    bottom: 0,
     width: `${100 / TABS.length}%`,
     height: s(2),
     borderRadius: s(3),

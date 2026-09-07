@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+
+import { useTopInset } from '../../theme/insets';
 
 import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
 import Avatar from '../../components/Avatar';
 import ScreenHeader from '../../components/ScreenHeader';
+import { notify } from '../../lib/confirm';
 import { formatAmount } from '../../lib/format';
 import {
   fetchMySettlementsDetailed,
@@ -14,6 +16,7 @@ import {
   type SettlementMember,
 } from '../../lib/settlements';
 import { isSettled } from '../../lib/settlementSummary';
+import { tossTransferUrl } from '../../lib/tossLink';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors, radii, shadows } from '../../theme/tokens';
@@ -38,8 +41,60 @@ function dayLabel(iso: string): string {
  * Figma 에 대응하는 화면이 없어 앱의 다른 화면 규칙을 따랐다 — ScreenHeader 뒤로가기,
  * 흰 카드에 radii.card, 강조는 primary, 금액은 오른쪽 정렬.
  */
+/** 내가 아직 안 보낸 정산인지 */
+function mineToPay(settlement: Settlement, userId: string | null): boolean {
+  const mine = settlement.members.find((member) => member.profileId === userId);
+  return Boolean(mine && !mine.isCompleted);
+}
+
 export default function SettlementsScreen() {
-  const insets = useSafeAreaInsets();
+  /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
+  const topInset = useTopInset();
+
+  /*
+   * 토스를 열어 준다. 실제 송금은 토스 안에서 사용자가 확인하고 누른다 —
+   * 앱이 대신 돈을 보내지 않는다.
+   *
+   * 스킴이 토스 공식 규격이 아니라 언제든 깨질 수 있다. 열리지 않으면
+   * 계좌번호를 그대로 안내해서, 손으로 보내는 길이 막히지 않게 한다.
+   */
+  const sendWithToss = async (settlement: Settlement) => {
+    const each =
+      settlement.splitCount > 0
+        ? Math.ceil(settlement.totalAmount / settlement.splitCount)
+        : settlement.totalAmount;
+
+    const url = tossTransferUrl({
+      bankName: settlement.bankName,
+      accountNumber: settlement.accountNumber,
+      amount: each,
+    });
+
+    const account = `${settlement.bankName} ${settlement.accountNumber}`;
+
+    if (!url) {
+      notify('토스로 열 수 없어요', `${account}
+
+계좌번호로 직접 보내 주세요.`);
+      return;
+    }
+
+    /*
+     * canOpenURL 로 미리 거르지 않는다. 스킴이 선언되지 않은 환경 — Expo Go,
+     * 안드로이드 11+ 에서 매니페스트 queries 가 없는 빌드 — 에서는 토스가
+     * 깔려 있어도 false 를 준다. 그 말을 믿고 막으면 멀쩡한 링크를 열어 보지도
+     * 못한다. 어차피 열어 볼 것이라면 물어볼 이유가 없다.
+     *
+     * openURL 은 열 앱이 없으면 양쪽 OS 모두 거부하므로 catch 에서 걸린다.
+     */
+    try {
+      await Linking.openURL(url);
+    } catch {
+      notify('토스를 열지 못했어요', `${account}
+
+토스가 없다면 계좌번호로 직접 보내 주세요.`);
+    }
+  };
   const { goBack } = useNavigation();
   const { user } = useAuth();
   const userId = user?.id ?? null;
@@ -84,11 +139,15 @@ export default function SettlementsScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
+      {/* 상태바 자리. 배경을 칠하지 않아 화면 배경이 그대로 비친다 —
+          헤더와 같은 색으로 칠하면 둘이 한 덩어리로 보여서 헤더가
+          어디서 시작하는지 알 수 없다 */}
+      <View style={{ height: topInset }} />
       <AppHeader />
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        <ScreenHeader title="정산" onBack={goBack} />
+        {/* AppHeader 아래라 위 여백을 줄인다 */}
+        <ScreenHeader title="정산" onBack={goBack} compact />
 
         <Text style={styles.summary}>
           {status === 'loading'
@@ -126,16 +185,39 @@ export default function SettlementsScreen() {
                 </View>
 
                 <View style={styles.amountBox}>
+                  {/* 큰 숫자가 1인당인지 총액인지 헷갈리지 않게 이름을 붙인다 */}
+                  <Text style={styles.eachLabel}>1인당</Text>
                   <Text style={styles.each}>{formatAmount(each)}</Text>
                   <Text style={styles.total}>총 {formatAmount(settlement.totalAmount)}</Text>
                 </View>
               </View>
 
               {settlement.bankName && settlement.accountNumber ? (
-                <Text style={styles.account} numberOfLines={1}>
-                  {settlement.bankName} {settlement.accountNumber}
-                  {settlement.accountHolder ? ` · ${settlement.accountHolder}` : ''}
-                </Text>
+                <>
+                  {/*
+                   * 계좌를 한 덩어리로 묶는다. 예전에는 송금 버튼과 한 줄에 놓여
+                   * 서로 자리를 뺏었고, 계좌번호가 길면 잘렸다.
+                   * 링크가 안 열릴 때 손으로 옮겨 적어야 하므로 늘 그대로 보인다.
+                   */}
+                  <View style={styles.accountBox}>
+                    <Text style={styles.accountLabel}>보낼 곳</Text>
+                    <Text style={styles.account} selectable>
+                      {settlement.bankName} {settlement.accountNumber}
+                    </Text>
+                    {settlement.accountHolder ? (
+                      <Text style={styles.accountHolder}>예금주 {settlement.accountHolder}</Text>
+                    ) : null}
+                  </View>
+
+                  {/* 내가 보낼 차례일 때만 송금 버튼을 띄운다 */}
+                  {mineToPay(settlement, userId) ? (
+                    <Pressable
+                      style={styles.tossButton}
+                      onPress={() => void sendWithToss(settlement)}>
+                      <Text style={styles.tossLabel}>토스로 보내기</Text>
+                    </Pressable>
+                  ) : null}
+                </>
               ) : null}
 
               {settlement.members.length === 0 ? (
@@ -148,7 +230,8 @@ export default function SettlementsScreen() {
                       <Pressable
                         key={member.id}
                         style={[styles.member, member.isCompleted && styles.memberDone]}
-                        disabled={!mine || busy}
+                        /* 전원이 보낸 뒤에는 되돌릴 수 없다 — 방이 이미 사라지는 중이다 */
+                        disabled={!mine || busy || settled}
                         onPress={() => void toggleMine(member)}>
                         <Avatar
                           name={member.name}
@@ -191,7 +274,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   summary: {
-    marginTop: s(10),
+    marginTop: s(6),
     marginHorizontal: s(18),
     fontFamily: fontFamily.body,
     fontSize: fs(7),
@@ -236,6 +319,12 @@ const styles = StyleSheet.create({
   amountBox: {
     alignItems: 'flex-end',
   },
+  eachLabel: {
+    fontFamily: fontFamily.semibold,
+    fontSize: fs(6),
+    lineHeight: fs(8.1),
+    color: colors.textMuted,
+  },
   each: {
     fontFamily: fontFamily.extrabold,
     fontSize: fs(11),
@@ -248,12 +337,47 @@ const styles = StyleSheet.create({
     lineHeight: fs(9),
     color: colors.textMuted,
   },
+  accountBox: {
+    marginTop: s(8),
+    paddingHorizontal: s(9),
+    paddingVertical: s(7),
+    borderRadius: s(8),
+    backgroundColor: colors.surface,
+  },
+  accountLabel: {
+    fontFamily: fontFamily.semibold,
+    fontSize: fs(6),
+    lineHeight: fs(8.1),
+    color: colors.textMuted,
+  },
   account: {
-    marginTop: s(6),
+    marginTop: s(2),
+    fontFamily: fontFamily.bold,
+    fontSize: fs(8),
+    lineHeight: fs(11),
+    color: colors.textPrimary,
+  },
+  accountHolder: {
+    marginTop: s(1),
     fontFamily: fontFamily.body,
     fontSize: fs(6.5),
     lineHeight: fs(9),
-    color: colors.textPrimary,
+    color: colors.textSecondary,
+  },
+  /* 토스 브랜드 색 — 앱 팔레트가 아니라 저쪽 앱으로 간다는 표시다 */
+  tossButton: {
+    marginTop: s(6),
+    height: s(24),
+    borderRadius: s(6),
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0064FF',
+  },
+  tossLabel: {
+    fontFamily: fontFamily.bold,
+    fontSize: fs(7.5),
+    lineHeight: fs(10),
+    color: colors.textOnAccent,
   },
   memberEmpty: {
     marginTop: s(8),

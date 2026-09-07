@@ -1,6 +1,7 @@
 import { Plus } from 'lucide-react-native';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+
+import { useTopInset } from '../theme/insets';
 
 import AdCarousel from '../components/AdCarousel';
 import PageHeader from '../components/PageHeader';
@@ -14,6 +15,7 @@ import { colors, shadows } from '../theme/tokens';
 import { fontFamily } from '../theme/typography';
 
 const banner = require('../../assets/ad/banner-1.png');
+const emptyRooms = require('../../assets/brand/empty-rooms.png');
 
 /**
  * Figma 홈/메인 (2154:655) — 220 x 483
@@ -28,7 +30,8 @@ const banner = require('../../assets/ad/banner-1.png');
  */
 export default function HomeScreen() {
   const { navigate } = useNavigation();
-  const insets = useSafeAreaInsets();
+  /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
+  const topInset = useTopInset();
   const { bundle } = useMyProfile();
   const { rooms, status, reload } = useMyRooms();
   const settlements = useMySettlements();
@@ -44,7 +47,10 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
+      {/* 상태바 자리. 배경을 칠하지 않아 화면 배경이 그대로 비친다 —
+          헤더와 같은 색으로 칠하면 둘이 한 덩어리로 보여서 헤더가
+          어디서 시작하는지 알 수 없다 */}
+      <View style={{ height: topInset }} />
 
       {/* 홈에서는 헤더 자리에 인사가 들어간다 — 시안 2154:681 */}
       <PageHeader>
@@ -62,7 +68,7 @@ export default function HomeScreen() {
             : status === 'error'
               ? '밥약을 불러오지 못했어요. 다시 시도해 주세요'
               : activeRooms.length === 0 && openSettlements.length === 0
-                ? '아직 잡힌 밥약이 없어요. 하나 만들어 볼까요?'
+                ? '아직 잡힌 밥약이 없어요.'
                 : `현재 밥약 ${activeRooms.length}건, 정산 ${openSettlements.length}건이 기다리고 있어요~`}
         </Text>
       </PageHeader>
@@ -85,26 +91,35 @@ export default function HomeScreen() {
           <Text style={styles.payAction}>보기 →</Text>
         </Pressable>
 
-        <View style={styles.roomList}>
-          {status === 'loading' ? (
-            <Text style={styles.empty}>밥약을 불러오는 중...</Text>
-          ) : status === 'error' ? (
-            <View style={styles.retryBox}>
-              <Text style={styles.empty}>밥약을 불러오지 못했어요</Text>
-              <Pressable style={styles.retryButton} onPress={reload}>
-                <Text style={styles.retryText}>다시 시도</Text>
-              </Pressable>
+        {status === 'loading' ? (
+          <Text style={styles.empty}>밥약을 불러오는 중...</Text>
+        ) : status === 'error' ? (
+          <View style={styles.retryBox}>
+            <Text style={styles.empty}>밥약을 불러오지 못했어요</Text>
+            <Pressable style={styles.retryButton} onPress={reload}>
+              <Text style={styles.retryText}>다시 시도</Text>
+            </Pressable>
+          </View>
+        ) : rooms.length === 0 ? (
+          /*
+           * 시안 2160:957. 그림 안에 "약속 잡으러 가기" 버튼이 그려져 있지만
+           * 마스크(100 x 107) 밖으로 잘려 나간다 — 그림에 박힌 버튼은 누를 수
+           * 없으니 오히려 잘리는 편이 맞다. 새 밥약은 우하단 버튼이 맡는다.
+           */
+          <View style={styles.emptyWrap}>
+            <View style={styles.emptyMask}>
+              <Image source={emptyRooms} style={styles.emptyArt} resizeMode="cover" />
             </View>
-          ) : rooms.length === 0 ? (
-            <Text style={styles.empty}>아직 참여 중인 밥약이 없어요</Text>
-          ) : (
-            rooms.map((room, i) => (
+          </View>
+        ) : (
+          <View style={styles.roomList}>
+            {rooms.map((room, i) => (
               <View key={room.id} style={i > 0 ? styles.roomGap : null}>
                 <RoomRow room={room} onPress={() => enterRoom(room.id, room.title, room.color)} />
               </View>
-            ))
-          )}
-        </View>
+            ))}
+          </View>
+        )}
       </ScrollView>
 
       {/* 새 밥약 — 시안 2154:701 (25 x 25, 우하단) */}
@@ -139,6 +154,8 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   content: {
+    /* 빈 상태에서 일러스트를 아래로 밀어붙이려면 내용이 화면을 채워야 한다 */
+    flexGrow: 1,
     paddingHorizontal: s(14),
     // 헤더 하단(y72) → 배너(y80)
     paddingTop: s(8),
@@ -189,6 +206,26 @@ const styles = StyleSheet.create({
     fontSize: fs(7),
     lineHeight: fs(10),
     color: colors.textMuted,
+  },
+  /* 남는 공간을 다 밀어내고 아래쪽에 붙인다 */
+  emptyWrap: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  // 빈 상태 일러스트 — 시안 2160:957 (100 x 107)
+  emptyMask: {
+    width: s(100),
+    height: s(107),
+    overflow: 'hidden',
+  },
+  /* 원본에 여백이 붙어 있어 시안처럼 마스크보다 크게 그려 잘라 낸다 */
+  emptyArt: {
+    position: 'absolute',
+    left: '-7.1%',
+    top: '-10.94%',
+    width: '114.2%',
+    height: '132.79%',
   },
   fab: {
     position: 'absolute',

@@ -32,7 +32,10 @@
       "infoPlist": {
         "NSCalendarsUsageDescription": "밀챗 약속 조율을 위해 디바이스 캘린더 접근 권한이 필요합니다.",
         "NSLocationWhenInUseUsageDescription": "밀챗 위치 기반 기능을 위해 위치 권한이 필요합니다.",
-        "NSPhotoLibraryUsageDescription": "영수증 사진 업로드를 위해 사진 라이브러리 접근 권한이 필요합니다."
+        "NSPhotoLibraryUsageDescription": "영수증 사진 업로드를 위해 사진 라이브러리 접근 권한이 필요합니다.",
+        "LSApplicationQueriesSchemes": [
+          "supertoss"
+        ]
       }
     },
     "android": {

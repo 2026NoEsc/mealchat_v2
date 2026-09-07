@@ -136,10 +136,27 @@ function toParticipant(row: ParticipantRow): RoomParticipant {
  * 이미 참가자인 방으로 제한하기 때문이다. 참가자·메시지 임베드도
  * 각자의 정책을 통과한 것만 실린다.
  */
+/**
+ * 기한이 지난 방을 지운다.
+ *
+ * 방 목록을 불러올 때 한 번 돌린다. 예약 작업(pg_cron)을 쓰지 않는 이유는
+ * 예약이 조용히 실패해도 앱에서 알 방법이 없어서다 — 방이 안 지워지는 것
+ * 말고는 증상이 없다.
+ *
+ * 실패해도 목록 조회는 그대로 진행한다. 청소는 곁다리고, 못 지웠다고 해서
+ * 사용자가 자기 방을 못 보면 안 된다.
+ */
+async function sweepExpiredRooms(): Promise<void> {
+  await supabase.rpc('delete_expired_rooms');
+}
+
 export async function fetchMyRooms(): Promise<{
   data: RoomSummary[] | null;
   error: Error | null;
 }> {
+  /* 기한이 지난 방을 먼저 치운다. 실패해도 목록은 그대로 읽는다 */
+  await sweepExpiredRooms().catch(() => undefined);
+
   const { data, error } = await supabase
     .from('rooms')
     .select(

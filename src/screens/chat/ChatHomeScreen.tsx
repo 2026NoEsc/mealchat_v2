@@ -10,7 +10,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useTopInset } from '../../theme/insets';
 
 import AppHeader from '../../components/AppHeader';
 import { useAuth } from '../../auth/AuthProvider';
@@ -41,7 +42,8 @@ import { fontFamily, weight } from '../../theme/typography';
 type ChipTone = 'active' | 'done' | 'open';
 
 export default function ChatHomeScreen() {
-  const insets = useSafeAreaInsets();
+  /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
+  const topInset = useTopInset();
   const { navigate } = useNavigation();
   const { user } = useAuth();
   const [code, setCode] = useState('');
@@ -171,7 +173,10 @@ export default function ChatHomeScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
+      {/* 상태바 자리. 배경을 칠하지 않아 화면 배경이 그대로 비친다 —
+          헤더와 같은 색으로 칠하면 둘이 한 덩어리로 보여서 헤더가
+          어디서 시작하는지 알 수 없다 */}
+      <View style={{ height: topInset }} />
       <AppHeader />
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
@@ -330,7 +335,9 @@ function RoomRow({ room, onPress }: { room: RoomSummary; onPress: () => void }) 
               </View>
             ))}
           </View>
-          <Text style={styles.meta}>{participantMeta(room.participants.length, room.expiresAt)}</Text>
+          <Text style={styles.meta}>
+            {participantMeta(room.participants.length, room.expiresAt, room.stage === 'done')}
+          </Text>
         </View>
       </View>
 

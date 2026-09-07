@@ -35,7 +35,20 @@ function durationText(ms: number): string {
 }
 
 /** 목록에 쓰는 짧은 표기 */
-export function remainingLabel(expiresAt: string, now: Date = new Date()): string | null {
+/**
+ * 방이 사라지기까지 남은 시간.
+ *
+ * 정산 전에는 세지 않는다. 방을 만들 때 잡아 둔 expires_at 은 임시값이고,
+ * 실제 기한은 정산이 끝나야 정해진다(그때 24시간으로 다시 잡힌다).
+ * 그 전에 "7일 남음" 이라고 세면 있지도 않은 마감을 알려 주는 셈이다.
+ */
+export function remainingLabel(
+  expiresAt: string,
+  settled: boolean,
+  now: Date = new Date(),
+): string | null {
+  if (!settled) return null;
+
   const expires = new Date(expiresAt);
   if (Number.isNaN(expires.getTime())) return null;
 
@@ -65,7 +78,17 @@ function clockText(ms: number): string {
  * 그보다 많이 남았을 때까지 `168:00:00` 로 보여 주면 읽히지 않아서, 그때는
  * 예전처럼 일·시간 단위로 뭉뚱그린다.
  */
-export function roomTimerLabel(expiresAt: string, now: Date = new Date()): string {
+export function roomTimerLabel(
+  expiresAt: string,
+  settled: boolean,
+  now: Date = new Date(),
+): string {
+  /*
+   * 정산 전에는 카운트다운이 아니라 규칙을 알려 준다. 기한은 정산이 끝나야
+   * 정해지므로, 그 전에 세는 숫자는 실제 마감과 아무 관계가 없다.
+   */
+  if (!settled) return '정산 후 24시간 뒤 사라져요';
+
   const expires = new Date(expiresAt);
   if (Number.isNaN(expires.getTime())) return '';
 
@@ -107,9 +130,10 @@ export function dayLabel(iso: string): string {
 export function participantMeta(
   participantCount: number,
   expiresAt: string,
+  settled: boolean,
   now: Date = new Date(),
 ): string {
-  const remaining = remainingLabel(expiresAt, now);
+  const remaining = remainingLabel(expiresAt, settled, now);
   const people = `${participantCount}명`;
   return remaining ? `${people} · ${remaining}` : people;
 }

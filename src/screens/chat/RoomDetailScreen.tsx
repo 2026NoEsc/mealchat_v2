@@ -1,11 +1,13 @@
 import { ChevronLeft } from 'lucide-react-native';
 import { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useTopInset } from '../../theme/insets';
 
 import { useAuth } from '../../auth/AuthProvider';
 import { DangerButton } from '../../components/ui/Button';
 import { meetingLine } from '../../lib/roomFormat';
+import { confirmAction } from '../../lib/confirm';
 import { leaveRoom } from '../../lib/rooms';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useRoom } from '../../rooms/useMyRooms';
@@ -14,7 +16,8 @@ import { colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 
 export default function RoomDetailScreen() {
-  const insets = useSafeAreaInsets();
+  /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
+  const topInset = useTopInset();
   const { goBack, navigate, resetTo, current } = useNavigation();
   const { user } = useAuth();
   const params = current.params as { roomId?: string; title?: string } | undefined;
@@ -44,35 +47,35 @@ export default function RoomDetailScreen() {
     if (!roomId || !user?.id) return;
 
     /* 되돌릴 수 없고 남은 사람들에게서도 방이 사라진다 — 한 번 묻는다 */
-    Alert.alert(
-      '방을 없앨까요?',
-      '메이트 모두에게서 방이 사라져요. 정산 내역은 남아 있어요.',
-      [
-        { text: '그대로 둘게요', style: 'cancel' },
-        {
-          text: '없애기',
-          style: 'destructive',
-          onPress: () => {
-            void (async () => {
-              setLeaving(true);
-              const error = await leaveRoom(roomId);
-              setLeaving(false);
+    confirmAction({
+      title: '방을 없앨까요?',
+      message: '메이트 모두에게서 방이 사라져요. 정산 내역은 남아 있어요.',
+      cancelLabel: '그대로 둘게요',
+      confirmLabel: '없애기',
+      destructive: true,
+      onConfirm: () => {
+        void (async () => {
+          setLeaving(true);
+          const error = await leaveRoom(roomId);
+          setLeaving(false);
 
-              if (error) {
-                Alert.alert('없애지 못했어요', error.message);
-                return;
-              }
-              resetTo('Chat');
-            })();
-          },
-        },
-      ],
-    );
+          if (error) {
+            Alert.alert('없애지 못했어요', error.message);
+            return;
+          }
+          /* 목록은 홈으로 합쳤다 */
+          resetTo('Home');
+        })();
+      },
+    });
   };
 
   return (
     <View style={styles.screen}>
-      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
+      {/* 상태바 자리. 배경을 칠하지 않아 화면 배경이 그대로 비친다 —
+          헤더와 같은 색으로 칠하면 둘이 한 덩어리로 보여서 헤더가
+          어디서 시작하는지 알 수 없다 */}
+      <View style={{ height: topInset }} />
 
       <View style={styles.header}>
         <Pressable onPress={goBack} hitSlop={s(8)}>

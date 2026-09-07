@@ -44,27 +44,31 @@ describe('roomStatus', () => {
 
 describe('remainingLabel', () => {
   it('한 시간 미만은 분으로', () => {
-    expect(remainingLabel('2026-08-18T12:30:00', NOW)).toBe('30분 남음');
+    expect(remainingLabel('2026-08-18T12:30:00', true, NOW)).toBe('30분 남음');
   });
 
   it('하루 미만은 시간으로', () => {
-    expect(remainingLabel('2026-08-18T20:00:00', NOW)).toBe('8시간 남음');
+    expect(remainingLabel('2026-08-18T20:00:00', true, NOW)).toBe('8시간 남음');
   });
 
   it('하루가 넘으면 일로', () => {
-    expect(remainingLabel('2026-08-21T12:00:00', NOW)).toBe('3일 남음');
+    expect(remainingLabel('2026-08-21T12:00:00', true, NOW)).toBe('3일 남음');
   });
 
   it('이미 지났으면 종료됨', () => {
-    expect(remainingLabel('2026-08-17T12:00:00', NOW)).toBe('종료됨');
+    expect(remainingLabel('2026-08-17T12:00:00', true, NOW)).toBe('종료됨');
   });
 
   it('1분 미만도 최소 1분으로 보여준다', () => {
-    expect(remainingLabel('2026-08-18T12:00:30', NOW)).toBe('1분 남음');
+    expect(remainingLabel('2026-08-18T12:00:30', true, NOW)).toBe('1분 남음');
   });
 
   it('읽을 수 없으면 null', () => {
-    expect(remainingLabel('nope', NOW)).toBeNull();
+    expect(remainingLabel('nope', true, NOW)).toBeNull();
+  });
+
+  it('정산 전에는 세지 않는다 — 기한은 정산이 끝나야 정해진다', () => {
+    expect(remainingLabel('2026-08-25T12:00:00', false, NOW)).toBeNull();
   });
 });
 
@@ -100,33 +104,41 @@ describe('dayKey / dayLabel', () => {
 
 describe('participantMeta', () => {
   it('인원과 남은 시간을 합친다', () => {
-    expect(participantMeta(3, '2026-08-18T20:00:00', NOW)).toBe('3명 · 8시간 남음');
+    expect(participantMeta(3, '2026-08-18T20:00:00', true, NOW)).toBe('3명 · 8시간 남음');
   });
 
   it('시간을 못 읽으면 인원만', () => {
-    expect(participantMeta(2, 'nope', NOW)).toBe('2명');
+    expect(participantMeta(2, 'nope', true, NOW)).toBe('2명');
+  });
+
+  it('정산 전에는 인원만 — 있지도 않은 마감을 세지 않는다', () => {
+    expect(participantMeta(3, '2026-08-25T12:00:00', false, NOW)).toBe('3명');
   });
 });
 
 describe('roomTimerLabel', () => {
+  it('정산 전에는 카운트다운 대신 규칙을 알려 준다', () => {
+    expect(roomTimerLabel('2026-08-25T12:00:00', false, NOW)).toBe('정산 후 24시간 뒤 사라져요');
+  });
+
   it('하루 안쪽이면 시안처럼 초까지 센다', () => {
-    expect(roomTimerLabel('2026-08-18T20:00:00', NOW)).toBe('08:00:00 후 방이 사라져요.');
-    expect(roomTimerLabel('2026-08-18T12:30:00', NOW)).toBe('00:30:00 후 방이 사라져요.');
-    expect(roomTimerLabel('2026-08-18T23:47:22', NOW)).toBe('11:47:22 후 방이 사라져요.');
+    expect(roomTimerLabel('2026-08-18T20:00:00', true, NOW)).toBe('08:00:00 후 방이 사라져요.');
+    expect(roomTimerLabel('2026-08-18T12:30:00', true, NOW)).toBe('00:30:00 후 방이 사라져요.');
+    expect(roomTimerLabel('2026-08-18T23:47:22', true, NOW)).toBe('11:47:22 후 방이 사라져요.');
   });
 
   it('하루보다 많이 남았으면 뭉뚱그린다 — 168:00:00 은 읽히지 않는다', () => {
-    expect(roomTimerLabel('2026-08-25T12:00:00', NOW)).toBe('7일 뒤 방이 사라져요');
-    expect(roomTimerLabel('2026-08-20T12:00:00', NOW)).toBe('2일 뒤 방이 사라져요');
+    expect(roomTimerLabel('2026-08-25T12:00:00', true, NOW)).toBe('7일 뒤 방이 사라져요');
+    expect(roomTimerLabel('2026-08-20T12:00:00', true, NOW)).toBe('2일 뒤 방이 사라져요');
   });
 
   it('이미 지났으면 카운트다운이 아니라 종료를 알린다', () => {
     // "종료됨 방이 사라져요" 처럼 어색해지는 것을 막는다
-    expect(roomTimerLabel('2026-08-17T12:00:00', NOW)).toBe('이미 종료된 밥약이에요');
+    expect(roomTimerLabel('2026-08-17T12:00:00', true, NOW)).toBe('이미 종료된 밥약이에요');
   });
 
   it('읽을 수 없으면 빈 문자열', () => {
-    expect(roomTimerLabel('nope', NOW)).toBe('');
+    expect(roomTimerLabel('nope', true, NOW)).toBe('');
   });
 });
 
