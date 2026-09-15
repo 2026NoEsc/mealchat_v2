@@ -1,20 +1,15 @@
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { participantMeta, roomStatus, timeLabel } from '../lib/roomFormat';
+import { remainingLabel, roomStatus, timeLabel } from '../lib/roomFormat';
 import { previewText } from '../lib/emoticon';
 import type { RoomStage, RoomSummary } from '../lib/rooms';
 import { roomColor } from '../lib/roomTheme';
-import { fs, s } from '../theme/scale';
+import { fs412, s412 } from '../theme/scale';
 import { colors } from '../theme/tokens';
 import { fontFamily } from '../theme/typography';
 
-/** 아바타 자리에 쓸 첫 글자. 이모지·한글 모두 한 글자로 잘리게 배열로 자른다. */
-function initialOf(name: string): string {
-  return [...name.trim()][0] ?? '?';
-}
-
 /*
- * 방 썸네일에 쓸 기본 캐릭터 — 시안 2154:709(moa) / 2154:663(ddori).
+ * 방 썸네일에 쓸 기본 캐릭터 — 시안 2169:806(moa) / 2169:814(ddori).
  * 방 사진을 올리는 기능이 아직 없어서, 넷 중 하나를 방마다 고정해서 보여 준다.
  * id 로 고르므로 같은 방은 언제 봐도 같은 캐릭터가 나온다.
  */
@@ -30,6 +25,9 @@ function characterFor(id: string) {
   for (const char of id) sum += char.charCodeAt(0);
   return CHARACTERS[sum % CHARACTERS.length];
 }
+
+/** 겹쳐 보여 주는 참가자 얼굴 수. 넘치는 사람은 "+N" 으로 센다. */
+const STACK_LIMIT = 3;
 
 type Tone = {
   label: string;
@@ -49,9 +47,9 @@ const EXPIRED: Tone = {
 };
 
 /*
- * 약속 단계마다 카드 톤이 다르다. 시안이 준 것은 둘뿐이라 —
- * 진행중(2154:706, 주황)과 확정(2154:660, 청록) — 나머지 셋은 그 흐름에
- * 맞춰 골랐다. 아직 내가 움직여야 하는 단계일수록 진하고, 끝난 단계는 옅다.
+ * 약속 단계마다 카드 톤이 다르다. 시안이 준 것은 진행중(2169:803, 주황)
+ * 하나뿐이라 나머지는 그 흐름에 맞춰 골랐다. 아직 내가 움직여야 하는
+ * 단계일수록 진하고, 끝난 단계는 옅다.
  */
 const TONE: Record<RoomStage, Tone> = {
   scheduling: {
@@ -92,26 +90,42 @@ const TONE: Record<RoomStage, Tone> = {
 };
 
 /**
- * 홈의 밥약 한 줄 — 시안 2154:706 / 2154:660 (196 x 54).
+ * 홈의 밥약 한 줄 — 시안 2169:802 (390 x 100).
  *
- * 예전에는 채팅방 탭에만 있었는데 탭을 셋으로 줄이면서 홈으로 옮겼다.
+ * 크기는 새 시안을 따르되, 글 배치는 예전 흐름 배치를 그대로 쓴다. 시안의
+ * 절대 좌표를 옮기면 제목(y11) 이 얼굴 윗선(y19) 보다 위에서 시작해 글
+ * 덩어리가 떠 보였다. 글 열을 얼굴 높이에 맞춰 위아래로 채우면 제목은
+ * 얼굴 윗선에, 얼굴 줄은 얼굴 아랫선에 맞는다.
  */
 export default function RoomRow({
   room,
+  unreadCount = 0,
   onPress,
 }: {
   room: RoomSummary;
+  /**
+   * 안 읽은 메시지 수. 아직 방별 읽음 표시를 저장하는 곳이 없어 아무도
+   * 넘기지 않는다 — 0 이면 배지를 그리지 않으므로 없는 수를 지어내지 않는다.
+   */
+  unreadCount?: number;
   onPress: () => void;
 }) {
   /* 기한이 지난 방은 단계와 상관없이 눌러 둔다 */
   const tone = roomStatus(room) === 'expired' ? EXPIRED : TONE[room.stage];
-  /* 왼쪽 막대와 캐릭터 칩은 방마다 다른 테마 색을 쓴다 */
+  /* 왼쪽 막대와 얼굴 칩은 방마다 다른 테마 색을 쓴다 */
   const theme = roomColor(room);
+
+  const shown = room.participants.slice(0, STACK_LIMIT);
+  const overflow = room.participants.length - shown.length;
+  const remaining = remainingLabel(room.expiresAt, room.stage === 'done');
+  /* 시안은 "+1 · 12시간 남음". 넘치는 사람도 남은 시간도 없으면 줄 자체가 빈다 */
+  const meta = [overflow > 0 ? `+${overflow}` : null, remaining].filter(Boolean).join(' · ');
 
   return (
     <Pressable style={[styles.card, tone.card]} onPress={onPress}>
       <View style={[styles.themeBar, { backgroundColor: theme }]} />
 
+      {/* 큰 얼굴은 방마다 고정된 캐릭터다 — 사진은 아래 참가자 줄에만 쓴다 */}
       <View style={[styles.avatar, { backgroundColor: `${theme}24` }]}>
         <Image source={characterFor(room.id)} style={styles.character} resizeMode="contain" />
       </View>
@@ -130,155 +144,195 @@ export default function RoomRow({
           {room.lastMessage ? previewText(room.lastMessage.text) : '아직 대화가 없어요'}
         </Text>
 
-        <View style={styles.metaRow}>
-          <View style={styles.stack}>
-            {room.participants.slice(0, 3).map((participant, i) => (
-              <View
-                key={participant.id}
-                style={[
-                  styles.stackItem,
-                  i > 0 && styles.stackOverlap,
-                  { backgroundColor: participant.avatarColor },
-                ]}>
-                <Text style={styles.stackInitial}>{initialOf(participant.name)}</Text>
-              </View>
-            ))}
-          </View>
-          <Text style={[styles.meta, { color: tone.meta }]} numberOfLines={1}>
-            {participantMeta(room.participants.length, room.expiresAt, room.stage === 'done')}
-          </Text>
+        <View style={styles.stackRow}>
+          {shown.map((participant, i) => (
+            <View key={participant.id} style={[styles.stack, i > 0 && styles.stackOverlap]}>
+              {participant.avatarUrl ? (
+                <Image
+                  source={{ uri: participant.avatarUrl }}
+                  style={styles.photo}
+                  resizeMode="cover"
+                  accessibilityLabel={`${participant.name} 프로필 사진`}
+                />
+              ) : (
+                <Image
+                  source={characterFor(participant.id)}
+                  style={styles.stackFace}
+                  resizeMode="contain"
+                />
+              )}
+            </View>
+          ))}
+          {meta ? (
+            <Text style={[styles.meta, { color: tone.meta }]} numberOfLines={1}>
+              {meta}
+            </Text>
+          ) : null}
         </View>
       </View>
 
       <View style={styles.right}>
-        <Text style={styles.time}>
+        <Text style={styles.time} numberOfLines={1}>
           {room.lastMessage ? timeLabel(room.lastMessage.createdAt) : ''}
         </Text>
+
+        {unreadCount > 0 ? (
+          <View style={[styles.unread, { backgroundColor: theme }]}>
+            <Text style={styles.unreadText} numberOfLines={1}>
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </Text>
+          </View>
+        ) : null}
       </View>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
+  /* 위아래 여백 18 씩 — 100 에서 얼굴 64 를 빼면 딱 나뉜다 */
   card: {
-    height: s(54),
-    borderRadius: s(10),
-    borderWidth: s(1),
+    height: s412(100),
+    borderRadius: s412(10),
+    borderWidth: s412(1),
     flexDirection: 'row',
-    paddingLeft: s(7.89),
-    paddingTop: s(9),
+    paddingLeft: s412(15.69),
+    paddingTop: s412(18),
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.12,
     shadowRadius: 4,
     elevation: 2,
   },
+  /* 막대(66.67) 가 얼굴(64) 보다 조금 길다 — 위아래로 반씩 넘겨 가운데를 맞춘다 */
   themeBar: {
-    width: s(3.379),
-    height: s(36),
-    borderRadius: s(999),
+    width: s412(6.72),
+    height: s412(66.67),
+    marginTop: s412(-1.33),
+    borderRadius: s412(999),
   },
   avatar: {
-    // 카드 왼쪽에서 18 — 테마바(7.89+3.379) 다음 자리
-    marginLeft: s(6.73),
-    /*
-     * 정사각. 시안은 36 x 32 로 되어 있는데 캐릭터가 가로로 눌려 보인다.
-     * 카드 높이 54 에서 위아래 여백 9 씩 빼면 36 이라 정사각이 딱 들어맞는다.
-     */
-    width: s(36),
-    height: s(36),
-    borderRadius: s(9),
+    // 카드 왼쪽에서 36 — 막대(15.69 + 6.72) 다음 자리
+    marginLeft: s412(13.59),
+    width: s412(64),
+    height: s412(64),
+    borderRadius: s412(9),
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   /*
-   * 캐릭터마다 가로세로 비가 크게 다르다 (dudu 1.37 ~ ddori 0.78). 상자를
-   * 21 x 25 로 두면 가로로 넓은 두두·모아가 폭에 걸려 작게 들어간다. 정사각
-   * 상자에 contain 으로 담아, 어떤 비율이든 상자를 꽉 채우게 한다.
-   *
-   * 30 은 36 x 36 / radius 9 마스크에 모서리가 안 닿는 최대 정사각이다 —
-   * 31 부터는 둥근 모서리에 걸린다.
+   * 캐릭터마다 가로세로 비가 크게 다르다 (dudu 1.37 ~ ddori 0.78). 시안이
+   * 준 상자(53 x 47)에 contain 으로 담아, 어떤 비율이든 잘리지 않으면서
+   * 둥근 모서리에 닿지 않게 한다.
    */
   character: {
-    width: s(30),
-    height: s(30),
+    width: s412(53),
+    height: s412(47),
   },
+  /* 올린 사진은 상자를 꽉 채운다 — 캐릭터처럼 여백을 둘 이유가 없다 */
+  photo: {
+    width: '100%',
+    height: '100%',
+  },
+  /*
+   * 글 열은 얼굴과 같은 높이를 차지하고 세 줄을 위아래로 벌린다. 줄이
+   * 빠져도 (남은 시간이 없는 방) 제목과 얼굴 줄의 자리는 그대로다.
+   */
   content: {
     flex: 1,
-    marginLeft: s(6.83),
-    marginTop: s(-1),
+    height: s412(64),
+    marginLeft: s412(12.8),
+    justifyContent: 'space-between',
   },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: s(5),
+    gap: s412(4),
   },
   title: {
     flexShrink: 1,
     fontFamily: fontFamily.bold,
-    fontSize: fs(8),
-    lineHeight: fs(10.8),
+    fontSize: fs412(16),
+    lineHeight: fs412(20.37),
     color: colors.textPrimary,
   },
   chip: {
-    paddingHorizontal: s(5),
-    paddingVertical: s(2),
-    borderRadius: s(4),
-  },
-  chipText: {
-    fontFamily: fontFamily.semibold,
-    fontSize: fs(5.6),
-    lineHeight: fs(7.56),
-  },
-  preview: {
-    marginTop: s(2.9),
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(8.1),
-    color: '#AEAEAE',
-  },
-  metaRow: {
-    marginTop: s(1.9),
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: s(5),
-  },
-  stack: {
-    flexDirection: 'row',
-  },
-  stackItem: {
-    width: s(14.644),
-    height: s(13),
-    borderRadius: s(999),
-    borderWidth: s(1),
-    borderColor: colors.card,
+    height: s412(18),
+    borderRadius: s412(4),
+    paddingHorizontal: s412(5),
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stackOverlap: {
-    // 시안은 10.1 간격으로 겹친다
-    marginLeft: s(-4.5),
+  chipText: {
+    fontFamily: fontFamily.semibold,
+    fontSize: fs412(10),
+    lineHeight: fs412(13.5),
   },
-  stackInitial: {
-    fontFamily: fontFamily.bold,
-    fontSize: fs(6),
-    lineHeight: fs(8),
-    color: colors.textOnAccent,
+  preview: {
+    fontFamily: fontFamily.body,
+    fontSize: fs412(10),
+    lineHeight: fs412(14.81),
+    color: '#AEAEAE',
+  },
+  stackRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  stack: {
+    width: s412(29.14),
+    height: s412(24.07),
+    borderRadius: s412(999),
+    borderWidth: s412(1),
+    borderColor: colors.card,
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  /* 칩 간격 20.17 — 폭 29.14 라 8.97 씩 겹친다 */
+  stackOverlap: {
+    marginLeft: s412(-8.97),
+  },
+  stackFace: {
+    width: s412(19),
+    height: s412(19),
   },
   meta: {
+    marginLeft: s412(8.96),
     flexShrink: 1,
     fontFamily: fontFamily.semibold,
-    fontSize: fs(5.6),
-    lineHeight: fs(7.56),
+    fontSize: fs412(5.6),
+    lineHeight: fs412(14.81),
   },
+  /* 시각은 제목과 같은 윗선에 둔다 */
   right: {
-    paddingRight: s(6),
-    paddingLeft: s(4),
+    paddingLeft: s412(7.5),
+    paddingRight: s412(11.2),
+    alignItems: 'center',
   },
   time: {
     fontFamily: fontFamily.body,
-    fontSize: fs(5.8),
-    lineHeight: fs(7.83),
+    fontSize: fs412(10),
+    lineHeight: fs412(14.81),
     color: '#9E9E9E',
+  },
+  unread: {
+    marginTop: s412(12),
+    width: s412(30),
+    height: s412(30),
+    borderRadius: s412(999),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unreadText: {
+    fontFamily: fontFamily.bold,
+    fontSize: fs412(12),
+    lineHeight: fs412(14.81),
+    color: colors.textOnAccent,
   },
 });

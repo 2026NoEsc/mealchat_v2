@@ -70,34 +70,26 @@ const styles = StyleSheet.create({
   container: {
     width: '100%',
     /*
-     * 홈 배너 실측값 (Figma 2154:680 — 194 × 83). 예전 197 × 109 로 두면
-     * 홈이 잡아 둔 83 높이보다 카드가 커져서, 위쪽 여백만 보이고 그림이 잘린다.
+     * 홈 배너 실측값 (Figma 2169:821 — 412 × 197). 원본 파일이 1817 × 866
+     * (2.098) 이라 시안 비율(2.091) 과 거의 같다 — 잘라 낼 것이 없다.
+     *
+     * 예전에는 카드처럼 모서리를 굴리고 그림자를 깔았는데, 새 시안은 화면
+     * 폭을 꽉 채우고 여백을 그림 안에 그려 넣었다.
      */
-    aspectRatio: 194 / 83,
-    borderRadius: s(10),
-    backgroundColor: colors.surface,
+    aspectRatio: 412 / 197,
     overflow: 'hidden',
-    shadowColor: '#A9A9A9',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.25,
-    shadowRadius: s(4.116),
-    elevation: 2,
   },
   page: {
     height: '100%',
     overflow: 'hidden',
   },
-  /*
-   * 시안(2154:680)이 그림을 마스크보다 키워서 넣는다 — 배너 원본에 사방으로
-   * 여백이 붙어 있어서, 딱 맞게 넣으면 그 여백이 카드 안에 그대로 보인다.
-   * 키운 비율과 오프셋은 시안 값 그대로다.
-   */
+  /* 시안(2169:821) 그대로 — 좌우로 0.21% 만 넘겨 가장자리 이음매를 덮는다 */
   image: {
     position: 'absolute',
-    left: '-3.31%',
-    top: '-7.99%',
-    width: '107.18%',
-    height: '118.54%',
+    left: '-0.11%',
+    top: 0,
+    width: '100.21%',
+    height: '100%',
   },
   counter: {
     position: 'absolute',

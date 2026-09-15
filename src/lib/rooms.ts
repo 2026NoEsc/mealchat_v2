@@ -13,6 +13,8 @@ export type RoomParticipant = {
   profileId: string | null;
   name: string;
   avatarColor: string;
+  /** 본인이 올린 프로필 사진. 안 올렸으면 null 이라 색·캐릭터로 대신한다 */
+  avatarUrl: string | null;
 };
 
 /** 약속이 어디까지 왔는지. 방 화면이 이 값에 따라 갈린다. */
@@ -128,7 +130,47 @@ function toParticipant(row: ParticipantRow): RoomParticipant {
     profileId: row.profile_id,
     name: row.name,
     avatarColor: row.avatar_color,
+    /* 사진은 participants 에 없다 — attachAvatars 가 나중에 채운다 */
+    avatarUrl: null,
   };
+}
+
+/**
+ * 참가자 사진을 채운다.
+ *
+ * participants 에는 사진이 없고, profiles 는 본인 행만 읽을 수 있다. 남의
+ * 사진은 public_profiles 로만 열려 있어서 한 번 더 물어봐야 한다. 방 조회에
+ * 끼워 넣지 않고 따로 가져오는 이유는, participants 에서 public_profiles 로
+ * 가는 외래키가 없어 임베드가 안 되기 때문이다.
+ *
+ * 실패해도 방 목록은 그대로 돌려준다 — 사진이 없는 것과 방을 못 읽는 것은
+ * 다른 일이고, 사진은 없으면 색과 캐릭터로 대신할 수 있다.
+ */
+async function attachAvatars(rooms: RoomSummary[]): Promise<void> {
+  const ids = [
+    ...new Set(
+      rooms.flatMap((room) =>
+        room.participants.map((participant) => participant.profileId).filter((id): id is string => Boolean(id)),
+      ),
+    ),
+  ];
+  if (ids.length === 0) return;
+
+  const { data, error } = await supabase
+    .from('public_profiles')
+    .select('id, avatar_url')
+    .in('id', ids)
+    .returns<{ id: string; avatar_url: string | null }[]>();
+
+  if (error || !data) return;
+
+  const byId = new Map(data.map((row) => [row.id, row.avatar_url]));
+  for (const room of rooms) {
+    for (const participant of room.participants) {
+      if (!participant.profileId) continue;
+      participant.avatarUrl = byId.get(participant.profileId) ?? null;
+    }
+  }
 }
 
 /**
@@ -194,6 +236,8 @@ export async function fetchMyRooms(): Promise<{
     };
   });
 
+  await attachAvatars(rooms);
+
   return { data: rooms, error: null };
 }
 
@@ -216,24 +260,25 @@ export async function fetchRoom(roomId: string): Promise<{
   if (error) return { data: null, error };
   if (!data) return { data: null, error: null };
 
-  return {
-    data: {
-      id: data.id,
-      code: data.code,
-      title: data.title,
-      color: data.color,
-      stage: toStage(data.stage),
-      ownerId: data.owner_id,
-      isConfirmed: data.is_confirmed,
-      confirmedSlot: data.confirmed_slot,
-      expiresAt: data.expires_at,
-      meetingDate: data.meeting_date,
-      locationName: data.location_name ?? data.confirmed_menu,
-      participants: (data.participants ?? []).map(toParticipant),
-      lastMessage: null,
-    },
-    error: null,
+  const room: RoomSummary = {
+    id: data.id,
+    code: data.code,
+    title: data.title,
+    color: data.color,
+    stage: toStage(data.stage),
+    ownerId: data.owner_id,
+    isConfirmed: data.is_confirmed,
+    confirmedSlot: data.confirmed_slot,
+    expiresAt: data.expires_at,
+    meetingDate: data.meeting_date,
+    locationName: data.location_name ?? data.confirmed_menu,
+    participants: (data.participants ?? []).map(toParticipant),
+    lastMessage: null,
   };
+
+  await attachAvatars([room]);
+
+  return { data: room, error: null };
 }
 
 export async function fetchRoomMessages(roomId: string): Promise<{

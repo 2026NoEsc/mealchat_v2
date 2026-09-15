@@ -48,7 +48,8 @@ export const colors = {
   /** 홈 정산 넛지 테두리 — 주황보다 옅어서 알림이 경고처럼 보이지 않는다 */
   primaryBorder: '#FFD9B8',
 
-  screen: '#FFFFFF',
+  /* 시안 2169:783 주석 "배경 색상 변경 #F8F6F2" — 흰 카드가 떠 보이게 한 톤 낮췄다 */
+  screen: '#F8F6F2',
 } as const;
 
 /** Figma radius 값 (스케일 전 원본) */

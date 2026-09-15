@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { fs, s } from '../theme/scale';
+import { fs412, s412 } from '../theme/scale';
 import { colors, shadows } from '../theme/tokens';
 import { fontFamily } from '../theme/typography';
 import { CalendarIcon, HomeIcon, ProfileIcon } from './icons';
@@ -17,7 +17,7 @@ const TABS: { key: TabKey; label: string }[] = [
 
 function TabIcon({ tab, active }: { tab: TabKey; active: boolean }) {
   const color = active ? colors.primary : colors.textPrimary;
-  const size = s(14);
+  const size = s412(26);
 
   switch (tab) {
     case 'home':
@@ -25,12 +25,12 @@ function TabIcon({ tab, active }: { tab: TabKey; active: boolean }) {
     case 'schedule':
       return <CalendarIcon size={size} color={color} />;
     case 'profile':
-      return <ProfileIcon size={s(13)} color={color} />;
+      return <ProfileIcon size={s412(24)} color={color} />;
   }
 }
 
 /**
- * Figma BottomNav1 (2154:584) — 220 x 38
+ * Figma BottomNav1 (2169:828) — 412 x 62
  * 탭 3개 균등 배치, 활성 탭 하단에 1/3 폭 오렌지 인디케이터
  */
 export default function BottomNav({
@@ -42,7 +42,7 @@ export default function BottomNav({
 }) {
   const activeIndex = TABS.findIndex((t) => t.key === active);
   /*
-   * 갤럭시의 제스처 바가 탭 위에 겹쳐 앉는다. 탭 높이(38)는 그대로 두고 아래에
+   * 갤럭시의 제스처 바가 탭 위에 겹쳐 앉는다. 탭 높이(62)는 그대로 두고 아래에
    * 시스템 바만큼 덧대서, 글자와 아이콘이 가려지지 않게 한다.
    */
   const insets = useSafeAreaInsets();
@@ -77,27 +77,28 @@ export default function BottomNav({
 const styles = StyleSheet.create({
   container: {
     width: '100%',
-    /* 높이 대신 아이템으로 38 을 채운다 — 아래 인셋이 더 붙을 수 있어서다 */
+    /* 높이 대신 아이템으로 62 를 채운다 — 아래 인셋이 더 붙을 수 있어서다 */
     flexDirection: 'row',
-    backgroundColor: colors.surface,
+    backgroundColor: colors.card,
     ...shadows.bar,
   },
   tab: {
     flex: 1,
-    height: s(38),
+    height: s412(62),
     alignItems: 'center',
   },
+  /* 아이콘 y9, 글자 y39 */
   iconSlot: {
-    height: s(14),
-    marginTop: s(6),
+    height: s412(28),
+    marginTop: s412(9),
     alignItems: 'center',
     justifyContent: 'center',
   },
   label: {
-    marginTop: s(3),
+    marginTop: s412(2),
     fontFamily: fontFamily.regular,
-    fontSize: fs(8),
-    lineHeight: fs(10),
+    fontSize: fs412(10),
+    lineHeight: fs412(13.5),
     color: colors.textPrimary,
     textAlign: 'center',
   },
@@ -107,8 +108,8 @@ const styles = StyleSheet.create({
   indicator: {
     position: 'absolute',
     width: `${100 / TABS.length}%`,
-    height: s(2),
-    borderRadius: s(3),
+    height: s412(3.26),
+    borderRadius: s412(3),
     backgroundColor: colors.primary,
   },
 });

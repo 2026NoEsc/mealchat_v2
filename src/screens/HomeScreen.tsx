@@ -1,32 +1,47 @@
-import { Plus } from 'lucide-react-native';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { CalendarPlus, Plus, Ticket } from 'lucide-react-native';
+import { useMemo, useRef, useState } from 'react';
+import { Animated, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useTopInset } from '../theme/insets';
 
 import AdCarousel from '../components/AdCarousel';
+import JoinCodeSheet from '../components/JoinCodeSheet';
 import PageHeader from '../components/PageHeader';
 import RoomRow from '../components/RoomRow';
 import { roomStatus } from '../lib/roomFormat';
 import { useNavigation } from '../navigation/NavigationContext';
 import { useMyProfile } from '../profile/useMyProfile';
 import { useMyRooms, useMySettlements } from '../rooms/useMyRooms';
-import { fs, s } from '../theme/scale';
+import { fs412, s412 } from '../theme/scale';
 import { colors, shadows } from '../theme/tokens';
 import { fontFamily } from '../theme/typography';
 
 const banner = require('../../assets/ad/banner-1.png');
-const emptyRooms = require('../../assets/brand/empty-rooms.png');
+
+/*
+ * 밥약이 하나도 없을 때 띄우는 그림 — 시안 2174:923 ~ 2174:926 (기본이미지 1~4).
+ *
+ * 넷 중 하나를 무작위로 고른다. 캐릭터도 말도 다 달라서, 늘 같은 그림이 뜨면
+ * 비어 있는 화면이 더 비어 보인다.
+ *
+ * 크기는 시안이 그림마다 다르게 잡아 두었다. 한 값으로 묶으면 어떤 그림은
+ * 커지고 어떤 그림은 작아져서 캐릭터 크기가 제각각으로 보인다.
+ */
+const EMPTY_ARTS = [
+  { source: require('../../assets/brand/empty-rooms-1.png'), width: 307, height: 223 },
+  { source: require('../../assets/brand/empty-rooms-2.png'), width: 292, height: 194 },
+  { source: require('../../assets/brand/empty-rooms-3.png'), width: 294, height: 220 },
+  { source: require('../../assets/brand/empty-rooms-4.png'), width: 300, height: 175 },
+];
 
 /**
- * Figma 홈/메인 (2154:655) — 220 x 483
+ * Figma 홈/메인 (2169:782) — 412 x 892
  *
- * 하단 탭이 셋으로 줄면서 채팅방 목록이 홈으로 들어왔다. 그래서 이 화면은
- * 인사 헤더 + 배너 + 정산 넛지 + 밥약 목록 + 새 밥약 버튼으로 구성된다.
- * 예전의 "다가올 일정" 카드와 "일정잡기" 버튼은 시안에서 빠졌다 — 목록이
- * 같은 정보를 담고, 새로 만들기는 우하단 버튼이 맡는다.
+ * 인사 헤더 + 배너 + 정산 넛지 + 밥약 목록 + 새 밥약 버튼.
  *
- * 좌표: 인사헤더 y30 h42 / 배너 y80 h83 / 정산넛지 y168 h31 /
- *       밥약 y209 부터 h54 (간격 6) / 새 밥약 버튼 y412 / 하단탭 y445
+ * 좌표: 헤더 y46 h80 / 배너 y126 h197 (좌우 여백 없음) /
+ *       정산넛지 y317 h50 / 밥약 y392 h100 / 새 밥약 버튼 y752 45x45 /
+ *       하단탭 y806
  */
 export default function HomeScreen() {
   const { navigate } = useNavigation();
@@ -35,6 +50,46 @@ export default function HomeScreen() {
   const { bundle } = useMyProfile();
   const { rooms, status, reload } = useMyRooms();
   const settlements = useMySettlements();
+
+  /*
+   * 화면에 들어올 때 한 번만 고른다. 그릴 때마다 고르면 목록을 새로 읽거나
+   * 글자가 바뀔 때마다 그림이 갈아끼워져 깜빡인다.
+   */
+  const emptyArt = useMemo(() => EMPTY_ARTS[Math.floor(Math.random() * EMPTY_ARTS.length)], []);
+
+  /*
+   * + 버튼을 누르면 위로 두 갈래가 펼쳐진다 — 새 밥약을 만들거나, 받은 초대
+   * 코드로 들어가거나. 닫는 동안에도 버블이 남아 있어야 사라지는 모습이 보이므로
+   * 펼침 상태(menuOpen)와 그림 여부(menuShown)를 따로 둔다.
+   */
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuShown, setMenuShown] = useState(false);
+  const [joinOpen, setJoinOpen] = useState(false);
+  const menu = useRef(new Animated.Value(0)).current;
+
+  const toggleMenu = (next: boolean) => {
+    setMenuOpen(next);
+    if (next) setMenuShown(true);
+    Animated.timing(menu, {
+      toValue: next ? 1 : 0,
+      duration: 160,
+      useNativeDriver: false,
+    }).start(({ finished }) => {
+      if (finished && !next) setMenuShown(false);
+    });
+  };
+
+  const pick = (action: () => void) => {
+    toggleMenu(false);
+    action();
+  };
+
+  /* + 가 × 로 돈다 */
+  const fabRotate = menu.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '45deg'] });
+  const bubbleStyle = {
+    opacity: menu,
+    transform: [{ translateY: menu.interpolate({ inputRange: [0, 1], outputRange: [s412(10), 0] }) }],
+  };
 
   const name = bundle?.profile.name;
   /* 아직 끝나지 않은 밥약만 센다 */
@@ -52,7 +107,7 @@ export default function HomeScreen() {
           어디서 시작하는지 알 수 없다 */}
       <View style={{ height: topInset }} />
 
-      {/* 홈에서는 헤더 자리에 인사가 들어간다 — 시안 2154:681 */}
+      {/* 홈에서는 헤더 자리에 인사가 들어간다 — 시안 2169:785 */}
       <PageHeader>
         <Text style={styles.greeting} numberOfLines={1}>
           {name ? `안녕하세요, ${name}님!` : '안녕하세요!'}
@@ -74,9 +129,8 @@ export default function HomeScreen() {
       </PageHeader>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.banner}>
-          <AdCarousel images={[banner]} />
-        </View>
+        {/* 시안 2169:821 — 화면 폭을 꽉 채운다. 여백은 그림에 그려져 있다 */}
+        <AdCarousel images={[banner]} />
 
         {/*
          * 정산 목록 화면으로 보낸다. 예전에는 해당 방의 채팅을 열면서 시트를
@@ -101,15 +155,12 @@ export default function HomeScreen() {
             </Pressable>
           </View>
         ) : rooms.length === 0 ? (
-          /*
-           * 시안 2160:957. 그림 안에 "약속 잡으러 가기" 버튼이 그려져 있지만
-           * 마스크(100 x 107) 밖으로 잘려 나간다 — 그림에 박힌 버튼은 누를 수
-           * 없으니 오히려 잘리는 편이 맞다. 새 밥약은 우하단 버튼이 맡는다.
-           */
           <View style={styles.emptyWrap}>
-            <View style={styles.emptyMask}>
-              <Image source={emptyRooms} style={styles.emptyArt} resizeMode="cover" />
-            </View>
+            <Image
+              source={emptyArt.source}
+              style={{ width: s412(emptyArt.width), height: s412(emptyArt.height) }}
+              resizeMode="contain"
+            />
           </View>
         ) : (
           <View style={styles.roomList}>
@@ -122,15 +173,59 @@ export default function HomeScreen() {
         )}
       </ScrollView>
 
-      {/* 새 밥약 — 시안 2154:701 (25 x 25, 우하단) */}
+      {menuShown ? (
+        <>
+          {/* 바깥을 누르면 접힌다 */}
+          <Animated.View style={[styles.menuBackdrop, { opacity: menu }]}>
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => toggleMenu(false)}
+              accessibilityLabel="메뉴 닫기"
+            />
+          </Animated.View>
+
+          <Animated.View style={[styles.menu, bubbleStyle]} pointerEvents={menuOpen ? 'auto' : 'none'}>
+            <Pressable
+              style={({ pressed }) => [styles.bubble, pressed && styles.bubblePressed]}
+              onPress={() => pick(() => setJoinOpen(true))}
+              accessibilityRole="button">
+              <Text style={styles.bubbleText}>초대 코드 입력</Text>
+              <View style={styles.bubbleIcon}>
+                <Ticket size={s412(18)} color={colors.primary} strokeWidth={2.4} />
+              </View>
+            </Pressable>
+
+            <Pressable
+              style={({ pressed }) => [styles.bubble, styles.bubbleGap, pressed && styles.bubblePressed]}
+              onPress={() => pick(() => navigate('ScheduleDetail'))}
+              accessibilityRole="button">
+              <Text style={styles.bubbleText}>밥약 만들기</Text>
+              <View style={styles.bubbleIcon}>
+                <CalendarPlus size={s412(18)} color={colors.primary} strokeWidth={2.4} />
+              </View>
+            </Pressable>
+          </Animated.View>
+        </>
+      ) : null}
+
+      {/* 새 밥약 — 시안 2169:839 (45 x 45, 우하단). 누르면 두 갈래 버블이 펼쳐진다 */}
       <Pressable
         style={styles.fab}
-        hitSlop={s(8)}
+        hitSlop={s412(10)}
         accessibilityRole="button"
-        accessibilityLabel="새 밥약 만들기"
-        onPress={() => navigate('ScheduleDetail')}>
-        <Plus size={s(13)} color={colors.textOnAccent} strokeWidth={3} />
+        accessibilityLabel={menuOpen ? '메뉴 닫기' : '새 밥약 또는 초대 코드'}
+        accessibilityState={{ expanded: menuOpen }}
+        onPress={() => toggleMenu(!menuOpen)}>
+        <Animated.View style={{ transform: [{ rotate: fabRotate }] }}>
+          <Plus size={s412(24)} color={colors.textOnAccent} strokeWidth={3} />
+        </Animated.View>
       </Pressable>
+
+      <JoinCodeSheet
+        visible={joinOpen}
+        onClose={() => setJoinOpen(false)}
+        onJoined={(roomId) => navigate('ChatRoom', { roomId })}
+      />
     </View>
   );
 }
@@ -142,69 +237,71 @@ const styles = StyleSheet.create({
   },
   greeting: {
     fontFamily: fontFamily.bold,
-    fontSize: fs(10),
-    lineHeight: fs(13.5),
+    fontSize: fs412(20),
+    lineHeight: fs412(27),
     color: colors.textPrimary,
   },
   greetingSub: {
-    marginTop: s(1),
+    marginTop: s412(4),
     fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(8.1),
-    color: colors.textSecondary,
+    fontSize: fs412(10),
+    lineHeight: fs412(13.5),
+    color: colors.iconMuted,
   },
   content: {
     /* 빈 상태에서 일러스트를 아래로 밀어붙이려면 내용이 화면을 채워야 한다 */
     flexGrow: 1,
-    paddingHorizontal: s(14),
-    // 헤더 하단(y72) → 배너(y80)
-    paddingTop: s(8),
-    paddingBottom: s(56),
+    // 헤더 하단(y126) 에 배너가 바로 붙는다
+    paddingTop: 0,
+    paddingBottom: s412(70),
   },
-  /* 높이는 AdCarousel 의 aspectRatio(194/83) 가 정한다 */
-  banner: {
-    borderRadius: s(10),
-    overflow: 'hidden',
-  },
-  // 정산 넛지 y168 h31 — 배너 하단(y163) 에서 5
+  /*
+   * 정산 넛지 y317. 배너 하단은 y323 이지만 그림 아래쪽에 여백이 그려져
+   * 있어 시안이 6 만큼 끌어올려 두었다.
+   */
   payNudge: {
-    marginTop: s(5),
-    height: s(31),
-    borderRadius: s(10),
-    borderWidth: s(1),
+    marginTop: s412(-6),
+    marginHorizontal: s412(11),
+    height: s412(50),
+    borderRadius: s412(10),
+    borderWidth: s412(1),
     borderColor: colors.primaryBorder,
     backgroundColor: colors.card,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: s(11),
+    /* 왼쪽을 오른쪽 여백(17.37) 과 맞춰 글이 테두리에 붙어 보이지 않게 한다 */
+    paddingLeft: s412(18),
+    paddingRight: s412(17.37),
     ...shadows.button,
   },
+  /* 시안은 12 인데 넛지 높이(50) 에 비해 글이 작아 보여 한 단계 키웠다 */
   payTitle: {
     flex: 1,
     fontFamily: fontFamily.bold,
-    fontSize: fs(8),
-    lineHeight: fs(10.8),
+    fontSize: fs412(14),
+    lineHeight: fs412(18.9),
     color: colors.textPrimary,
   },
   payAction: {
     fontFamily: fontFamily.semibold,
-    fontSize: fs(6.5),
-    lineHeight: fs(8.78),
+    fontSize: fs412(14),
+    lineHeight: fs412(18.9),
     color: colors.primaryVivid,
   },
-  // 첫 밥약 y209 — 넛지 하단(y199) 에서 10
+  // 첫 밥약 y392 — 넛지 하단(y367) 에서 25
   roomList: {
-    marginTop: s(10),
+    marginTop: s412(25),
+    marginHorizontal: s412(11),
   },
   roomGap: {
-    marginTop: s(6),
+    marginTop: s412(11),
   },
   empty: {
-    marginTop: s(10),
+    marginTop: s412(19),
     textAlign: 'center',
     fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    lineHeight: fs(10),
+    fontSize: fs412(13),
+    lineHeight: fs412(19),
     color: colors.textMuted,
   },
   /* 남는 공간을 다 밀어내고 아래쪽에 붙인다 */
@@ -213,27 +310,56 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     alignItems: 'center',
   },
-  // 빈 상태 일러스트 — 시안 2160:957 (100 x 107)
-  emptyMask: {
-    width: s(100),
-    height: s(107),
-    overflow: 'hidden',
+  menuBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.25)',
   },
-  /* 원본에 여백이 붙어 있어 시안처럼 마스크보다 크게 그려 잘라 낸다 */
-  emptyArt: {
+  /* + 버튼 바로 위, 오른쪽 끝을 버튼과 맞춘다 (버튼 하단 21 + 높이 45 + 간격 12) */
+  menu: {
     position: 'absolute',
-    left: '-7.1%',
-    top: '-10.94%',
-    width: '114.2%',
-    height: '132.79%',
+    right: s412(23),
+    bottom: s412(21 + 45 + 12),
+    alignItems: 'flex-end',
+  },
+  bubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: s412(44),
+    paddingLeft: s412(18),
+    paddingRight: s412(5),
+    borderRadius: s412(999),
+    backgroundColor: colors.card,
+    ...shadows.button,
+  },
+  bubbleGap: {
+    marginTop: s412(10),
+  },
+  bubblePressed: {
+    opacity: 0.85,
+  },
+  bubbleText: {
+    fontFamily: fontFamily.bold,
+    fontSize: fs412(14),
+    lineHeight: fs412(19),
+    color: colors.textPrimary,
+  },
+  bubbleIcon: {
+    marginLeft: s412(10),
+    width: s412(34),
+    height: s412(34),
+    borderRadius: s412(999),
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   fab: {
     position: 'absolute',
-    right: s(12),
-    bottom: s(8),
-    width: s(25),
-    height: s(25),
-    borderRadius: s(999),
+    right: s412(23),
+    /* 시안은 하단탭에서 9 인데 탭에 붙어 보여 조금 띄웠다 */
+    bottom: s412(21),
+    width: s412(45),
+    height: s412(45),
+    borderRadius: s412(999),
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
@@ -243,16 +369,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   retryButton: {
-    marginTop: s(-6),
-    paddingHorizontal: s(8),
-    paddingVertical: s(3),
-    borderRadius: s(6),
+    marginTop: s412(-11),
+    paddingHorizontal: s412(15),
+    paddingVertical: s412(6),
+    borderRadius: s412(11),
     backgroundColor: colors.primarySoft,
   },
   retryText: {
     fontFamily: fontFamily.bold,
-    fontSize: fs(6),
-    lineHeight: fs(8),
+    fontSize: fs412(11),
+    lineHeight: fs412(15),
     color: colors.primary,
   },
 });
