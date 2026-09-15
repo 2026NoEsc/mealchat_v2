@@ -1,7 +1,6 @@
 import { CalendarDays, ChevronLeft, MoreVertical, Send, Smile, Users, Utensils, Wallet } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import {
-  Alert,
   Image,
   ImageSourcePropType,
   KeyboardAvoidingView,
@@ -22,7 +21,7 @@ import { useMyProfile } from '../../profile/useMyProfile';
 import type { ScheduleRecommendResponse } from '../schedule/scheduleTypes';
 import { parseEmoticonToken } from '../../lib/emoticon';
 import { confirmAction, notify } from '../../lib/confirm';
-import { parseRoomNotice, type RoomNotice } from '../../lib/roomNotice';
+import { roomNoticeOf, type RoomNotice } from '../../lib/roomNotice';
 import { dayKey, dayLabel, roomTimerLabel, timeLabel } from '../../lib/roomFormat';
 import {
   advanceRoomStage,
@@ -72,8 +71,8 @@ function toDisplayMessages(rows: RoomMessage[], myId: string | null): Message[] 
     }
 
     if (row.kind === 'system') {
-      /* 토큰이 붙은 것만 카드로 세운다. 예전 평문 안내는 그대로 회색 알약이다. */
-      const notice = parseRoomNotice(row.text);
+      /* 카드로 세울 수 있는 것만 세운다. 알아보지 못한 안내는 회색 알약이다. */
+      const notice = roomNoticeOf(row.text);
       out.push(notice ? { kind: 'notice', notice } : { kind: 'sys', text: row.text });
       continue;
     }
@@ -248,7 +247,7 @@ export default function ChatRoomScreen() {
       setSheet('settlement');
       return;
     }
-    Alert.alert('아직 준비 중이에요', '캘린더 저장은 곧 붙일게요.');
+    notify('아직 준비 중이에요', '캘린더 저장은 곧 붙일게요.');
   };
 
   /* 서버가 준 목록에 날짜 구분선을 끼워 화면용 배열로 만든다 */
@@ -263,14 +262,14 @@ export default function ChatRoomScreen() {
       const error = await sendRoomMessage(roomId, text);
 
       if (error) {
-        Alert.alert('전송 실패', error.message);
+        notify('전송 실패', error.message);
         return;
       }
 
       setDraft('');
       reload();
     } catch {
-      Alert.alert('전송 실패', '메시지를 보내지 못했어요. 잠시 후 다시 시도해 주세요.');
+      notify('전송 실패', '메시지를 보내지 못했어요. 잠시 후 다시 시도해 주세요.');
     } finally {
       setSending(false);
     }
@@ -281,12 +280,12 @@ export default function ChatRoomScreen() {
     try {
       const error = await sendRoomSticker(roomId, stickerId);
       if (error) {
-        Alert.alert('전송 실패', error.message);
+        notify('전송 실패', error.message);
         return;
       }
       reload();
     } catch {
-      Alert.alert('전송 실패', '이모티콘을 보내지 못했어요. 잠시 후 다시 시도해 주세요.');
+      notify('전송 실패', '이모티콘을 보내지 못했어요. 잠시 후 다시 시도해 주세요.');
     }
   };
 
@@ -296,12 +295,12 @@ export default function ChatRoomScreen() {
     try {
       const error = await sendRoomMessage(roomId, `초대 코드 ${code}를 메이트에게 알려 주세요.`);
       if (error) {
-        Alert.alert('초대 코드를 보내지 못했어요', error.message);
+        notify('초대 코드를 보내지 못했어요', error.message);
         return;
       }
       reload();
     } catch {
-      Alert.alert('초대 코드를 보내지 못했어요', '잠시 후 다시 시도해 주세요.');
+      notify('초대 코드를 보내지 못했어요', '잠시 후 다시 시도해 주세요.');
     }
   };
 
