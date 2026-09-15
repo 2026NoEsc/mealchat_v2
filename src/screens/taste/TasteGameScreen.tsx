@@ -1,7 +1,17 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { Heart, X } from 'lucide-react-native';
-import { useState } from 'react';
-import { Alert, Image, ImageSourcePropType, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRef, useState } from 'react';
+import {
+  Alert,
+  Animated,
+  Image,
+  ImageSourcePropType,
+  PanResponder,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../auth/AuthProvider';
@@ -14,7 +24,29 @@ import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 
-const thumb = require('../../../assets/brand/welling-thumb.png');
+/*
+ * 가운데 캐릭터의 세 표정. 좌우로 밀면 그쪽 표정으로 바뀐다 —
+ * 오른쪽은 하트 눈(2111:15776), 왼쪽은 ㅡ ㅡ 눈(2111:15768).
+ */
+const FACES = {
+  neutral: require('../../../assets/brand/welling-thumb.png'),
+  like: require('../../../assets/brand/welling-like.png'),
+  dislike: require('../../../assets/brand/welling-dislike.png'),
+} as const;
+
+type Face = keyof typeof FACES;
+
+/*
+ * 밀기 거리 (220 프레임 기준).
+ * 캐릭터 가운데(x110) 에서 양옆 동그라미 가운데(x37 / x183) 까지가 73 이라
+ * 거기서 멈춘다. 반쯤 넘기면 답으로 친다.
+ */
+const MAX_DRAG = s(73);
+const COMMIT_DRAG = s(40);
+/* 이만큼만 밀어도 표정이 먼저 바뀐다 — 어느 쪽으로 가는지 바로 보이게 */
+const FACE_DRAG = s(8);
+/* 손을 빨리 튕기면 거리가 짧아도 답으로 친다 */
+const COMMIT_VELOCITY = 0.5;
 
 type Question = { key: string; label: string; image: ImageSourcePropType };
 
@@ -77,6 +109,85 @@ export default function TasteGameScreen() {
     }
   };
 
+  /*
+   * 제스처 핸들러는 한 번만 만든다. 그 안에서 answer 를 바로 부르면 처음
+   * 렌더의 index 에 묶여 매번 첫 질문에 답하게 되므로, 최신 것을 ref 로 건넨다.
+   */
+  const answerRef = useRef(answer);
+  answerRef.current = answer;
+
+  const [face, setFace] = useState<Face>('neutral');
+  const faceRef = useRef<Face>('neutral');
+  const showFace = (next: Face) => {
+    if (faceRef.current === next) return;
+    faceRef.current = next;
+    setFace(next);
+  };
+
+  const drag = useRef(new Animated.Value(0)).current;
+  /* 답이 넘어가는 동안 또 밀면 한 질문에 두 번 답하게 된다 */
+  const committing = useRef(false);
+
+  const settle = () => {
+    showFace('neutral');
+    Animated.spring(drag, { toValue: 0, friction: 6, useNativeDriver: false }).start();
+  };
+
+  const commit = (liked: boolean) => {
+    committing.current = true;
+    showFace(liked ? 'like' : 'dislike');
+    Animated.timing(drag, {
+      toValue: liked ? MAX_DRAG : -MAX_DRAG,
+      duration: 120,
+      useNativeDriver: false,
+    }).start(() => {
+      answerRef.current(liked);
+      settle();
+      committing.current = false;
+    });
+  };
+
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => !committing.current,
+      onMoveShouldSetPanResponder: (_, g) => !committing.current && Math.abs(g.dx) > 4,
+      onPanResponderMove: (_, g) => {
+        drag.setValue(g.dx);
+        showFace(g.dx > FACE_DRAG ? 'like' : g.dx < -FACE_DRAG ? 'dislike' : 'neutral');
+      },
+      onPanResponderRelease: (_, g) => {
+        if (g.dx > COMMIT_DRAG || g.vx > COMMIT_VELOCITY) commit(true);
+        else if (g.dx < -COMMIT_DRAG || g.vx < -COMMIT_VELOCITY) commit(false);
+        else settle();
+      },
+      onPanResponderTerminate: settle,
+    }),
+  ).current;
+
+  /* 동그라미 끝에서 멈춘다 */
+  const translateX = drag.interpolate({
+    inputRange: [-MAX_DRAG, MAX_DRAG],
+    outputRange: [-MAX_DRAG, MAX_DRAG],
+    extrapolate: 'clamp',
+  });
+  /* 미는 쪽으로 살짝 기운다 */
+  const rotate = drag.interpolate({
+    inputRange: [-MAX_DRAG, 0, MAX_DRAG],
+    outputRange: ['-12deg', '0deg', '12deg'],
+    extrapolate: 'clamp',
+  });
+  /* 다가가는 쪽 동그라미가 커지면서 어느 답인지 알려 준다 */
+  const dislikeScale = drag.interpolate({
+    inputRange: [-MAX_DRAG, 0],
+    outputRange: [1.25, 1],
+    extrapolate: 'clamp',
+  });
+  const likeScale = drag.interpolate({
+    inputRange: [0, MAX_DRAG],
+    outputRange: [1, 1.25],
+    extrapolate: 'clamp',
+  });
+
   const back = () => {
     if (index > 0) {
       setIndex(index - 1);
@@ -124,17 +235,52 @@ export default function TasteGameScreen() {
       </View>
 
       <View style={styles.actions}>
-        <Image source={thumb} style={styles.thumb} resizeMode="contain" />
-
-        <Pressable style={[styles.circle, styles.circleLeft]} onPress={() => answer(false)}>
+        {/*
+         * 동그라미는 이제 누르는 버튼이 아니라 방향 표시다. 답은 가운데
+         * 캐릭터를 그쪽으로 밀어서 한다.
+         */}
+        <Animated.View
+          style={[styles.circle, styles.circleLeft, { transform: [{ scale: dislikeScale }] }]}>
           <X size={s(15)} color={colors.textPrimary} strokeWidth={3} />
-        </Pressable>
-        <Pressable style={[styles.circle, styles.circleRight]} onPress={() => answer(true)}>
+        </Animated.View>
+        <Animated.View
+          style={[styles.circle, styles.circleRight, { transform: [{ scale: likeScale }] }]}>
           <Heart size={s(14)} color={colors.danger} fill={colors.danger} strokeWidth={2} />
-        </Pressable>
+        </Animated.View>
 
         <Text style={[styles.actionLabel, styles.actionLabelLeft]}>별로예요</Text>
         <Text style={[styles.actionLabel, styles.actionLabelRight]}>좋아요</Text>
+
+        {/* 동그라미 위로 지나가야 하므로 마지막에 둔다 */}
+        <Animated.View
+          {...pan.panHandlers}
+          style={[styles.thumb, { transform: [{ translateX }, { rotate }] }]}
+          accessible
+          accessibilityRole="adjustable"
+          accessibilityLabel={`${question.label}, 좋아하세요? 오른쪽으로 밀면 좋아요, 왼쪽으로 밀면 별로예요`}
+          accessibilityActions={[
+            { name: 'increment', label: '좋아요' },
+            { name: 'decrement', label: '별로예요' },
+          ]}
+          onAccessibilityAction={(event) => {
+            /* 화면 읽기를 쓰면 밀 수 없다 — 위아래 쓸기로 같은 답을 한다 */
+            if (committing.current) return;
+            if (event.nativeEvent.actionName === 'increment') commit(true);
+            if (event.nativeEvent.actionName === 'decrement') commit(false);
+          }}>
+          {/*
+           * 세 표정을 겹쳐 두고 보이는 것만 바꾼다. 그때그때 source 를 갈면
+           * 웹에서 처음 바꿀 때 그림을 새로 받느라 한 번 깜빡인다.
+           */}
+          {(Object.keys(FACES) as Face[]).map((key) => (
+            <Image
+              key={key}
+              source={FACES[key]}
+              style={[key === 'like' ? styles.faceLike : styles.face, { opacity: face === key ? 1 : 0 }]}
+              resizeMode="contain"
+            />
+          ))}
+        </Animated.View>
       </View>
     </View>
   );
@@ -221,6 +367,21 @@ const styles = StyleSheet.create({
     top: 0,
     width: s(46),
     height: s(55),
+  },
+  face: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    width: s(46),
+    height: s(55),
+  },
+  /* 하트 표정은 머리 위 하트 때문에 1 더 크다 (46 x 56) — 몸이 제자리에 오게 위로 올린다 */
+  faceLike: {
+    position: 'absolute',
+    left: 0,
+    top: s(-1),
+    width: s(46),
+    height: s(56),
   },
   circle: {
     position: 'absolute',
