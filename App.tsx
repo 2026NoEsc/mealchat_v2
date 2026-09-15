@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AuthProvider, useAuth } from './src/auth/AuthProvider';
 import { SignupDraftProvider } from './src/auth/SignupDraftProvider';
+import DialogHost from './src/components/DialogHost';
 import { NotificationsProvider } from './src/components/NotificationsProvider';
 import { useConsentGate } from './src/consents/useConsentGate';
 import { AppLifecycleProvider } from './src/lifecycle/AppLifecycleContext';
@@ -39,6 +40,8 @@ export default function App() {
       <AuthProvider>
         <AppRoot />
       </AuthProvider>
+      {/* 확인·알림 창. 로그인 전 화면에서도 떠야 하므로 인증 바깥에 둔다 */}
+      <DialogHost />
     </SafeAreaProvider>
   );
 }

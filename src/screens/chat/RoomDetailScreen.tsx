@@ -1,13 +1,13 @@
 import { ChevronLeft } from 'lucide-react-native';
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useTopInset } from '../../theme/insets';
 
 import { useAuth } from '../../auth/AuthProvider';
 import { DangerButton } from '../../components/ui/Button';
 import { meetingLine } from '../../lib/roomFormat';
-import { confirmAction } from '../../lib/confirm';
+import { confirmAction, notify } from '../../lib/confirm';
 import { leaveRoom } from '../../lib/rooms';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useRoom } from '../../rooms/useMyRooms';
@@ -60,7 +60,8 @@ export default function RoomDetailScreen() {
           setLeaving(false);
 
           if (error) {
-            Alert.alert('없애지 못했어요', error.message);
+            /* Alert.alert 은 웹에서 빈 함수라, 거절 사유가 통째로 사라진다 */
+            notify('없애지 못했어요', error.message);
             return;
           }
           /* 목록은 홈으로 합쳤다 */
