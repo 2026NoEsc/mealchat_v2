@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>밀챗 계정 및 데이터 삭제 요청</title>
+<style>
+  :root {
+    --bg: #f4f4f4;
+    --card: #ffffff;
+    --ink: #1a1a1a;
+    --muted: #6b6b6b;
+    --line: #e4e4e4;
+    --accent: #f5821f;
+    --accent-soft: #fff6ed;
+    --warn-bg: #fff8e6;
+    --warn-line: #f0d9a8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 16px 64px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+                 "Malgun Gothic", sans-serif;
+    line-height: 1.7;
+    font-size: 16px;
+  }
+  main {
+    max-width: 760px;
+    margin: 0 auto;
+    background: var(--card);
+    border-radius: 16px;
+    padding: 40px 28px;
+  }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  .app-line {
+    color: var(--muted);
+    font-size: 15px;
+    margin: 0 0 4px;
+  }
+  .meta { color: var(--muted); font-size: 14px; margin: 0; }
+  h2 {
+    font-size: 19px;
+    margin: 40px 0 12px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 15px; margin: 24px 0 8px; }
+  p, li { font-size: 15px; }
+
+  /* 삭제 요청 단계 — 페이지에서 가장 눈에 띄어야 하는 부분 */
+  .steps {
+    background: var(--accent-soft);
+    border: 2px solid var(--accent);
+    border-radius: 14px;
+    padding: 24px 24px 24px 20px;
+    margin: 20px 0 8px;
+  }
+  .steps ol {
+    margin: 0;
+    padding-left: 24px;
+    counter-reset: step;
+    list-style: none;
+  }
+  .steps li {
+    counter-increment: step;
+    position: relative;
+    padding-left: 38px;
+    margin-bottom: 20px;
+    font-size: 16px;
+  }
+  .steps li:last-child { margin-bottom: 0; }
+  .steps li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 1px;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 700;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .mailto {
+    display: inline-block;
+    font-weight: 700;
+    font-size: 17px;
+    color: #b45309;
+    word-break: break-all;
+  }
+  .tpl {
+    background: #fff;
+    border: 1px solid var(--warn-line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin: 12px 0 0;
+    font-size: 14px;
+    line-height: 1.9;
+    white-space: pre-wrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .note {
+    background: var(--warn-bg);
+    border-left: 4px solid var(--accent);
+    border-radius: 6px;
+    padding: 14px 16px;
+    margin: 20px 0;
+    font-size: 14px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  th, td {
+    border: 1px solid var(--line);
+    padding: 10px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: #fafafa; font-weight: 600; }
+  ul { padding-left: 20px; }
+  a { color: #b45309; }
+  footer {
+    margin-top: 40px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 14px;
+  }
+  @media (max-width: 600px) {
+    main { padding: 28px 18px; border-radius: 12px; }
+    h1 { font-size: 22px; }
+    .steps { padding: 20px 18px 20px 16px; }
+    .steps li { font-size: 15px; padding-left: 34px; }
+    table, th, td { font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>계정 및 데이터 삭제 요청</h1>
+<p class="app-line">앱 이름: <strong>밀챗 (MealChat)</strong> &middot; 개발자: <strong>팀 MealChat</strong></p>
+<p class="meta">최종 업데이트: 2026년 9월 20일</p>
+
+<p>
+  밀챗 이용자는 언제든지 계정과 계정에 연결된 개인정보의 삭제를 요청할 수 있습니다.
+  아래 절차에 따라 요청해 주시면 본인 확인 후 처리해 드립니다.
+</p>
+
+<h2>삭제 요청 방법</h2>
+
+<div class="steps">
+  <ol>
+    <li>
+      밀챗에 <strong>가입할 때 사용한 이메일 주소</strong>로 메일을 작성합니다.
+      (본인 확인을 위해 가입 이메일에서 보내주셔야 합니다.)
+    </li>
+    <li>
+      받는 사람을 <span class="mailto">goyellow0916@naver.com</span> 으로 지정합니다.
+    </li>
+    <li>
+      제목을 <strong>&ldquo;밀챗 계정 삭제 요청&rdquo;</strong> 으로 적고,
+      본문에 아래 내용을 넣어 보냅니다.
+      <div class="tpl">가입 이메일 주소:
+앱에서 사용 중인 이름(닉네임):
+요청 내용: 계정 및 모든 개인정보 삭제를 요청합니다.</div>
+    </li>
+    <li>
+      운영자가 <strong>영업일 기준 3일 이내</strong>에 접수 확인 메일을 보내드립니다.
+      본인 확인이 끝나면 <strong>14일 이내</strong>에 삭제를 완료하고
+      처리 결과를 회신합니다.
+    </li>
+  </ol>
+</div>
+
+<div class="note">
+  <strong>현재 앱 안에는 계정 삭제 버튼이 없습니다.</strong>
+  삭제는 위 이메일 접수로만 처리되며, 앱 내 삭제 기능이 추가되면
+  이 페이지를 갱신하겠습니다.
+</div>
+
+<h2>삭제되는 데이터</h2>
+<p>삭제 요청이 처리되면 아래 정보는 <strong>복구할 수 없도록 완전히 삭제</strong>됩니다.</p>
+<table>
+  <tr><th>구분</th><th>항목</th></tr>
+  <tr>
+    <td>계정 정보</td>
+    <td>이메일 주소, 비밀번호, 계정 식별자</td>
+  </tr>
+  <tr>
+    <td>프로필 정보</td>
+    <td>이름(닉네임), 사용자 태그, 프로필 사진</td>
+  </tr>
+  <tr>
+    <td>민감 정보</td>
+    <td>은행명, 계좌번호, 생년월일, 성별</td>
+  </tr>
+  <tr>
+    <td>설정 및 취향</td>
+    <td>음식 취향, 정보 공개 범위 설정, 출발 위치(장소명 및 위도·경도)</td>
+  </tr>
+  <tr>
+    <td>개인 일정</td>
+    <td>이용자가 직접 등록한 개인 일정 및 메모</td>
+  </tr>
+</table>
+
+<h2>보관되는 데이터와 보관 기간</h2>
+
+<h3>가. 탈퇴 후 30일간 보관 후 파기</h3>
+<p>
+  계정 정보는 삭제 처리일로부터 <strong>30일이 경과한 뒤 최종 파기</strong>됩니다.
+  이 기간은 재가입 문의 및 분쟁 처리에 대응하기 위한 것이며,
+  기간 중에도 즉시 파기를 요청하시면 지체 없이 처리합니다.
+</p>
+
+<h3>나. 식별 정보를 제거한 뒤 보관</h3>
+<p>
+  여러 이용자가 함께 참여한 <strong>모임(방)의 대화 내용, 일정, 정산 내역</strong>은
+  다른 참여자의 이용 기록이기도 합니다. 따라서 탈퇴한 이용자를 식별할 수 있는 정보를
+  제거(익명 처리)한 뒤, 모임 기록 자체는 남습니다. 익명 처리된 기록으로는
+  탈퇴한 이용자를 다시 특정할 수 없습니다.
+</p>
+
+<h3>다. 법령에 따라 보관</h3>
+<p>관계 법령이 보존을 요구하는 경우, 해당 기간 동안 분리 보관한 뒤 파기합니다.</p>
+<table>
+  <tr><th>보관 항목</th><th>보관 기간</th><th>근거 법령</th></tr>
+  <tr>
+    <td>계약 또는 청약철회 등에 관한 기록</td>
+    <td>5년</td>
+    <td>전자상거래 등에서의 소비자보호에 관한 법률</td>
+  </tr>
+  <tr>
+    <td>대금결제 및 재화 등의 공급에 관한 기록</td>
+    <td>5년</td>
+    <td>전자상거래 등에서의 소비자보호에 관한 법률</td>
+  </tr>
+  <tr>
+    <td>소비자의 불만 또는 분쟁처리에 관한 기록</td>
+    <td>3년</td>
+    <td>전자상거래 등에서의 소비자보호에 관한 법률</td>
+  </tr>
+  <tr>
+    <td>접속에 관한 기록</td>
+    <td>3개월</td>
+    <td>통신비밀보호법</td>
+  </tr>
+</table>
+
+<h2>일부 데이터만 삭제하고 싶은 경우</h2>
+<p>
+  계정 전체를 삭제하지 않고 특정 정보만 지우고 싶으시다면, 앱 내
+  <strong>프로필</strong> 화면에서 직접 수정하거나 삭제할 수 있습니다.
+  계좌 정보, 프로필 사진, 음식 취향, 출발 위치는 계정을 유지한 채로
+  개별 삭제가 가능합니다.
+</p>
+<p>
+  앱에서 직접 지울 수 없는 항목은 위 이메일로 요청해 주시면 처리해 드립니다.
+</p>
+
+<h2>문의처</h2>
+<table>
+  <tr><th>개발자</th><td>팀 MealChat</td></tr>
+  <tr><th>개인정보 보호책임자</th><td>이도은</td></tr>
+  <tr><th>이메일</th><td>goyellow0916@naver.com</td></tr>
+</table>
+<p>
+  개인정보 처리에 관한 자세한 내용은
+  <a href="../privacy/">개인정보처리방침</a>에서 확인하실 수 있습니다.
+</p>
+
+<footer>
+  밀챗(MealChat) &middot; 팀 MealChat
+</footer>
+
+</main>
+</body>
+</html>
