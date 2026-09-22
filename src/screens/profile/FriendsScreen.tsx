@@ -1,7 +1,6 @@
 import { ChevronDown, UserMinus } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,6 +13,7 @@ import { useTopInset } from '../../theme/insets';
 
 import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
+import { notify } from '../../lib/confirm';
 import {
   addFriend,
   fetchMyFriends,
@@ -58,8 +58,19 @@ export default function FriendsScreen() {
   const search = async () => {
     if (!userId) return;
     setBusy(true);
-    const { data } = await searchProfilesByTag(keyword, userId);
+    const { data, error } = await searchProfilesByTag(keyword, userId);
     setBusy(false);
+
+    /*
+     * 실패를 삼키면 안 된다. 예전에는 error 를 버려서, 검색이 막히거나
+     * 끊겨도 화면에는 "결과 없음" 과 똑같이 보였다 — 사람은 그 사람이
+     * 없는 줄 안다.
+     */
+    if (error) {
+      setCandidates([]);
+      notify('검색하지 못했어요', error.message);
+      return;
+    }
 
     const already = new Set(friends.map((friend) => friend.profileId));
     setCandidates((data ?? []).filter((profile) => !already.has(profile.id)));
@@ -72,7 +83,7 @@ export default function FriendsScreen() {
     setBusy(false);
 
     if (error) {
-      Alert.alert('추가 실패', error.message);
+      notify('추가 실패', error.message);
       return;
     }
     setCandidates((prev) => prev.filter((profile) => profile.id !== targetId));
@@ -85,7 +96,7 @@ export default function FriendsScreen() {
     setBusy(false);
 
     if (error) {
-      Alert.alert('삭제 실패', error.message);
+      notify('삭제 실패', error.message);
       return;
     }
     void load();
@@ -146,7 +157,7 @@ export default function FriendsScreen() {
                 value={keyword}
                 onChangeText={setKeyword}
                 placeholder="닉네임 또는 태그"
-                placeholderTextColor={colors.textMuted}
+                placeholderTextColor={colors.placeholder}
                 autoCapitalize="none"
                 onSubmitEditing={() => void search()}
               />
