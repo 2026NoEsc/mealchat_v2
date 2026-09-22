@@ -1,5 +1,7 @@
+import { useRef } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { useKeyboardOverlap } from '../theme/keyboard';
 import { fs, s } from '../theme/scale';
 import { colors } from '../theme/tokens';
 import { fontFamily } from '../theme/typography';
@@ -17,9 +19,16 @@ type Props = {
  * 상단 그랩 핸들 + 타이틀 + 서브타이틀, 본문은 각 시트가 채운다.
  */
 export default function BottomSheet({ visible, title, subtitle, onClose, children }: Props) {
+  /*
+   * 시트에 입력칸이 있으면 키보드가 그대로 덮는다. 가리는 만큼 시트를 올린다.
+   * 덮개(backdrop)는 절대 배치라 이 여백에 영향받지 않고 화면을 계속 다 가린다.
+   */
+  const rootRef = useRef<View>(null);
+  const { overlap: keyboard, remeasure } = useKeyboardOverlap(rootRef);
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.root}>
+      <View ref={rootRef} style={[styles.root, { paddingBottom: keyboard }]} onLayout={remeasure}>
         <Pressable style={styles.backdrop} onPress={onClose} />
 
         <View style={styles.sheet}>
