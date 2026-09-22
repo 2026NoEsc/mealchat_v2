@@ -90,7 +90,7 @@ export default function ProfileHomeScreen() {
           <Pressable style={styles.identity} onPress={() => navigate('ProfileEdit')}>
             <Avatar
               name={bundle?.profile.name ?? '?'}
-              color={bundle?.profile.avatarColor ?? colors.primary}
+              seed={bundle?.profile.id}
               url={bundle?.profile.avatarUrl}
               size={s(46)}
               radius={s(12)}
@@ -124,9 +124,12 @@ export default function ProfileHomeScreen() {
           </View>
 
           <View style={styles.track}>
-            {/* 진행 막대는 실제 완료 개수를 따른다 */}
-            <View style={[styles.fill, { flex: doneCount, minWidth: 0 }]} />
-            <View style={{ flex: steps.length - doneCount }} />
+            {/*
+              완료 개수를 폭 비율로 그린다. 예전에는 flex 로 나눴는데 track 에
+              flexDirection 이 없어 기본값(column)이라, 폭이 아니라 높이가 나뉘었다.
+              그래서 게이지가 차지 않고 늘 같은 모양이었다.
+            */}
+            <View style={[styles.fill, { width: `${(doneCount / steps.length) * 100}%` }]} />
           </View>
 
           {steps.map((step) => (
@@ -264,8 +267,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceSunken,
     overflow: 'hidden',
   },
+  /* 폭은 완료 개수가 정한다 — 여기에 고정 폭을 두면 게이지가 움직이지 않는다 */
   fill: {
-    width: `${(60 / 179) * 100}%`,
     height: '100%',
     borderRadius: s(4),
     backgroundColor: colors.primary,

@@ -233,11 +233,11 @@ export default function SettlementsScreen() {
                         /* 전원이 보낸 뒤에는 되돌릴 수 없다 — 방이 이미 사라지는 중이다 */
                         disabled={!mine || busy || settled}
                         onPress={() => void toggleMine(member)}>
-                        <Avatar
-                          name={member.name}
-                          color={member.isCompleted ? colors.primary : colors.surfaceStrong}
-                          size={s(16)}
-                        />
+                        {/*
+                          * 보냈는지 여부는 줄 전체(memberDone)와 오른쪽 글자로 알린다.
+                          * 아바타 뒤에 색을 깔면 캐릭터의 투명한 귀퉁이로 비쳐 테두리가 된다.
+                          */}
+                        <Avatar name={member.name} seed={member.profileId ?? member.id} size={s(16)} />
                         <Text style={styles.memberName} numberOfLines={1}>
                           {member.name}
                           {mine ? ' (나)' : ''}

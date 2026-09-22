@@ -5,6 +5,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useTopInset } from '../../theme/insets';
 
 import { useAuth } from '../../auth/AuthProvider';
+import Avatar from '../../components/Avatar';
 import { DangerButton } from '../../components/ui/Button';
 import { meetingLine } from '../../lib/roomFormat';
 import { confirmAction, notify } from '../../lib/confirm';
@@ -128,11 +129,18 @@ export default function RoomDetailScreen() {
             const mine = member.profileId === user?.id;
             return (
               <View key={member.id} style={styles.memberRow}>
-                <View style={[styles.avatarBox, { backgroundColor: member.avatarColor }]}>
-                  <Text style={styles.avatarInitial}>
-                    {[...member.name.trim()][0] ?? '?'}
-                  </Text>
-                </View>
+                {/*
+                  * 올린 사진이 있으면 사진, 없으면 기본 캐릭터 — 채팅방·멤버 목록과
+                  * 같은 얼굴이다. 예전에는 avatar_color 칸에 이름 첫 글자를 넣어서
+                  * 사진이 한 번도 뜨지 않았고, 색이 진한 계정은 칸이 초록으로 보였다.
+                  */}
+                <Avatar
+                  name={member.name}
+                  url={member.avatarUrl}
+                  seed={member.profileId ?? member.id}
+                  size={s(20)}
+                  radius={s(5)}
+                />
                 <Text style={styles.memberName}>{member.name}</Text>
                 {/* 방장 개념이 없다 — 나와 남만 구분한다 */}
                 <Text style={[styles.memberRole, mine && styles.memberRoleOwner]}>
@@ -272,23 +280,6 @@ const styles = StyleSheet.create({
     marginTop: s(7),
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  avatarInitial: {
-    fontFamily: fontFamily.bold,
-    fontSize: fs(9),
-    color: colors.textOnAccent,
-  },
-  avatarBox: {
-    width: s(16),
-    height: s(16),
-    borderRadius: s(5),
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatar: {
-    width: s(11),
-    height: s(12),
   },
   memberName: {
     flex: 1,

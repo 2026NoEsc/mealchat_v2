@@ -171,7 +171,7 @@ export function SettlementSheet({
             editable={editable}
             keyboardType="number-pad"
             placeholder="0"
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={colors.placeholder}
           />
         </View>
         <View style={styles.amountRight}>
@@ -524,11 +524,18 @@ export function MembersSheet({
               <View
                 key={participant.id}
                 style={[memberStyles.row, mine && memberStyles.rowMe]}>
+                {/*
+                  * url 을 안 넘겨서 올린 사진이 한 번도 뜨지 않았고, style 의
+                  * 12x14 가 size(26) 를 덮어써서 얼굴이 작게 눌려 있었다.
+                  * seed 는 사람을 가리키는 값이어야 이름이 같은 사람이 둘일 때
+                  * 기본 캐릭터가 겹치지 않는다 — 방·프로필과도 같은 얼굴이 된다.
+                  */}
                 <Avatar
                   name={participant.name}
-                  color={participant.avatarColor}
+                  url={participant.avatarUrl}
+                  seed={participant.profileId ?? participant.id}
                   size={s(26)}
-                  style={memberStyles.avatar}
+                  radius={s(6.5)}
                 />
 
                 <View style={memberStyles.body}>
@@ -588,18 +595,6 @@ const memberStyles = StyleSheet.create({
     backgroundColor: TINT,
     borderWidth: s(0.8),
     borderColor: colors.primary,
-  },
-  avatarBox: {
-    width: s(18),
-    height: s(18),
-    borderRadius: s(6),
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatar: {
-    width: s(12),
-    height: s(14),
   },
   body: {
     flex: 1,

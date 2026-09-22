@@ -168,7 +168,7 @@ function ProfileEditForm({
               onPress={() => void pickAvatar()}>
               <Avatar
                 name={nickname || bundle.profile.name}
-                color={bundle.profile.avatarColor}
+                seed={bundle.profile.id}
                 url={avatarUrl}
                 size={s(46)}
                 radius={s(12)}
@@ -214,7 +214,7 @@ function ProfileEditForm({
                 value={account}
                 onChangeText={setAccount}
                 placeholder="계좌번호 입력"
-                placeholderTextColor={colors.textMuted}
+                placeholderTextColor={colors.placeholder}
                 keyboardType="number-pad"
               />
             </View>
@@ -279,7 +279,7 @@ function Field({
   return (
     <>
       <Text style={styles.label}>{label}</Text>
-      <TextInput style={styles.input} placeholderTextColor={colors.textMuted} {...rest} />
+      <TextInput style={styles.input} placeholderTextColor={colors.placeholder} {...rest} />
     </>
   );
 }

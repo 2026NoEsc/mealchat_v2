@@ -41,7 +41,6 @@ export default function SubmissionStatus({ members }: { members: SubmissionMembe
           <View key={member.id} style={styles.member}>
             <Avatar
               name={member.name}
-              color={member.avatarColor}
               url={member.avatarUrl}
               size={s(20)}
               radius={s(5)}
