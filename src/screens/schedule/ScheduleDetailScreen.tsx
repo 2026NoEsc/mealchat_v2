@@ -232,7 +232,7 @@ export default function ScheduleDetailScreen() {
             value={name}
             onChangeText={setName}
             placeholder="약속 이름 ( 예: 점심 번개팅 )"
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={colors.placeholder}
           />
         </View>
 
@@ -316,7 +316,7 @@ export default function ScheduleDetailScreen() {
                   value={query}
                   onChangeText={setQuery}
                   placeholder="동네나 건물 이름 검색"
-                  placeholderTextColor={colors.textMuted}
+                  placeholderTextColor={colors.placeholder}
                   returnKeyType="search"
                   onSubmitEditing={() => void runSearch()}
                 />

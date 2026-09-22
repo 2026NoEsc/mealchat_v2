@@ -18,7 +18,7 @@ export default function TextField({ label, containerStyle, style, ...rest }: Pro
       <Text style={styles.label}>{label}</Text>
       <TextInput
         style={[styles.input, style]}
-        placeholderTextColor={colors.textMuted}
+        placeholderTextColor={colors.placeholder}
         {...rest}
       />
     </View>

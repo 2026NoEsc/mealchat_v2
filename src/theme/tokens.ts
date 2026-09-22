@@ -23,6 +23,11 @@ export const colors = {
   textPrimary: '#000000',
   /** Figma 변수 text/muted */
   textMuted: '#9C9C9C',
+  /**
+   * 입력칸 안내 문구. textMuted 를 그대로 쓰면 적어 넣은 값과 구분이 안 가서
+   * 이미 입력된 것처럼 보인다. 한 단계 옅게 둔다.
+   */
+  placeholder: '#C7C7C7',
   /** 홈 "다가올 일정"의 날짜·D-day 배지 — textMuted 보다 한 단계 진하다 */
   textSecondary: '#737373',
   /** Figma 변수 text/onAccent */

@@ -207,7 +207,7 @@ export default function ChatHomeScreen() {
               /* 저장된 코드가 대문자라 입력도 맞춰 올린다 — RPC 는 정확히 일치해야 찾는다 */
               onChangeText={(text) => setCode(text.toUpperCase())}
               placeholder="초대 코드 6자리 입력"
-              placeholderTextColor={colors.textMuted}
+              placeholderTextColor={colors.placeholder}
               autoCapitalize="characters"
               autoCorrect={false}
               maxLength={6}

@@ -133,7 +133,7 @@ export default function OriginScreen() {
               value={query}
               onChangeText={setQuery}
               placeholder="주소 또는 장소 검색"
-              placeholderTextColor={colors.textMuted}
+              placeholderTextColor={colors.placeholder}
               returnKeyType="search"
               onSubmitEditing={() => void runSearch()}
             />

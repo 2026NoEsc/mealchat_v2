@@ -240,7 +240,7 @@ export default function VotingSheet({
           value={draft}
           onChangeText={setDraft}
           placeholder={placeholder}
-          placeholderTextColor={colors.textMuted}
+          placeholderTextColor={colors.placeholder}
           onSubmitEditing={() => void add()}
         />
         <Pressable

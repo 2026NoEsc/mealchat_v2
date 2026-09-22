@@ -80,7 +80,7 @@ export default function JoinCodeSheet({
           /* 저장된 코드가 대문자라 입력도 맞춰 올린다 — RPC 는 정확히 일치해야 찾는다 */
           onChangeText={(text) => setCode(text.replace(/\s/g, '').toUpperCase())}
           placeholder="예: ABC123"
-          placeholderTextColor={colors.textMuted}
+          placeholderTextColor={colors.placeholder}
           autoCapitalize="characters"
           autoCorrect={false}
           autoFocus
