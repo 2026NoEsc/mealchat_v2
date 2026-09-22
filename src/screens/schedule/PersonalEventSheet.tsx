@@ -4,6 +4,8 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import BottomSheet from '../../components/BottomSheet';
 import { CompleteButton, DangerButton } from '../../components/ui/Button';
 import { formatDateIn } from '../../lib/calendar';
+import { notify } from '../../lib/confirm';
+import { formatTimeInput, isCompleteTime } from '../../lib/timeInput';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
@@ -86,6 +88,15 @@ function EventSheetFields({ editing, onClose, onSave, onDelete }: EventSheetFiel
     const trimmed = title.trim();
     if (!trimmed || saving) return;
 
+    /*
+     * 덜 친 시간이 그대로 저장되면 "09:3 ~ 10:0" 같은 값이 남아, 시간으로 읽는
+     * 쪽이 조용히 실패한다. 여기서 막고 이유를 알려 준다.
+     */
+    if (!isCompleteTime(start) || !isCompleteTime(end)) {
+      notify('시간을 확인해 주세요', '시작과 끝을 09:00 처럼 네 자리로 넣어 주세요.');
+      return;
+    }
+
     setSaving(true);
     const saved = await onSave({
       id: editing?.id ?? `${Date.now()}`,
@@ -106,7 +117,7 @@ function EventSheetFields({ editing, onClose, onSave, onDelete }: EventSheetFiel
         value={title}
         onChangeText={setTitle}
         placeholder="예: 알바, 스터디"
-        placeholderTextColor={colors.textMuted}
+        placeholderTextColor={colors.placeholder}
         autoFocus
       />
 
@@ -115,17 +126,22 @@ function EventSheetFields({ editing, onClose, onSave, onDelete }: EventSheetFiel
         <TextInput
           style={[styles.input, styles.timeInput]}
           value={start}
-          onChangeText={setStart}
+          /* 숫자만 받고 콜론은 알아서 넣는다 — 예전에는 아무 글자나 들어갔다 */
+          onChangeText={(text) => setStart(formatTimeInput(text))}
           placeholder="09:00"
-          placeholderTextColor={colors.textMuted}
+          placeholderTextColor={colors.placeholder}
+          keyboardType="number-pad"
+          maxLength={5}
         />
         <Text style={styles.tilde}>~</Text>
         <TextInput
           style={[styles.input, styles.timeInput]}
           value={end}
-          onChangeText={setEnd}
+          onChangeText={(text) => setEnd(formatTimeInput(text))}
           placeholder="10:00"
-          placeholderTextColor={colors.textMuted}
+          placeholderTextColor={colors.placeholder}
+          keyboardType="number-pad"
+          maxLength={5}
         />
       </View>
 
@@ -165,16 +181,20 @@ function EventSheetFields({ editing, onClose, onSave, onDelete }: EventSheetFiel
   );
 }
 
+/*
+ * 새 일정은 시간 칸을 비워 둔다. 예전에는 09:00 / 10:00 이 값으로 들어가 있어서
+ * 안내 문구(09:00)가 나올 자리가 없었고, 고치려면 지우고 다시 쳐야 했다.
+ */
 function initialEventDraft(editing: PersonalEvent | null | undefined) {
   if (!editing) {
-    return { title: '', start: '09:00', end: '10:00', color: EVENT_COLORS[0] };
+    return { title: '', start: '', end: '', color: EVENT_COLORS[0] };
   }
 
   const [start, end] = editing.time.split('~').map((time) => time.trim());
   return {
     title: editing.title,
-    start: start || '09:00',
-    end: end || '10:00',
+    start: start ?? '',
+    end: end ?? '',
     color: editing.color,
   };
 }
@@ -236,7 +256,7 @@ function MemoSheetFields({ memo, onClose, onSave }: MemoSheetFieldsProps) {
         value={draft}
         onChangeText={setDraft}
         placeholder="예: 저녁 약속 잡기 좋은 날"
-        placeholderTextColor={colors.textMuted}
+        placeholderTextColor={colors.placeholder}
         multiline
         autoFocus
       />
