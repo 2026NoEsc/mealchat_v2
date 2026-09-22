@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import {
-  Alert,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -15,6 +14,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../auth/AuthProvider';
 import ScreenHeader from '../components/ScreenHeader';
+import { notify } from '../lib/confirm';
+import { authErrorMessage } from '../lib/password';
 import { AccentButton } from '../components/ui/Button';
 import { useNavigation } from '../navigation/NavigationContext';
 import { fs, s } from '../theme/scale';
@@ -46,20 +47,21 @@ export default function LoginScreen() {
     const error = await signInWithEmail(email, password);
     setSubmitting(false);
 
-    if (error) Alert.alert('로그인 실패', error.message);
+    /* 서버는 영어로 던진다. Alert 는 웹에서 빈 함수라 이유가 통째로 사라졌다 */
+    if (error) notify('로그인 실패', authErrorMessage(error.message));
   };
 
   const resetPassword = async () => {
     if (!email.trim()) {
-      Alert.alert('이메일 입력', '비밀번호 재설정 메일을 받을 이메일을 입력해 주세요.');
+      notify('이메일 입력', '비밀번호 재설정 메일을 받을 이메일을 입력해 주세요.');
       return;
     }
 
     const error = await sendPasswordReset(email);
     if (error) {
-      Alert.alert('재설정 메일 전송 실패', error.message);
+      notify('재설정 메일 전송 실패', authErrorMessage(error.message));
     } else {
-      Alert.alert('메일 전송 완료', '이메일의 재설정 링크를 열어 새 비밀번호를 설정해 주세요.');
+      notify('메일 전송 완료', '이메일의 재설정 링크를 열어 새 비밀번호를 설정해 주세요.');
     }
   };
 
@@ -86,7 +88,7 @@ export default function LoginScreen() {
             value={email}
             onChangeText={setEmail}
             placeholder="이메일을 입력하세요"
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={colors.placeholder}
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
@@ -98,7 +100,7 @@ export default function LoginScreen() {
             value={password}
             onChangeText={setPassword}
             placeholder="비밀번호를 입력하세요"
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={colors.placeholder}
             secureTextEntry
           />
 

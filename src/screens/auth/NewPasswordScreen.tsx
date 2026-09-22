@@ -83,7 +83,7 @@ export default function NewPasswordScreen() {
             value={password}
             onChangeText={setPassword}
             placeholder="새 비밀번호를 입력하세요"
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={colors.placeholder}
             secureTextEntry
             autoCapitalize="none"
             autoCorrect={false}
@@ -96,7 +96,7 @@ export default function NewPasswordScreen() {
             value={confirm}
             onChangeText={setConfirm}
             placeholder="한 번 더 입력하세요"
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={colors.placeholder}
             secureTextEntry
             autoCapitalize="none"
             autoCorrect={false}

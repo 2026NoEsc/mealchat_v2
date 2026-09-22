@@ -1,9 +1,11 @@
 import { ChevronRight, CheckSquare, Square } from 'lucide-react-native';
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '../../auth/AuthProvider';
 import { useSignupDraft } from '../../auth/SignupDraftProvider';
+import { notify } from '../../lib/confirm';
+import { authErrorMessage } from '../../lib/password';
 import { saveSignupPrivateProfile } from '../../lib/profile';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
@@ -42,12 +44,12 @@ export default function SignupTermsScreen() {
 
   const completeSignup = async () => {
     if (!canSubmit) {
-      Alert.alert('약관 동의', '필수 약관에 동의해 주세요.');
+      notify('약관 동의', '필수 약관에 동의해 주세요.');
       return;
     }
 
     if (!draft.nickname.trim() || !draft.email.trim() || !draft.password) {
-      Alert.alert('가입 정보 없음', '개인정보 입력 화면에서 가입 정보를 다시 입력해 주세요.');
+      notify('가입 정보 없음', '개인정보 입력 화면에서 가입 정보를 다시 입력해 주세요.');
       return;
     }
 
@@ -77,14 +79,14 @@ export default function SignupTermsScreen() {
       }
 
       if (result.error) {
-        Alert.alert('회원가입 실패', result.error.message);
+        notify('회원가입 실패', authErrorMessage(result.error.message));
         return;
       }
 
       resetDraft();
 
       if (result.confirmationRequired) {
-        Alert.alert(
+        notify(
           '이메일 확인 필요',
           '이메일의 확인 링크를 연 뒤 로그인해 주세요.\n계좌와 생년월일은 로그인 후 프로필에서 입력할 수 있어요.',
         );
@@ -93,10 +95,10 @@ export default function SignupTermsScreen() {
       }
 
       if (privateSaveFailed) {
-        Alert.alert('일부 정보 미저장', '계좌와 생년월일은 프로필에서 다시 입력해 주세요.');
+        notify('일부 정보 미저장', '계좌와 생년월일은 프로필에서 다시 입력해 주세요.');
       }
     } catch {
-      Alert.alert('회원가입 실패', '계정을 만들지 못했어요. 잠시 후 다시 시도해 주세요.');
+      notify('회원가입 실패', '계정을 만들지 못했어요. 잠시 후 다시 시도해 주세요.');
     } finally {
       setSubmitting(false);
     }
