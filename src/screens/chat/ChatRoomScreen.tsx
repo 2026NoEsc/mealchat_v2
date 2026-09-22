@@ -1,10 +1,8 @@
-import { CalendarDays, ChevronLeft, MoreVertical, Send, Smile, Users, Utensils, Wallet } from 'lucide-react-native';
-import { useEffect, useRef, useState } from 'react';
+import { CalendarDays, Send, Smile, Users, Utensils, Wallet } from 'lucide-react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Image,
   ImageSourcePropType,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,14 +12,20 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useKeyboardOverlap } from '../../theme/keyboard';
+
 import { useAuth } from '../../auth/AuthProvider';
+import Avatar from '../../components/Avatar';
+import { MenuBarsIcon, RoomBackIcon } from '../../components/icons';
 import { buildPlaceCandidates } from '../../lib/placeCandidates';
 import { supabase } from '../../lib/supabase';
 import { useMyProfile } from '../../profile/useMyProfile';
 import type { ScheduleRecommendResponse } from '../schedule/scheduleTypes';
 import { parseEmoticonToken } from '../../lib/emoticon';
 import { confirmAction, notify } from '../../lib/confirm';
+import { roomCharacterFor } from '../../lib/roomCharacter';
 import { roomNoticeOf, type RoomNotice } from '../../lib/roomNotice';
+import { roomColor } from '../../lib/roomTheme';
 import { dayKey, dayLabel, roomTimerLabel, timeLabel } from '../../lib/roomFormat';
 import {
   advanceRoomStage,
@@ -47,19 +51,55 @@ const SYS_TEXT = '#696969';
 type Message =
   | { kind: 'date'; text: string }
   | { kind: 'sys'; text: string }
-  | { kind: 'msg'; mine: boolean; name?: string; color?: string; text: string; time: string }
-  | {
-      kind: 'sticker';
-      mine?: boolean;
-      name?: string;
-      avatar?: ImageSourcePropType;
-      sticker: ImageSourcePropType;
-      time: string;
-    }
+  | ({ kind: 'msg'; mine: boolean; text: string } & Bubble)
+  | ({ kind: 'sticker'; mine?: boolean; sticker: ImageSourcePropType } & Bubble)
   | { kind: 'notice'; notice: RoomNotice };
 
+/** 상대 말풍선 옆 아바타를 그리는 데 필요한 것. 내 말풍선에는 아바타가 없다. */
+type Sender = { name?: string; senderId?: string | null; avatarUrl?: string | null };
+
+/** 말풍선 한 줄이 보낸 사람과 시각에 대해 들고 가는 것 */
+type Bubble = Sender & {
+  time: string;
+  /** 같은 사람이 같은 분에 이어 보낸 줄이면 false — 시각을 마지막 줄에만 남긴다 */
+  showTime: boolean;
+  /** 바로 위 줄과 한 묶음이면 true — 위 줄에 붙여 그린다 */
+  grouped?: boolean;
+};
+
+/**
+ * 상대 말풍선 옆 아바타 — 시안 2178:567 (20x20, 라운드 5, 옅은 주황 칸).
+ *
+ * 사진을 올렸으면 사진, 아니면 기본 캐릭터다. 사람을 가리키는 id 로 캐릭터를 골라
+ * 이름이 같은 사람이 둘이어도 얼굴이 섞이지 않는다.
+ */
+function SenderAvatar({ name, senderId, avatarUrl, grouped }: Sender & { grouped?: boolean }) {
+  /*
+   * 한 사람이 이어 보낸 줄마다 얼굴을 반복하면 지저분하다. 묶음의 첫 줄에만
+   * 그리고, 나머지 줄은 같은 너비의 빈 자리를 둬 말풍선 왼쪽 선을 맞춘다.
+   */
+  if (grouped) return <View style={styles.avatarSpacer} />;
+
+  return (
+    <Avatar
+      name={name ?? '?'}
+      url={avatarUrl}
+      seed={senderId ?? undefined}
+      size={s(20)}
+      radius={s(5)}
+      /* 시안의 옅은 주황 칸 — 기본 캐릭터에도 깔려야 해서 style 로 넘긴다 */
+      style={styles.msgAvatar}
+    />
+  );
+}
+
 /** 서버 메시지를 화면용 배열로 바꾼다. 날짜가 바뀌는 지점에 구분선을 넣는다. */
-function toDisplayMessages(rows: RoomMessage[], myId: string | null): Message[] {
+function toDisplayMessages(
+  rows: RoomMessage[],
+  myId: string | null,
+  /* 보낸 사람 id → 프로필 사진. 방 참가자 목록에서 온다 */
+  avatars: Map<string, string | null>,
+): Message[] {
   const out: Message[] = [];
   let lastDay = '';
 
@@ -78,30 +118,46 @@ function toDisplayMessages(rows: RoomMessage[], myId: string | null): Message[] 
     }
 
     const mine = Boolean(myId) && row.senderId === myId;
-    // 내 말풍선에는 이름을 붙이지 않는다
-    const name = mine ? undefined : row.senderName;
+    // 내 말풍선에는 이름도 아바타도 붙이지 않는다
+    const sender: Sender = mine
+      ? { senderId: row.senderId }
+      : {
+          name: row.senderName,
+          senderId: row.senderId,
+          avatarUrl: row.senderId ? avatars.get(row.senderId) ?? null : null,
+        };
     const time = timeLabel(row.createdAt);
     const emoticon = parseEmoticonToken(row.text);
 
     if (emoticon) {
       const sticker = findSticker(emoticon);
       if (sticker) {
-        out.push({ kind: 'sticker', mine, name, sticker: sticker.source, time });
+        out.push({ kind: 'sticker', mine, sticker: sticker.source, time, showTime: true, ...sender });
       } else {
         // 앱에 없는 이모티콘 — 토큰을 그대로 보여주느니 사람이 읽을 말로 바꾼다
-        out.push({ kind: 'msg', mine, name, color: row.senderColor, text: '(이모티콘)', time });
+        out.push({ kind: 'msg', mine, text: '(이모티콘)', time, showTime: true, ...sender });
       }
       continue;
     }
 
-    out.push({
-      kind: 'msg',
-      mine,
-      name,
-      color: row.senderColor,
-      text: row.text,
-      time,
-    });
+    out.push({ kind: 'msg', mine, text: row.text, time, showTime: true, ...sender });
+  }
+
+  /*
+   * 한 사람이 같은 분에 여러 줄을 보내면 줄마다 같은 시각이 반복돼 눈에 걸린다.
+   * 묶음의 마지막 줄에만 남긴다 — 아래에 붙어 있는 시각이 그 묶음이 끝난 때다.
+   * 중간에 날짜 구분선이나 안내가 끼면 묶음이 끊긴다 (말풍선끼리만 본다).
+   */
+  for (let i = 0; i < out.length - 1; i += 1) {
+    const line = out[i];
+    const next = out[i + 1];
+    if (line.kind !== 'msg' && line.kind !== 'sticker') continue;
+    if (next.kind !== 'msg' && next.kind !== 'sticker') continue;
+    /* id 가 없는(탈퇴한) 사람은 id 로는 가릴 수 없어 이름까지 같아야 한 사람으로 본다 */
+    if (line.senderId === next.senderId && line.name === next.name && line.time === next.time) {
+      line.showTime = false;
+      next.grouped = true;
+    }
   }
 
   return out;
@@ -116,6 +172,12 @@ type SheetKey = 'schedule' | 'menu' | 'settlement' | 'members' | null;
  */
 export default function ChatRoomScreen() {
   const insets = useSafeAreaInsets();
+  /*
+   * 키보드가 가리는 만큼만 화면을 줄인다. 안드로이드가 스스로 줄여 주는 양이
+   * 기기마다 달라서, 창 크기 API 대신 이 화면을 직접 재서 넘긴다.
+   */
+  const screenRef = useRef<View>(null);
+  const { overlap: keyboard, remeasure } = useKeyboardOverlap(screenRef);
   const { goBack, navigate, current } = useNavigation();
   const { user } = useAuth();
   const { bundle } = useMyProfile();
@@ -131,7 +193,12 @@ export default function ChatRoomScreen() {
    * 홈의 정산 링크처럼 roomId 만 들고 들어오는 경로도 있어 불러온 값으로 채운다.
    */
   const title = params?.title ?? room?.title ?? '밥약';
-  const roomColor = params?.color ?? room?.color ?? colors.primary;
+  /*
+   * 방 테마 색 — 목록과 같은 값이어야 같은 방으로 보인다. 예전에 만든 방은
+   * 색을 전부 '#FF9900' 로 저장해서 roomColor() 가 id 로 골라 준다. 방을 아직
+   * 못 불러왔으면 목록에서 실어 보낸 색으로 버틴다.
+   */
+  const theme = room ? roomColor(room) : params?.color ?? colors.primary;
   const { messages: remoteMessages, status, reload } = useRoomMessages(roomId);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -208,6 +275,14 @@ export default function ChatRoomScreen() {
   const scrollRef = useRef<ScrollView>(null);
 
   /*
+   * 키보드가 열리면 목록 칸이 그만큼 줄어든다. 그대로 두면 보고 있던 마지막
+   * 메시지가 입력바 뒤로 밀려 사라진다.
+   */
+  useEffect(() => {
+    if (keyboard > 0) scrollRef.current?.scrollToEnd({ animated: true });
+  }, [keyboard]);
+
+  /*
    * 식당 결정을 마치고 약속을 확정한다. 방장만 누를 수 있고, 되돌릴 수 없어서
    * 한 번 묻는다 — 확정하면 식당을 다시 고를 수 없다.
    */
@@ -250,8 +325,20 @@ export default function ChatRoomScreen() {
     notify('아직 준비 중이에요', '캘린더 저장은 곧 붙일게요.');
   };
 
+  /* 보낸 사람 id 로 프로필 사진을 찾을 수 있게 참가자 목록을 표로 바꿔 둔다 */
+  const avatarBySender = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const participant of room?.participants ?? []) {
+      if (participant.profileId) map.set(participant.profileId, participant.avatarUrl);
+    }
+    return map;
+  }, [room?.participants]);
+
   /* 서버가 준 목록에 날짜 구분선을 끼워 화면용 배열로 만든다 */
-  const messages = toDisplayMessages(remoteMessages, user?.id ?? null);
+  const messages = useMemo(
+    () => toDisplayMessages(remoteMessages, user?.id ?? null, avatarBySender),
+    [remoteMessages, user?.id, avatarBySender],
+  );
 
   const send = async () => {
     const text = draft.trim();
@@ -305,17 +392,31 @@ export default function ChatRoomScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.screen}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
+    /*
+     * 키보드가 가리는 만큼 화면 전체를 줄인다. 입력바에만 marginBottom 을 주면
+     * 위의 목록이 줄어드는 것과 겹쳐 두 배로 밀려 올라간다 (실측 690 → 169).
+     */
+    <View ref={screenRef} style={[styles.screen, { paddingBottom: keyboard }]} onLayout={remeasure}>
+      <View style={{ height: insets.top, backgroundColor: colors.screen }} />
 
       <View style={styles.header}>
         <Pressable onPress={goBack} hitSlop={s(8)}>
-          <ChevronLeft size={s(14)} color={SYS_TEXT} strokeWidth={2.5} />
+          <RoomBackIcon size={s(24)} />
         </Pressable>
 
-        <View style={[styles.headerAvatar, { backgroundColor: roomColor }]} />
+        {/*
+          * 방 대표 그림 — 목록 카드와 같은 캐릭터다. 색을 꽉 채우면 그림이 묻혀서
+          * 테마 색을 옅게(24 = 14%) 깔고 그 위에 올린다.
+          */}
+        <View style={[styles.headerAvatar, { backgroundColor: `${theme}24` }]}>
+          {roomId ? (
+            <Image
+              source={roomCharacterFor(roomId)}
+              style={styles.headerAvatarImage}
+              resizeMode="contain"
+            />
+          ) : null}
+        </View>
 
         <View style={styles.headerCenter}>
           <View style={styles.headerTitleRow}>
@@ -334,7 +435,7 @@ export default function ChatRoomScreen() {
         </View>
 
         <Pressable hitSlop={s(8)} onPress={() => navigate('RoomDetail', { roomId, title })}>
-          <MoreVertical size={s(13)} color={SYS_TEXT} strokeWidth={2} />
+          <MenuBarsIcon size={s(24)} />
         </Pressable>
       </View>
 
@@ -407,8 +508,17 @@ export default function ChatRoomScreen() {
       {/*
         인셋을 더한다. 예전엔 paddingBottom 을 insets.bottom 으로 덮어써서, 인셋이
         0 인 웹·구형 안드로이드에서는 스타일의 아래 여백까지 같이 사라졌다.
+
+        키보드가 올라오면 그 높이만큼 통째로 띄운다. 이때 제스처바 인셋은 빼야
+        한다 — 키보드가 이미 그 자리를 덮고 있어서, 그대로 두면 입력바가 키보드
+        위에 한 칸 떠 보인다.
       */}
-      <View style={[styles.inputBar, { paddingBottom: s(7) + insets.bottom }]}>
+      <View
+        style={[
+          styles.inputBar,
+          /* 키보드가 제스처바까지 덮으므로 그때는 인셋을 더하지 않는다 */
+          { paddingBottom: s(7) + (keyboard > 0 ? 0 : insets.bottom) },
+        ]}>
         {/*
           위 액션 행을 여닫는다. 예전에는 ScheduleDetail 로 보냈는데, 그 화면은
           createRoom 으로 새 방을 만드는 곳이라 대화 중에 누르면 지금 방을 두고
@@ -502,7 +612,7 @@ export default function ChatRoomScreen() {
           void shareInviteCode(code);
         }}
       />
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -554,8 +664,8 @@ function Row({
     case 'msg':
       if (message.mine) {
         return (
-          <View style={styles.mineRow}>
-            <Text style={styles.time}>{message.time}</Text>
+          <View style={[styles.mineRow, message.grouped && styles.grouped]}>
+            {message.showTime ? <Text style={styles.time}>{message.time}</Text> : null}
             <View style={[styles.bubble, styles.bubbleMine]}>
               <Text style={styles.bubbleTextMine}>{message.text}</Text>
             </View>
@@ -563,20 +673,20 @@ function Row({
         );
       }
       return (
-        <View style={styles.otherRow}>
-          {/* 아바타 업로드 전까지는 sender_color 원에 이름 첫 글자를 넣는다 */}
-          <View style={[styles.avatar, { backgroundColor: message.color ?? colors.primary }]}>
-            <Text style={styles.avatarInitial}>
-              {[...(message.name ?? '?').trim()][0] ?? '?'}
-            </Text>
-          </View>
+        <View style={[styles.otherRow, message.grouped && styles.grouped]}>
+          <SenderAvatar
+            name={message.name}
+            senderId={message.senderId}
+            avatarUrl={message.avatarUrl}
+            grouped={message.grouped}
+          />
           <View style={styles.otherCol}>
-            <Text style={styles.name}>{message.name}</Text>
+            {message.grouped ? null : <Text style={styles.name}>{message.name}</Text>}
             <View style={styles.otherLine}>
               <View style={[styles.bubble, styles.bubbleOther]}>
                 <Text style={styles.bubbleText}>{message.text}</Text>
               </View>
-              <Text style={styles.time}>{message.time}</Text>
+              {message.showTime ? <Text style={styles.time}>{message.time}</Text> : null}
             </View>
           </View>
         </View>
@@ -585,8 +695,8 @@ function Row({
     case 'sticker':
       if (message.mine) {
         return (
-          <View style={styles.mineRow}>
-            <Text style={styles.time}>{message.time}</Text>
+          <View style={[styles.mineRow, message.grouped && styles.grouped]}>
+            {message.showTime ? <Text style={styles.time}>{message.time}</Text> : null}
             <View style={styles.sticker}>
               <Image source={message.sticker} style={styles.stickerImage} resizeMode="contain" />
             </View>
@@ -594,17 +704,20 @@ function Row({
         );
       }
       return (
-        <View style={styles.otherRow}>
-          <View style={styles.avatar}>
-            <Image source={message.avatar} style={styles.avatarImage} resizeMode="contain" />
-          </View>
+        <View style={[styles.otherRow, message.grouped && styles.grouped]}>
+          <SenderAvatar
+            name={message.name}
+            senderId={message.senderId}
+            avatarUrl={message.avatarUrl}
+            grouped={message.grouped}
+          />
           <View style={styles.otherCol}>
-            <Text style={styles.name}>{message.name}</Text>
+            {message.grouped ? null : <Text style={styles.name}>{message.name}</Text>}
             <View style={styles.otherLine}>
               <View style={styles.sticker}>
                 <Image source={message.sticker} style={styles.stickerImage} resizeMode="contain" />
               </View>
-              <Text style={styles.time}>{message.time}</Text>
+              {message.showTime ? <Text style={styles.time}>{message.time}</Text> : null}
             </View>
           </View>
         </View>
@@ -656,18 +769,22 @@ function ActionButton({
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: colors.surfaceSunken,
+    /* 시안 2178:556 주석 "배경 색상 변경" — 화면과 헤더가 같은 #F8F6F2 다 */
+    backgroundColor: colors.screen,
   },
 
   // roomHeader y30 h44
   header: {
     height: s(44),
-    backgroundColor: colors.surface,
+    backgroundColor: colors.screen,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: s(10),
     gap: s(7),
-    ...shadows.bar,
+    /*
+     * 그림자를 뺀다. 본문과 같은 색이 되면서 그림자가 회색 띠처럼 보였고,
+     * 시안에도 헤더 아래 구분선이 없다.
+     */
     zIndex: 2,
   },
   headerAvatar: {
@@ -678,9 +795,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  /*
+   * 시안 값(16.8 x 18.24)은 여백이 넓은 원본에 맞춰 잰 것이라, 여백을 떼어낸
+   * 그림을 넣으면 칸 한가운데 조그맣게 떠 보였다. 칸(24)의 대부분을 쓰게 키운다.
+   * contain 이라 가로로 넓은 캐릭터든 세로로 긴 캐릭터든 잘리지 않는다.
+   */
   headerAvatarImage: {
-    width: s(16.8),
-    height: s(18.24),
+    width: s(20),
+    height: s(20),
   },
   headerCenter: {
     flex: 1,
@@ -736,12 +858,19 @@ const styles = StyleSheet.create({
     color: '#FF8C3A',
   },
 
-  // chatScroll x11.5 gap8
+  /*
+   * chatScroll x11.5 — 시안 줄간격은 8 이지만 말풍선이 띄엄띄엄 떨어져 보여
+   * 5 로 좁혔다. 한 사람이 이어 보낸 줄(grouped)은 한 덩어리로 보이게 더 붙인다.
+   */
   list: {
     paddingHorizontal: s(11.5),
     paddingTop: s(14),
     paddingBottom: s(10),
-    gap: s(8),
+    gap: s(5),
+  },
+  /* 위 줄과 같은 사람·같은 분이면 gap 을 덜어내 붙여 놓는다 */
+  grouped: {
+    marginTop: s(-2.5),
   },
   dateRow: {
     flexDirection: 'row',
@@ -779,22 +908,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: s(5),
   },
-  avatar: {
-    width: s(20),
-    height: s(20),
-    borderRadius: s(5),
+  msgAvatar: {
     backgroundColor: colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  avatarInitial: {
-    fontFamily: fontFamily.bold,
-    fontSize: fs(9),
-    color: colors.textOnAccent,
-  },
-  avatarImage: {
-    width: s(14),
-    height: s(15.2),
+  /* 아바타(20)를 안 그리는 줄이 왼쪽으로 밀리지 않게 자리를 지킨다 */
+  avatarSpacer: {
+    width: s(20),
   },
   otherCol: {
     flexShrink: 1,

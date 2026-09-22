@@ -1,5 +1,9 @@
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { roomCharacterFor } from '../lib/roomCharacter';
+
+import { defaultCharacterFor } from './Avatar';
+
 import { remainingLabel, roomStatus, timeLabel } from '../lib/roomFormat';
 import { previewText } from '../lib/emoticon';
 import type { RoomStage, RoomSummary } from '../lib/rooms';
@@ -7,24 +11,6 @@ import { roomColor } from '../lib/roomTheme';
 import { fs412, s412 } from '../theme/scale';
 import { colors } from '../theme/tokens';
 import { fontFamily } from '../theme/typography';
-
-/*
- * 방 썸네일에 쓸 기본 캐릭터 — 시안 2169:806(moa) / 2169:814(ddori).
- * 방 사진을 올리는 기능이 아직 없어서, 넷 중 하나를 방마다 고정해서 보여 준다.
- * id 로 고르므로 같은 방은 언제 봐도 같은 캐릭터가 나온다.
- */
-const CHARACTERS = [
-  require('../../assets/brand/moa.png'),
-  require('../../assets/brand/ddori.png'),
-  require('../../assets/brand/dudu.png'),
-  require('../../assets/brand/welling2.png'),
-];
-
-function characterFor(id: string) {
-  let sum = 0;
-  for (const char of id) sum += char.charCodeAt(0);
-  return CHARACTERS[sum % CHARACTERS.length];
-}
 
 /** 겹쳐 보여 주는 참가자 얼굴 수. 넘치는 사람은 "+N" 으로 센다. */
 const STACK_LIMIT = 3;
@@ -118,8 +104,12 @@ export default function RoomRow({
   const shown = room.participants.slice(0, STACK_LIMIT);
   const overflow = room.participants.length - shown.length;
   const remaining = remainingLabel(room.expiresAt, room.stage === 'done');
-  /* 시안은 "+1 · 12시간 남음". 넘치는 사람도 남은 시간도 없으면 줄 자체가 빈다 */
-  const meta = [overflow > 0 ? `+${overflow}` : null, remaining].filter(Boolean).join(' · ');
+  /*
+   * 시안은 "+1 · 12시간 남음". 사람이 셋을 넘지 않으면 "+N" 이 없어 줄이 비는데,
+   * 그러면 몇 명인지 알 수가 없다 — 넘치지 않을 때는 전체 인원을 적는다.
+   */
+  const count = overflow > 0 ? `+${overflow}` : `${room.participants.length}명`;
+  const meta = [count, remaining].filter(Boolean).join(' · ');
 
   return (
     <Pressable style={[styles.card, tone.card]} onPress={onPress}>
@@ -127,7 +117,7 @@ export default function RoomRow({
 
       {/* 큰 얼굴은 방마다 고정된 캐릭터다 — 사진은 아래 참가자 줄에만 쓴다 */}
       <View style={[styles.avatar, { backgroundColor: `${theme}24` }]}>
-        <Image source={characterFor(room.id)} style={styles.character} resizeMode="contain" />
+        <Image source={roomCharacterFor(room.id)} style={styles.character} resizeMode="contain" />
       </View>
 
       <View style={styles.content}>
@@ -155,8 +145,13 @@ export default function RoomRow({
                   accessibilityLabel={`${participant.name} 프로필 사진`}
                 />
               ) : (
+                /*
+                 * 사진을 안 올린 사람은 프로필 기본 캐릭터다 — 프로필·채팅방과
+                 * 같은 얼굴이어야 같은 사람으로 보인다. 멤버 행 id 는 방마다
+                 * 달라 사람을 가리키는 profileId 로 고른다.
+                 */
                 <Image
-                  source={characterFor(participant.id)}
+                  source={defaultCharacterFor(participant.profileId ?? participant.id)}
                   style={styles.stackFace}
                   resizeMode="contain"
                 />
@@ -221,13 +216,14 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   /*
-   * 캐릭터마다 가로세로 비가 크게 다르다 (dudu 1.37 ~ ddori 0.78). 시안이
-   * 준 상자(53 x 47)에 contain 으로 담아, 어떤 비율이든 잘리지 않으면서
-   * 둥근 모서리에 닿지 않게 한다.
+   * 캐릭터마다 가로세로 비가 크게 다르다 (dudu 1.39 ~ welling 0.61). 정사각
+   * 상자에 contain 으로 담아, 어떤 비율이든 잘리지 않으면서 긴 쪽이 같은
+   * 크기로 선다. 시안은 53 x 47 인데 여백 넓은 원본에 맞춰 잰 값이라,
+   * 여백을 떼어낸 그림에는 칸(64)의 3/4 인 48 이 맞는다.
    */
   character: {
-    width: s412(53),
-    height: s412(47),
+    width: s412(48),
+    height: s412(48),
   },
   /* 올린 사진은 상자를 꽉 채운다 — 캐릭터처럼 여백을 둘 이유가 없다 */
   photo: {
@@ -302,11 +298,16 @@ const styles = StyleSheet.create({
     width: s412(19),
     height: s412(19),
   },
+  /*
+   * 시안 값(5.6)을 그대로 쓰면 기기에서 5px 도 안 돼 읽을 수가 없다. 시안의
+   * 이 글자는 줄어든 컴포넌트 안에 들어 있어 크기가 같이 줄어든 것으로 보고,
+   * 옆줄(미리보기·시각)과 같은 10 으로 맞춘다.
+   */
   meta: {
     marginLeft: s412(8.96),
     flexShrink: 1,
     fontFamily: fontFamily.semibold,
-    fontSize: fs412(5.6),
+    fontSize: fs412(10),
     lineHeight: fs412(14.81),
   },
   /* 시각은 제목과 같은 윗선에 둔다 */
