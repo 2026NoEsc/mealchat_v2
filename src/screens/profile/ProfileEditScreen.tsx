@@ -21,12 +21,23 @@ import BankSelect from '../../components/ui/BankSelect';
 import { CompleteButton } from '../../components/ui/Button';
 import { removeAvatar, uploadAvatar } from '../../lib/avatar';
 import { fromBirthDate } from '../../lib/birthDate';
-import { saveMyPrivateProfile, updateMyName } from '../../lib/profile';
+import { saveMyGender, saveMyPrivateProfile, updateMyName } from '../../lib/profile';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useMyProfile } from '../../profile/useMyProfile';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
+
+type Gender = 'male' | 'female' | 'none';
+const GENDER_OPTIONS: { value: Gender; label: string }[] = [
+  { value: 'male', label: '남성' },
+  { value: 'female', label: '여성' },
+  { value: 'none', label: '밝히지 않음' },
+];
+
+function savedGender(value: unknown): Gender | null {
+  return value === 'male' || value === 'female' || value === 'none' ? value : null;
+}
 
 /**
  * Figma 프로필/프로필 수정 (309:1086) — 220 x 486
@@ -66,6 +77,9 @@ function ProfileEditForm({
   const [bank, setBank] = useState<string | null>(bundle.privateProfile.bankName);
   const [account, setAccount] = useState(bundle.privateProfile.accountNumber ?? '');
   const [birth, setBirth] = useState(fromBirthDate(bundle.privateProfile.birthDate));
+  const [gender, setGender] = useState<Gender | null>(
+    savedGender(bundle.privateProfile.personalData.gender),
+  );
   const [saving, setSaving] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState(bundle.profile.avatarUrl);
   const [uploading, setUploading] = useState(false);
@@ -128,16 +142,18 @@ function ProfileEditForm({
     setSaving(true);
 
     const nameError = await updateMyName(userId, nickname);
-    const privateError = nameError
+    const privateError = nameError ? null : await saveMyPrivateProfile(userId, { bank, account, birth });
+    const genderError = nameError || privateError || !gender ||
+      gender === savedGender(bundle.privateProfile.personalData.gender)
       ? null
-      : await saveMyPrivateProfile(userId, { bank, account, birth });
-    const passwordError = nameError || privateError || !password
+      : await saveMyGender(userId, gender, bundle.privateProfile.personalData.gender);
+    const passwordError = nameError || privateError || genderError || !password
       ? null
       : await updatePassword(password);
 
     setSaving(false);
 
-    const failure = nameError ?? privateError ?? passwordError;
+    const failure = nameError ?? privateError ?? genderError ?? passwordError;
     if (failure) {
       Alert.alert('저장 실패', failure.message);
       return;
@@ -236,6 +252,22 @@ function ProfileEditForm({
                 unit="일"
                 onChange={(v) => setBirth((p) => ({ ...p, day: v }))}
               />
+            </View>
+
+            <Text style={styles.label}>성별</Text>
+            <View style={styles.genderRow}>
+              {GENDER_OPTIONS.map((option) => (
+                <Pressable
+                  key={option.value}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: gender === option.value }}
+                  onPress={() => setGender(option.value)}
+                  style={[styles.genderOption, gender === option.value && styles.genderSelected]}>
+                  <Text style={[styles.genderText, gender === option.value && styles.genderTextSelected]}>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              ))}
             </View>
           </View>
 
@@ -406,6 +438,30 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.body,
     fontSize: fs(6.5),
     color: colors.textMuted,
+  },
+  genderRow: {
+    flexDirection: 'row',
+    gap: s(4),
+  },
+  genderOption: {
+    flex: 1,
+    minHeight: s(23),
+    borderRadius: s(9),
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  genderSelected: {
+    backgroundColor: colors.primarySoft,
+  },
+  genderText: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(7),
+    color: colors.textMuted,
+  },
+  genderTextSelected: {
+    fontFamily: fontFamily.bold,
+    color: colors.primary,
   },
   cta: {
     marginTop: s(10),

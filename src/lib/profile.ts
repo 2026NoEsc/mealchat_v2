@@ -146,6 +146,38 @@ export async function saveMyPrivateProfile(
   return error;
 }
 
+/** 변경된 성별만 저장한다. 다른 personal_data 키가 동시에 바뀌면 덮어쓰지 않는다. */
+export async function saveMyGender(
+  userId: string,
+  gender: 'male' | 'female' | 'none',
+  expectedGender: unknown,
+): Promise<Error | null> {
+  const { data: row, error: readError } = await supabase
+    .from('profile_private')
+    .select('personal_data, updated_at')
+    .eq('id', userId)
+    .single<{ personal_data: Record<string, unknown> | null; updated_at: string }>();
+  if (readError) return readError;
+  if (!row) return new Error('프로필을 다시 불러와 주세요.');
+
+  const current = row.personal_data ?? {};
+  if (current.gender !== expectedGender) {
+    return new Error('다른 곳에서 성별이 변경됐어요. 다시 열고 저장해 주세요.');
+  }
+  if (current.gender === gender) return null;
+
+  const { data, error } = await supabase
+    .from('profile_private')
+    .update({ personal_data: { ...current, gender } })
+    .eq('id', userId)
+    .eq('updated_at', row.updated_at)
+    .select('id')
+    .maybeSingle<{ id: string }>();
+
+  if (error) return error;
+  return data ? null : new Error('다른 곳에서 프로필이 변경됐어요. 다시 열고 저장해 주세요.');
+}
+
 /** 가입 마지막 단계에서 쓰는 이름. 인자 형태가 같아 그대로 위임한다. */
 export const saveSignupPrivateProfile = saveMyPrivateProfile;
 

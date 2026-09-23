@@ -36,6 +36,7 @@ export default function FriendsScreen() {
   const userId = user?.id ?? null;
 
   const [friends, setFriends] = useState<Friend[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [candidates, setCandidates] = useState<SearchedProfile[]>([]);
@@ -43,7 +44,12 @@ export default function FriendsScreen() {
 
   const load = useCallback(async () => {
     if (!userId) return;
-    const { data } = await fetchMyFriends(userId);
+    const { data, error } = await fetchMyFriends(userId);
+    if (error) {
+      setLoadError(error.message);
+      return;
+    }
+    setLoadError(null);
     setFriends(data ?? []);
   }, [userId]);
 
@@ -115,7 +121,9 @@ export default function FriendsScreen() {
         <Text style={styles.sub}>함께 밥약을 잡을 메이트 {friends.length}명</Text>
 
         <View style={styles.card}>
-          {friends.length === 0 ? (
+          {loadError ? (
+            <Text style={styles.empty}>친구 목록을 불러오지 못했어요: {loadError}</Text>
+          ) : friends.length === 0 ? (
             <Text style={styles.empty}>아직 등록된 메이트가 없어요</Text>
           ) : (
             friends.map((friend, i) => (
@@ -149,14 +157,14 @@ export default function FriendsScreen() {
 
         {inviteOpen ? (
           <View style={styles.card}>
-            <Text style={styles.inviteHint}>닉네임이나 태그로 찾아서 추가하세요</Text>
+            <Text style={styles.inviteHint}>닉네임이나 @로 시작하는 유저 코드로 찾아서 추가하세요</Text>
 
             <View style={styles.searchRow}>
               <TextInput
                 style={styles.searchInput}
                 value={keyword}
                 onChangeText={setKeyword}
-                placeholder="닉네임 또는 태그"
+                placeholder="닉네임 또는 @user-코드"
                 placeholderTextColor={colors.placeholder}
                 autoCapitalize="none"
                 onSubmitEditing={() => void search()}
