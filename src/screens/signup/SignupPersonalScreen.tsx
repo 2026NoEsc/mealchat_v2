@@ -1,7 +1,5 @@
 import { useState } from 'react';
 import {
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,9 +9,11 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import KeyboardSafeScreen from '../../components/KeyboardSafeScreen';
 import SignupHeader from '../../components/SignupHeader';
 import BankSelect from '../../components/ui/BankSelect';
 import { AccentButton } from '../../components/ui/Button';
+import { BIRTH_LENGTH, formatBirthInput, type BirthField } from '../../lib/birthDate';
 import { notify } from '../../lib/confirm';
 import { checkEmailAvailable, type EmailCheck } from '../../lib/email';
 import { isEmailShaped } from '../../lib/emailFormat';
@@ -112,12 +112,10 @@ export default function SignupPersonalScreen() {
   };
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top }]}>
+    <KeyboardSafeScreen style={[styles.screen, { paddingTop: insets.top }]}>
       <SignupHeader title="개인정보 입력" step={1} stepLabel="개인정보 입력" onBack={goBack} />
 
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={styles.flex}>
         <ScrollView
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
@@ -205,18 +203,21 @@ export default function SignupPersonalScreen() {
           <Text style={[styles.label, styles.birthLabel]}>생년월일</Text>
           <View style={styles.birthRow}>
             <BirthBox
+              field="year"
               value={draft.birth.year}
               unit="년"
               placeholder="2003"
               onChange={(year) => updateDraft({ birth: { ...draft.birth, year } })}
             />
             <BirthBox
+              field="month"
               value={draft.birth.month}
               unit="월"
               placeholder="10"
               onChange={(month) => updateDraft({ birth: { ...draft.birth, month } })}
             />
             <BirthBox
+              field="day"
               value={draft.birth.day}
               unit="일"
               placeholder="29"
@@ -231,17 +232,19 @@ export default function SignupPersonalScreen() {
             onPress={continueSignup}
           />
         </ScrollView>
-      </KeyboardAvoidingView>
-    </View>
+      </View>
+    </KeyboardSafeScreen>
   );
 }
 
 function BirthBox({
+  field,
   value,
   unit,
   placeholder,
   onChange,
 }: {
+  field: BirthField;
   value: string;
   unit: string;
   placeholder: string;
@@ -252,10 +255,12 @@ function BirthBox({
       <TextInput
         style={styles.birthValue}
         value={value}
-        onChangeText={onChange}
+        onChangeText={(text) => onChange(formatBirthInput(field, text))}
         placeholder={placeholder}
         placeholderTextColor={colors.placeholder}
         keyboardType="number-pad"
+        /* 숫자판을 띄워도 붙여넣기로는 글자가 들어온다 - 길이는 여기서도 막는다 */
+        maxLength={BIRTH_LENGTH[field]}
       />
       <Text style={styles.birthUnit}>{unit}</Text>
     </View>

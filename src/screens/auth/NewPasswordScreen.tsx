@@ -1,8 +1,6 @@
 import { useState } from 'react';
 import {
   Alert,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,6 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import KeyboardSafeScreen from '../../components/KeyboardSafeScreen';
 import { useAuth } from '../../auth/AuthProvider';
 import ScreenHeader from '../../components/ScreenHeader';
 import { AccentButton } from '../../components/ui/Button';
@@ -63,12 +62,10 @@ export default function NewPasswordScreen() {
   };
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top }]}>
+    <KeyboardSafeScreen style={[styles.screen, { paddingTop: insets.top }]}>
       <ScreenHeader title="새 비밀번호 설정" />
 
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={styles.flex}>
         <ScrollView
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
@@ -113,8 +110,8 @@ export default function NewPasswordScreen() {
             <Text style={styles.helper}>나중에 하기 (로그인 화면으로)</Text>
           </Pressable>
         </ScrollView>
-      </KeyboardAvoidingView>
-    </View>
+      </View>
+    </KeyboardSafeScreen>
   );
 }
 

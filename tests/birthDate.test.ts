@@ -1,4 +1,4 @@
-import { toBirthDate } from '../src/lib/birthDate';
+import { formatBirthInput, toBirthDate } from '../src/lib/birthDate';
 
 describe('toBirthDate', () => {
   it('세 칸 입력을 date 컬럼용 문자열로 바꾼다', () => {
@@ -39,5 +39,24 @@ describe('toBirthDate', () => {
 
   it('윤년 2월 29일은 통과시킨다', () => {
     expect(toBirthDate({ year: '2000', month: '2', day: '29' })).toBe('2000-02-29');
+  });
+});
+
+describe('formatBirthInput', () => {
+  it('칸마다 정해진 자릿수까지만 받는다', () => {
+    expect(formatBirthInput('year', '20031')).toBe('2003');
+    expect(formatBirthInput('month', '105')).toBe('10');
+    expect(formatBirthInput('day', '295')).toBe('29');
+  });
+
+  it('숫자가 아닌 것은 지운다 — 붙여넣기나 외장 키보드로 들어온다', () => {
+    expect(formatBirthInput('year', '2003년')).toBe('2003');
+    expect(formatBirthInput('month', '1 0')).toBe('10');
+    expect(formatBirthInput('day', 'abc')).toBe('');
+  });
+
+  it('아직 덜 적은 값은 그대로 둔다 — 적는 도중을 막지 않는다', () => {
+    expect(formatBirthInput('year', '20')).toBe('20');
+    expect(formatBirthInput('month', '')).toBe('');
   });
 });

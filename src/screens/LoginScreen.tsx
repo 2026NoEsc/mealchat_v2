@@ -1,8 +1,6 @@
 import { useState } from 'react';
 import {
   Image,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,6 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import KeyboardSafeScreen from '../components/KeyboardSafeScreen';
 import { useAuth } from '../auth/AuthProvider';
 import ScreenHeader from '../components/ScreenHeader';
 import { notify } from '../lib/confirm';
@@ -66,12 +65,10 @@ export default function LoginScreen() {
   };
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top }]}>
+    <KeyboardSafeScreen style={[styles.screen, { paddingTop: insets.top }]}>
       <ScreenHeader title="로그인" onBack={canGoBack ? goBack : undefined} />
 
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={styles.flex}>
         <ScrollView
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
@@ -122,8 +119,8 @@ export default function LoginScreen() {
             <Text style={styles.helper}>아이디 비밀번호 찾기</Text>
           </Pressable>
         </ScrollView>
-      </KeyboardAvoidingView>
-    </View>
+      </View>
+    </KeyboardSafeScreen>
   );
 }
 

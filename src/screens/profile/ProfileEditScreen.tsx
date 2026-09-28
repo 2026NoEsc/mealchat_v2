@@ -2,8 +2,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { useState } from 'react';
 import {
   Alert,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,6 +10,7 @@ import {
   View,
 } from 'react-native';
 
+import KeyboardSafeScreen from '../../components/KeyboardSafeScreen';
 import { useTopInset } from '../../theme/insets';
 
 import { useAuth } from '../../auth/AuthProvider';
@@ -20,7 +19,12 @@ import Avatar from '../../components/Avatar';
 import BankSelect from '../../components/ui/BankSelect';
 import { CompleteButton } from '../../components/ui/Button';
 import { removeAvatar, uploadAvatar } from '../../lib/avatar';
-import { fromBirthDate } from '../../lib/birthDate';
+import {
+  BIRTH_LENGTH,
+  formatBirthInput,
+  fromBirthDate,
+  type BirthField,
+} from '../../lib/birthDate';
 import { saveMyPrivateProfile, updateMyName } from '../../lib/profile';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useMyProfile } from '../../profile/useMyProfile';
@@ -147,16 +151,14 @@ function ProfileEditForm({
   };
 
   return (
-    <View style={styles.screen}>
+    <KeyboardSafeScreen style={styles.screen}>
       {/* 상태바 자리. 배경을 칠하지 않아 화면 배경이 그대로 비친다 —
           헤더와 같은 색으로 칠하면 둘이 한 덩어리로 보여서 헤더가
           어디서 시작하는지 알 수 없다 */}
       <View style={{ height: topInset }} />
       <AppHeader />
 
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={styles.flex}>
         <ScrollView
           contentContainerStyle={styles.body}
           keyboardShouldPersistTaps="handled"
@@ -222,16 +224,19 @@ function ProfileEditForm({
             <Text style={styles.label}>생년월일</Text>
             <View style={styles.birthRow}>
               <BirthBox
+                field="year"
                 value={birth.year}
                 unit="년"
                 onChange={(v) => setBirth((p) => ({ ...p, year: v }))}
               />
               <BirthBox
+                field="month"
                 value={birth.month}
                 unit="월"
                 onChange={(v) => setBirth((p) => ({ ...p, month: v }))}
               />
               <BirthBox
+                field="day"
                 value={birth.day}
                 unit="일"
                 onChange={(v) => setBirth((p) => ({ ...p, day: v }))}
@@ -246,8 +251,8 @@ function ProfileEditForm({
             onPress={() => void save()}
           />
         </ScrollView>
-      </KeyboardAvoidingView>
-    </View>
+      </View>
+    </KeyboardSafeScreen>
   );
 }
 
@@ -285,10 +290,12 @@ function Field({
 }
 
 function BirthBox({
+  field,
   value,
   unit,
   onChange,
 }: {
+  field: BirthField;
   value: string;
   unit: string;
   onChange: (v: string) => void;
@@ -298,8 +305,10 @@ function BirthBox({
       <TextInput
         style={styles.birthValue}
         value={value}
-        onChangeText={onChange}
+        onChangeText={(text) => onChange(formatBirthInput(field, text))}
         keyboardType="number-pad"
+        /* 숫자판을 띄워도 붙여넣기로는 글자가 들어온다 - 길이는 여기서도 막는다 */
+        maxLength={BIRTH_LENGTH[field]}
       />
       <Text style={styles.birthUnit}>{unit}</Text>
     </View>
