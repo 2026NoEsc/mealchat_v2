@@ -1,8 +1,13 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ChevronRight, CheckSquare, Square } from 'lucide-react-native';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '../../auth/AuthProvider';
+import {
+  clearPendingSignupProfile,
+  persistPendingSignupProfile,
+} from '../../auth/pendingSignupProfile';
 import { useSignupDraft } from '../../auth/SignupDraftProvider';
 import { notify } from '../../lib/confirm';
 import { authErrorMessage } from '../../lib/password';
@@ -67,15 +72,31 @@ export default function SignupTermsScreen() {
        * 이메일 확인이 켜져 있으면 이 시점에 세션이 없으므로 저장할 수 없다.
        * 사용자 메타데이터로 넘기는 방법도 있지만 그건 JWT 에 실려 나가므로 쓰지 않는다.
        */
+      const privateProfile = {
+        bank: draft.bank,
+        account: draft.account,
+        birth: draft.birth,
+        tastes: draft.tastes,
+      };
+
       let privateSaveFailed = false;
-      if (!result.error && !result.confirmationRequired && result.userId) {
-        const saveError = await saveSignupPrivateProfile(result.userId, {
-          bank: draft.bank,
-          account: draft.account,
-          birth: draft.birth,
-          tastes: draft.tastes,
-        });
-        privateSaveFailed = Boolean(saveError);
+      if (!result.error) {
+        if (!result.confirmationRequired && result.userId) {
+          const saveError = await saveSignupPrivateProfile(result.userId, privateProfile);
+          privateSaveFailed = Boolean(saveError);
+          /* 들어갔으면 기기에 남은 것을 지운다 - 계좌번호를 놔둘 이유가 없다 */
+          if (!saveError) await clearPendingSignupProfile(AsyncStorage).catch(() => undefined);
+        } else {
+          /*
+           * 세션이 아직 없어 지금은 쓸 수 없다. 버리면 메일을 확인하고 처음
+           * 로그인했을 때 적어 넣은 값이 하나도 없다 - 기기에 맡겨 뒀다가
+           * 로그인하는 순간 AuthProvider 가 옮겨 담는다.
+           */
+          await persistPendingSignupProfile(AsyncStorage, {
+            email: draft.email,
+            ...privateProfile,
+          }).catch(() => undefined);
+        }
       }
 
       if (result.error) {
@@ -88,7 +109,7 @@ export default function SignupTermsScreen() {
       if (result.confirmationRequired) {
         notify(
           '이메일 확인 필요',
-          '이메일의 확인 링크를 연 뒤 로그인해 주세요.\n계좌와 생년월일은 로그인 후 프로필에서 입력할 수 있어요.',
+          '이메일의 확인 링크를 연 뒤 로그인해 주세요.\n적어 주신 계좌·생년월일·취향은 로그인하면 그대로 들어가요.',
         );
         resetTo('Login');
         return;

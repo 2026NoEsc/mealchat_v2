@@ -4,6 +4,7 @@ import * as Linking from 'expo-linking';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Alert } from 'react-native';
 
+import { saveMyPrivateProfile } from '../lib/profile';
 import { supabase } from '../lib/supabase';
 import {
   authRedirectErrorMessage,
@@ -15,6 +16,11 @@ import {
   persistPasswordResetPending,
   readPasswordResetPending,
 } from './passwordResetState';
+import {
+  clearPendingSignupProfile,
+  isPendingProfileFor,
+  readPendingSignupProfile,
+} from './pendingSignupProfile';
 
 type SignUpResult = {
   confirmationRequired: boolean;
@@ -172,6 +178,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       linkSubscription.remove();
     };
   }, []);
+
+  /*
+   * 가입 화면에서 받아 둔 계좌·생년월일·취향을 로그인하는 순간 옮겨 담는다.
+   *
+   * 이메일 확인을 켜 두면 가입 직후에는 세션이 없어 그때는 쓸 수 없다. 예전에는
+   * 그대로 버려서, 메일을 확인하고 처음 로그인하면 적어 넣은 값이 하나도 없었다.
+   *
+   * 맡겨 둔 값의 주인(이메일)이 지금 로그인한 사람과 같을 때만 옮긴다 - 한 기기에서
+   * 다른 계정으로 로그인했는데 남의 계좌가 들어가면 안 된다.
+   */
+  useEffect(() => {
+    const userId = session?.user?.id;
+    const email = session?.user?.email;
+    if (!userId) return;
+
+    let active = true;
+
+    void (async () => {
+      const pending = await readPendingSignupProfile(AsyncStorage).catch(() => null);
+      if (!active || !pending || !isPendingProfileFor(pending, email)) return;
+
+      const error = await saveMyPrivateProfile(userId, {
+        bank: pending.bank,
+        account: pending.account,
+        birth: pending.birth,
+        tastes: pending.tastes,
+      });
+
+      /* 못 넣었으면 남겨 둔다 - 지우면 값이 영영 사라진다. 다음 로그인에 다시 해 본다 */
+      if (!error) await clearPendingSignupProfile(AsyncStorage).catch(() => undefined);
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [session?.user?.id, session?.user?.email]);
 
   const signInWithEmail = useCallback(async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({
