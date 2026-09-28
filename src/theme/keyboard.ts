@@ -1,5 +1,31 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
-import { Keyboard, Platform, type View } from 'react-native';
+import { Dimensions, Keyboard, Platform, StatusBar, type View } from 'react-native';
+
+/** 화면(기기 전체) 높이. 키보드가 떠도 변하지 않는 기준점이다. */
+const SCREEN_HEIGHT = Dimensions.get('screen').height;
+
+/**
+ * 이 화면의 아랫변이 '화면' 좌표로 어디인지.
+ *
+ * measureInWindow 는 '창' 기준 좌표를 주는데 키보드의 screenY 는 '화면' 기준이라,
+ * 그대로 빼면 어긋난다. 안드로이드의 measureInWindow 는 상태바 높이를 빼고 주므로
+ * (실측 SM-G991N: 화면 전체를 덮는 루트인데 아랫변이 773.33 = 800 - 26.67),
+ * 창 좌표를 그대로 믿으면 딱 상태바만큼 덜 올려 입력칸 아래가 잘린다.
+ *
+ * 그래서 아랫변을 창이 아니라 화면 기준으로 다시 세운다. 루트는 제 창을 가득
+ * 채우므로, 윗변은 화면 맨 위(전체를 덮는 창) 아니면 상태바 아래(그만큼 비켜난 창)
+ * 둘 중 하나다. 두 경우 모두 '상태바 + 루트 높이' 를 화면 높이로 자르면 맞는다.
+ *
+ *   루트 800   (화면 전체)        -> min(800, 26.67+800)    = 800
+ *   루트 773.33(상태바만 비켜남)  -> min(800, 26.67+773.33) = 800
+ *   루트 725.33(위아래 다 비켜남) -> min(800, 26.67+725.33) = 752
+ *
+ * @param rootHeight 화면 루트의 높이. 루트가 아닌 일부 View 를 넘기면 맞지 않는다.
+ */
+function bottomOnScreen(box: { bottom: number; height: number }): number {
+  if (Platform.OS !== 'android') return box.bottom;
+  return Math.min(SCREEN_HEIGHT, (StatusBar.currentHeight ?? 0) + box.height);
+}
 
 /**
  * 키보드가 이 화면을 실제로 가리는 높이.
@@ -22,13 +48,13 @@ export function useKeyboardOverlap(ref: RefObject<View | null>): {
 } {
   /* 키보드 윗변의 화면 좌표. 닫혀 있으면 null */
   const [keyboardTop, setKeyboardTop] = useState<number | null>(null);
-  /* 이 화면 아랫변의 화면 좌표 */
-  const [bottom, setBottom] = useState<number | null>(null);
+  /* 이 화면의 아랫변과 높이 (둘 다 창 기준) */
+  const [box, setBox] = useState<{ bottom: number; height: number } | null>(null);
   const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const remeasure = useCallback(() => {
     ref.current?.measureInWindow((_x, y, _width, height) => {
-      if (Number.isFinite(y) && Number.isFinite(height)) setBottom(y + height);
+      if (Number.isFinite(y) && Number.isFinite(height)) setBox({ bottom: y + height, height });
     });
   }, [ref]);
 
@@ -56,9 +82,10 @@ export function useKeyboardOverlap(ref: RefObject<View | null>): {
     };
   }, [remeasure]);
 
-  if (keyboardTop === null || bottom === null) return { overlap: 0, remeasure };
+  if (keyboardTop === null || box === null) return { overlap: 0, remeasure };
 
-  const covered = bottom - keyboardTop;
+  /* 잰 값은 창 기준이라 화면 기준으로 옮긴 뒤 키보드 윗변과 견준다 */
+  const covered = bottomOnScreen(box) - keyboardTop;
   /* 1 미만은 반올림 오차로 본다 */
   return { overlap: covered > 1 ? covered : 0, remeasure };
 }

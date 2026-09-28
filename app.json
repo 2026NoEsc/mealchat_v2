@@ -41,7 +41,7 @@
     },
     "android": {
       "package": "com.mealchat.app",
-      "versionCode": 1,
+      "versionCode": 11,
       "permissions": [
         "android.permission.READ_CALENDAR",
         "android.permission.WRITE_CALENDAR",
