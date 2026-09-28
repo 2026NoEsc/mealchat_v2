@@ -2,6 +2,7 @@ import {
   dayKey,
   dayLabel,
   daysUntil,
+  meetingDateText,
   meetingLine,
   participantMeta,
   remainingLabel,
@@ -187,5 +188,21 @@ describe('meetingLine', () => {
   it('장소가 없으면 날짜만', () => {
     expect(meetingLine('2026-08-13', null)).toBe('2026년 8월 13일');
     expect(meetingLine('2026-08-13', '  ')).toBe('2026년 8월 13일');
+  });
+});
+
+describe('meetingDateText', () => {
+  const now = new Date('2026-09-23T12:00:00+09:00');
+
+  it('올해 날짜는 해를 뺀다 — 좁은 띠에 넣을 값이다', () => {
+    expect(meetingDateText('2026-09-28', now)).toBe('9월 28일');
+  });
+
+  it('해가 다르면 해를 붙인다', () => {
+    expect(meetingDateText('2027-01-02', now)).toBe('2027년 1월 2일');
+  });
+
+  it('날짜 꼴이 아니면 온 값을 그대로 돌려준다', () => {
+    expect(meetingDateText('미정', now)).toBe('미정');
   });
 });

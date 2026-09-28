@@ -26,7 +26,7 @@ import { confirmAction, notify } from '../../lib/confirm';
 import { roomCharacterFor } from '../../lib/roomCharacter';
 import { roomNoticeOf, type RoomNotice } from '../../lib/roomNotice';
 import { roomColor } from '../../lib/roomTheme';
-import { dayKey, dayLabel, roomTimerLabel, timeLabel } from '../../lib/roomFormat';
+import { dayKey, dayLabel, meetingDateText, roomTimerLabel, timeLabel } from '../../lib/roomFormat';
 import {
   advanceRoomStage,
   sendRoomMessage,
@@ -325,6 +325,16 @@ export default function ChatRoomScreen() {
     notify('아직 준비 중이에요', '캘린더 저장은 곧 붙일게요.');
   };
 
+  /*
+   * 방 위에 걸어 둘 확정 내용 — "9월 28일 · 리코리코" 처럼 때와 곳을 나란히 적는다.
+   *
+   * 시각(confirmed_slot)은 시간 투표를 확정해야 채워지는데, 지금 앱에는 그 단계가
+   * 없어 늘 비어 있다. 그래서 있으면 시각을, 없으면 방을 만들 때 정한 약속 날짜를
+   * 쓴다 - 날짜는 어느 방에나 있다.
+   */
+  const when = room?.confirmedSlot?.trim() || (room ? meetingDateText(room.meetingDate) : '');
+  const confirmedLine = [when, room?.locationName?.trim()].filter(Boolean).join(' · ');
+
   /* 보낸 사람 id 로 프로필 사진을 찾을 수 있게 참가자 목록을 표로 바꿔 둔다 */
   const avatarBySender = useMemo(() => {
     const map = new Map<string, string | null>();
@@ -439,9 +449,19 @@ export default function ChatRoomScreen() {
         </Pressable>
       </View>
 
-      {room?.isConfirmed && room.confirmedSlot ? (
+      {/*
+        * 확정된 것을 방 맨 위에 공지처럼 붙여 둔다 — 대화가 길어지면 확정 안내
+        * 메시지가 위로 밀려 올라가 다시 찾기 어렵다.
+        *
+        * 일정과 식당은 저장되는 곳이 다르다 (confirmed_slot / confirmed_menu).
+        * 예전에는 is_confirmed 와 일정만 보고 그려서, 식당만 정해진 방에서는
+        * 아무것도 뜨지 않았고 둘 다 정해져도 시간만 보였다.
+        */}
+      {confirmedLine ? (
         <View style={styles.banner}>
-          <Text style={styles.bannerText}>{room.confirmedSlot}</Text>
+          <Text style={styles.bannerText} numberOfLines={1}>
+            {confirmedLine}
+          </Text>
         </View>
       ) : null}
 
@@ -844,6 +864,8 @@ const styles = StyleSheet.create({
     marginTop: s(11),
     marginHorizontal: s(9),
     height: s(18),
+    /* 식당 이름이 길어도 글자가 테두리에 닿지 않게 */
+    paddingHorizontal: s(10),
     borderRadius: s(9),
     borderWidth: s(0.8),
     borderColor: colors.primary,

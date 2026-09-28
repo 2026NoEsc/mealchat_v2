@@ -159,6 +159,21 @@ export function upcomingBadge(meetingDate: string, now: Date = new Date()): Upco
   return days === 0 ? { label: '오늘', tone: 'today' } : { label: `D-${days}`, tone: 'countdown' };
 }
 
+/**
+ * `8월 13일` — 채팅방 맨 위 띠처럼 좁은 자리에 쓸 짧은 날짜.
+ *
+ * 해가 다르면 `2027년 1월 2일` 처럼 해를 붙인다. 방은 길어야 며칠 살기 때문에
+ * 올해 날짜에 해를 적으면 자리만 먹는다.
+ */
+export function meetingDateText(meetingDate: string, now: Date = new Date()): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(meetingDate.trim());
+  if (!match) return meetingDate.trim();
+
+  const [, year, month, day] = match;
+  const short = `${Number(month)}월 ${Number(day)}일`;
+  return Number(year) === now.getFullYear() ? short : `${year}년 ${short}`;
+}
+
 /** `2026년 8월 13일 · 버거킹 하단점` — 장소가 없으면 날짜만 */
 export function meetingLine(meetingDate: string, locationName: string | null): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(meetingDate.trim());
