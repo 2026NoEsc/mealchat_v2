@@ -147,6 +147,18 @@ export default function TasteGameScreen() {
     });
   };
 
+  /*
+   * 누르는 것도 미는 것과 같은 답이다.
+   *
+   * 시안의 동그라미는 눌러 보게 생겼고, 한 손으로 들고 엄지로만 쓰거나 밀기가
+   * 잘 안 잡히는 경우가 있다. 누르면 미는 것과 똑같이 캐릭터가 그쪽으로 가고
+   * 표정이 바뀐 뒤 다음 질문으로 넘어간다 (commit 하나를 같이 쓴다).
+   */
+  const tap = (liked: boolean) => {
+    if (committing.current) return;
+    commit(liked);
+  };
+
   const pan = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => !committing.current,
@@ -236,17 +248,29 @@ export default function TasteGameScreen() {
 
       <View style={styles.actions}>
         {/*
-         * 동그라미는 이제 누르는 버튼이 아니라 방향 표시다. 답은 가운데
-         * 캐릭터를 그쪽으로 밀어서 한다.
+         * 동그라미는 방향 표시이면서 버튼이다. 가운데 캐릭터를 그쪽으로 밀어도 되고
+         * 동그라미를 눌러도 같은 답이 된다.
          */}
-        <Animated.View
-          style={[styles.circle, styles.circleLeft, { transform: [{ scale: dislikeScale }] }]}>
-          <X size={s(15)} color={colors.textPrimary} strokeWidth={3} />
-        </Animated.View>
-        <Animated.View
-          style={[styles.circle, styles.circleRight, { transform: [{ scale: likeScale }] }]}>
-          <Heart size={s(14)} color={colors.danger} fill={colors.danger} strokeWidth={2} />
-        </Animated.View>
+        <Pressable
+          style={[styles.circleSlot, styles.circleLeft]}
+          hitSlop={s(8)}
+          onPress={() => tap(false)}
+          accessibilityRole="button"
+          accessibilityLabel={`${question.label} 별로예요`}>
+          <Animated.View style={[styles.circle, { transform: [{ scale: dislikeScale }] }]}>
+            <X size={s(15)} color={colors.textPrimary} strokeWidth={3} />
+          </Animated.View>
+        </Pressable>
+        <Pressable
+          style={[styles.circleSlot, styles.circleRight]}
+          hitSlop={s(8)}
+          onPress={() => tap(true)}
+          accessibilityRole="button"
+          accessibilityLabel={`${question.label} 좋아요`}>
+          <Animated.View style={[styles.circle, { transform: [{ scale: likeScale }] }]}>
+            <Heart size={s(14)} color={colors.danger} fill={colors.danger} strokeWidth={2} />
+          </Animated.View>
+        </Pressable>
 
         <Text style={[styles.actionLabel, styles.actionLabelLeft]}>별로예요</Text>
         <Text style={[styles.actionLabel, styles.actionLabelRight]}>좋아요</Text>
@@ -257,7 +281,7 @@ export default function TasteGameScreen() {
           style={[styles.thumb, { transform: [{ translateX }, { rotate }] }]}
           accessible
           accessibilityRole="adjustable"
-          accessibilityLabel={`${question.label}, 좋아하세요? 오른쪽으로 밀면 좋아요, 왼쪽으로 밀면 별로예요`}
+          accessibilityLabel={`${question.label}, 좋아하세요? 오른쪽으로 밀거나 하트를 누르면 좋아요, 왼쪽으로 밀거나 X 를 누르면 별로예요`}
           accessibilityActions={[
             { name: 'increment', label: '좋아요' },
             { name: 'decrement', label: '별로예요' },
@@ -383,10 +407,13 @@ const styles = StyleSheet.create({
     width: s(46),
     height: s(56),
   },
-  circle: {
+  /* 누르는 자리. 동그라미가 커졌다 작아져도 누를 범위는 그대로여야 한다 */
+  circleSlot: {
     position: 'absolute',
     // y378 — 썸 상단(y365.5) 에서 12.5
     top: s(12.5),
+  },
+  circle: {
     width: s(30),
     height: s(30),
     borderRadius: s(30),
