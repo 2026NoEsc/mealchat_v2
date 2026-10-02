@@ -1,10 +1,10 @@
 import { CalendarDays, Send, Smile, Users, Utensils, Wallet } from 'lucide-react-native';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  FlatList,
   Image,
   ImageSourcePropType,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -48,12 +48,13 @@ const TIME_GRAY = '#B4B2A8';
 const DIVIDER = '#D3D1C6';
 const SYS_TEXT = '#696969';
 
-type Message =
+type Message = { key: string } & (
   | { kind: 'date'; text: string }
   | { kind: 'sys'; text: string }
   | ({ kind: 'msg'; mine: boolean; text: string } & Bubble)
   | ({ kind: 'sticker'; mine?: boolean; sticker: ImageSourcePropType } & Bubble)
-  | { kind: 'notice'; notice: RoomNotice };
+  | { kind: 'notice'; notice: RoomNotice }
+);
 
 /** 상대 말풍선 옆 아바타를 그리는 데 필요한 것. 내 말풍선에는 아바타가 없다. */
 type Sender = { name?: string; senderId?: string | null; avatarUrl?: string | null };
@@ -94,7 +95,7 @@ function SenderAvatar({ name, senderId, avatarUrl, grouped }: Sender & { grouped
 }
 
 /** 서버 메시지를 화면용 배열로 바꾼다. 날짜가 바뀌는 지점에 구분선을 넣는다. */
-function toDisplayMessages(
+export function toDisplayMessages(
   rows: RoomMessage[],
   myId: string | null,
   /* 보낸 사람 id → 프로필 사진. 방 참가자 목록에서 온다 */
@@ -106,14 +107,18 @@ function toDisplayMessages(
   for (const row of rows) {
     const day = dayKey(row.createdAt);
     if (day && day !== lastDay) {
-      out.push({ kind: 'date', text: dayLabel(row.createdAt) });
+      out.push({ key: `date:${day}`, kind: 'date', text: dayLabel(row.createdAt) });
       lastDay = day;
     }
 
     if (row.kind === 'system') {
       /* 카드로 세울 수 있는 것만 세운다. 알아보지 못한 안내는 회색 알약이다. */
       const notice = roomNoticeOf(row.text);
-      out.push(notice ? { kind: 'notice', notice } : { kind: 'sys', text: row.text });
+      out.push(
+        notice
+          ? { key: row.id, kind: 'notice', notice }
+          : { key: row.id, kind: 'sys', text: row.text },
+      );
       continue;
     }
 
@@ -132,15 +137,15 @@ function toDisplayMessages(
     if (emoticon) {
       const sticker = findSticker(emoticon);
       if (sticker) {
-        out.push({ kind: 'sticker', mine, sticker: sticker.source, time, showTime: true, ...sender });
+        out.push({ key: row.id, kind: 'sticker', mine, sticker: sticker.source, time, showTime: true, ...sender });
       } else {
         // 앱에 없는 이모티콘 — 토큰을 그대로 보여주느니 사람이 읽을 말로 바꾼다
-        out.push({ kind: 'msg', mine, text: '(이모티콘)', time, showTime: true, ...sender });
+        out.push({ key: row.id, kind: 'msg', mine, text: '(이모티콘)', time, showTime: true, ...sender });
       }
       continue;
     }
 
-    out.push({ kind: 'msg', mine, text: row.text, time, showTime: true, ...sender });
+    out.push({ key: row.id, kind: 'msg', mine, text: row.text, time, showTime: true, ...sender });
   }
 
   /*
@@ -202,6 +207,13 @@ export default function ChatRoomScreen() {
   const { messages: remoteMessages, status, reload } = useRoomMessages(roomId);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  // state 반영 전 같은 프레임의 연속 제출도 막는다.
+  const sendingRef = useRef(false);
+  const draftRevision = useRef(0);
+  const changeDraft = useCallback((text: string) => {
+    draftRevision.current += 1;
+    setDraft(text);
+  }, []);
   // 홈의 "미완료 정산 보기" 처럼 특정 시트를 펼친 채로 들어오는 경로가 있다
   const stage = room?.stage ?? 'scheduling';
 
@@ -272,15 +284,22 @@ export default function ChatRoomScreen() {
   const [emoticonOpen, setEmoticonOpen] = useState(false);
   /* 입력창의 ＋ 로 여닫는다. 기본은 펴진 상태 — 방에 들어오면 뭘 할 수 있는지 보여야 한다 */
   const [actionsOpen, setActionsOpen] = useState(true);
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<FlatList<Message>>(null);
+  const nearLatest = useRef(true);
+  const userScrolling = useRef(false);
+  const followLatest = useCallback(() => {
+    if (nearLatest.current && !userScrolling.current) {
+      scrollRef.current?.scrollToOffset({ offset: 0, animated: false });
+    }
+  }, []);
 
   /*
-   * 키보드가 열리면 목록 칸이 그만큼 줄어든다. 그대로 두면 보고 있던 마지막
-   * 메시지가 입력바 뒤로 밀려 사라진다.
+   * 키보드가 열리거나 닫힐 때 최신 대화를 보던 상태를 유지한다.
+   * 목록 자체의 레이아웃 변경은 아래 onLayout에서도 처리한다.
    */
   useEffect(() => {
-    if (keyboard > 0) scrollRef.current?.scrollToEnd({ animated: true });
-  }, [keyboard]);
+    followLatest();
+  }, [keyboard, followLatest]);
 
   /*
    * 식당 결정을 마치고 약속을 확정한다. 방장만 누를 수 있고, 되돌릴 수 없어서
@@ -313,7 +332,7 @@ export default function ChatRoomScreen() {
    * 알림 카드의 배지. 방 안에서 할 수 있는 일로 이어 준다.
    * 일정 카드의 "캘린더에 저장" 은 아직 붙일 곳이 없어 안내만 남긴다.
    */
-  const onNoticeAction = (kind: RoomNotice['kind']) => {
+  const onNoticeAction = useCallback((kind: RoomNotice['kind']) => {
     if (kind === 'place') {
       setSheet('menu');
       return;
@@ -323,7 +342,7 @@ export default function ChatRoomScreen() {
       return;
     }
     notify('아직 준비 중이에요', '캘린더 저장은 곧 붙일게요.');
-  };
+  }, []);
 
   /*
    * 방 위에 걸어 둘 확정 내용 — "9월 28일 · 리코리코" 처럼 때와 곳을 나란히 적는다.
@@ -346,13 +365,20 @@ export default function ChatRoomScreen() {
 
   /* 서버가 준 목록에 날짜 구분선을 끼워 화면용 배열로 만든다 */
   const messages = useMemo(
-    () => toDisplayMessages(remoteMessages, user?.id ?? null, avatarBySender),
+    // inverted 목록은 최신 줄부터 받는다. 긴 대화도 첫 렌더부터 끝부분을 보여 준다.
+    () => toDisplayMessages(remoteMessages, user?.id ?? null, avatarBySender).reverse(),
     [remoteMessages, user?.id, avatarBySender],
+  );
+  const renderMessage = useCallback(
+    ({ item }: { item: Message }) => <Row message={item} onAction={onNoticeAction} />,
+    [onNoticeAction],
   );
 
   const send = async () => {
     const text = draft.trim();
-    if (!text || !roomId) return;
+    if (!text || !roomId || sendingRef.current) return;
+    sendingRef.current = true;
+    const submittedRevision = draftRevision.current;
 
     try {
       setSending(true);
@@ -363,17 +389,21 @@ export default function ChatRoomScreen() {
         return;
       }
 
-      setDraft('');
+      // 전송을 기다리는 동안 사용자가 쓴 다음 메시지는 보존한다.
+      if (draftRevision.current === submittedRevision) setDraft('');
       reload();
     } catch {
       notify('전송 실패', '메시지를 보내지 못했어요. 잠시 후 다시 시도해 주세요.');
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   };
 
   const sendSticker = async (stickerId: string) => {
-    if (!roomId) return;
+    if (!roomId || sendingRef.current) return;
+    sendingRef.current = true;
+    setSending(true);
     try {
       const error = await sendRoomSticker(roomId, stickerId);
       if (error) {
@@ -383,6 +413,9 @@ export default function ChatRoomScreen() {
       reload();
     } catch {
       notify('전송 실패', '이모티콘을 보내지 못했어요. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
     }
   };
 
@@ -465,27 +498,58 @@ export default function ChatRoomScreen() {
         </View>
       ) : null}
 
-      <ScrollView
+      <FlatList
         ref={scrollRef}
+        style={styles.messageList}
+        data={messages}
+        renderItem={renderMessage}
+        keyExtractor={messageKey}
+        inverted
+        initialNumToRender={20}
+        maxToRenderPerBatch={10}
+        windowSize={7}
+        ItemSeparatorComponent={MessageSeparator}
+        maintainVisibleContentPosition={visibleContentPosition}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
-        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}>
-        {status === 'loading' ? (
-          <Text style={styles.listNotice}>메시지를 불러오는 중...</Text>
-        ) : status === 'error' ? (
-          <View style={styles.retryBox}>
-            <Text style={styles.listNotice}>메시지를 불러오지 못했어요</Text>
-            <Pressable style={styles.retryButton} onPress={reload}>
-              <Text style={styles.retryText}>다시 시도</Text>
-            </Pressable>
-          </View>
-        ) : messages.length === 0 ? (
-          <Text style={styles.listNotice}>아직 대화가 없어요. 먼저 인사해 보세요!</Text>
-        ) : null}
-        {messages.map((message, i) => (
-          <Row key={i} message={message} onAction={onNoticeAction} />
-        ))}
-      </ScrollView>
+        keyboardShouldPersistTaps="handled"
+        scrollEventThrottle={16}
+        onScrollBeginDrag={(event) => {
+          userScrolling.current = true;
+          nearLatest.current = event.nativeEvent.contentOffset.y <= s(40);
+        }}
+        onScroll={(event) => {
+          // Native anchor/layout adjustments are not a request to read history.
+          if (userScrolling.current) {
+            nearLatest.current = event.nativeEvent.contentOffset.y <= s(40);
+          }
+        }}
+        onScrollEndDrag={(event) => {
+          nearLatest.current = event.nativeEvent.contentOffset.y <= s(40);
+          userScrolling.current = false;
+        }}
+        onMomentumScrollBegin={() => { userScrolling.current = true; }}
+        onMomentumScrollEnd={(event) => {
+          nearLatest.current = event.nativeEvent.contentOffset.y <= s(40);
+          userScrolling.current = false;
+        }}
+        onLayout={followLatest}
+        onContentSizeChange={followLatest}
+        ListFooterComponent={
+          status === 'loading' ? (
+            <Text style={styles.listNotice}>메시지를 불러오는 중...</Text>
+          ) : status === 'error' ? (
+            <View style={styles.retryBox}>
+              <Text style={styles.listNotice}>메시지를 불러오지 못했어요</Text>
+              <Pressable style={styles.retryButton} onPress={reload}>
+                <Text style={styles.retryText}>다시 시도</Text>
+              </Pressable>
+            </View>
+          ) : messages.length === 0 ? (
+            <Text style={styles.listNotice}>아직 대화가 없어요. 먼저 인사해 보세요!</Text>
+          ) : null
+        }
+      />
 
       {/*
         약속 단계에 따라 열 수 있는 것이 다르다. 정산까지 간 방에서 식당을 다시
@@ -557,13 +621,13 @@ export default function ChatRoomScreen() {
           <TextInput
             style={styles.inputText}
             value={draft}
-            onChangeText={setDraft}
+            onChangeText={changeDraft}
             placeholder="메시지를 입력해 주세요..."
             placeholderTextColor={TIME_GRAY}
             onSubmitEditing={send}
             returnKeyType="send"
           />
-          <Pressable onPress={() => setEmoticonOpen((v) => !v)} hitSlop={s(6)}>
+          <Pressable accessibilityLabel="이모티콘 선택" disabled={sending} onPress={() => setEmoticonOpen((v) => !v)} hitSlop={s(6)}>
             <Smile size={s(10)} color={emoticonOpen ? colors.primary : TIME_GRAY} strokeWidth={2} />
           </Pressable>
         </View>
@@ -579,6 +643,7 @@ export default function ChatRoomScreen() {
       {emoticonOpen ? (
         <EmoticonPanel
           onPick={(sticker) => {
+            if (sendingRef.current) return;
             setEmoticonOpen(false);
             void sendSticker(sticker.id);
           }}
@@ -655,7 +720,14 @@ function RoomTimer({ expiresAt, settled }: { expiresAt: string; settled: boolean
   return <Text style={styles.timer}>{label}</Text>;
 }
 
-function Row({
+const messageKey = (message: Message) => message.key;
+const visibleContentPosition = { minIndexForVisible: 0 };
+
+function MessageSeparator() {
+  return <View style={styles.messageSeparator} />;
+}
+
+const Row = memo(function Row({
   message,
   onAction,
 }: {
@@ -762,7 +834,7 @@ function Row({
       );
     }
   }
-}
+});
 
 function ActionButton({
   icon,
@@ -884,11 +956,17 @@ const styles = StyleSheet.create({
    * chatScroll x11.5 — 시안 줄간격은 8 이지만 말풍선이 띄엄띄엄 떨어져 보여
    * 5 로 좁혔다. 한 사람이 이어 보낸 줄(grouped)은 한 덩어리로 보이게 더 붙인다.
    */
+  messageList: {
+    flex: 1,
+  },
+  messageSeparator: {
+    height: s(5),
+  },
   list: {
     paddingHorizontal: s(11.5),
-    paddingTop: s(14),
-    paddingBottom: s(10),
-    gap: s(5),
+    // inverted 목록이라 화면 위·아래 여백도 반대로 준다.
+    paddingTop: s(10),
+    paddingBottom: s(14),
   },
   /* 위 줄과 같은 사람·같은 분이면 gap 을 덜어내 붙여 놓는다 */
   grouped: {

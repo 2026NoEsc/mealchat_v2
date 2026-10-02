@@ -2,28 +2,10 @@
   "schemaVersion": 1,
   "advisories": [
     {
-      "id": "GHSA-6GMQ-8VP8-GCM6",
-      "package": "@xmldom/xmldom",
-      "reason": "Expo CLI and native build tooling only; the vulnerable serializer is not imported by the app runtime. Revisit after the next Expo SDK upgrade.",
-      "expiresOn": "2026-09-30"
-    },
-    {
-      "id": "GHSA-w3rx-r6r6-pgpr",
-      "package": "image-size",
-      "reason": "Metro build-time asset inspection only. The repository blocks ICNS, JXL, HEIF/HEIC, and AVIF files by extension and file signature, and currently contains only PNG and SVG assets.",
-      "expiresOn": "2026-09-30"
-    },
-    {
-      "id": "GHSA-5p2g-fcmc-qvqq",
-      "package": "image-size",
-      "reason": "Metro build-time asset inspection only. The repository blocks ICNS, JXL, HEIF/HEIC, and AVIF files by extension and file signature, and currently contains only PNG and SVG assets.",
-      "expiresOn": "2026-09-30"
-    },
-    {
-      "id": "GHSA-w5hq-g745-h8pq",
-      "package": "uuid",
-      "reason": "The transitive xcode package is build-time only and calls uuid.v4(); the advisory affects v3, v5, and v6 buffer handling.",
-      "expiresOn": "2026-09-30"
+      "id": "GHSA-86W9-CPQP-85RV",
+      "package": "node-forge",
+      "reason": "No patched release exists. Expo CLI development tooling only: verification checks local self-signatures or signatures it just generated; default RSA exponent is 65537. This app has no update code signing or EAS project ID, and node-forge is absent from exported bundles. tests/dependencyTooling.test.js guards consumers, configuration, and runtime imports. Reassess upstream fixes and these boundaries before 2026-10-09; do not automatically extend.",
+      "expiresOn": "2026-10-09"
     }
   ]
 }
