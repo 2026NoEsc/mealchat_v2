@@ -6,6 +6,12 @@
       "package": "node-forge",
       "reason": "No patched release exists. Expo CLI development tooling only: verification checks local self-signatures or signatures it just generated; default RSA exponent is 65537. This app has no update code signing or EAS project ID, and node-forge is absent from exported bundles. tests/dependencyTooling.test.js guards consumers, configuration, and runtime imports. Reassess upstream fixes and these boundaries before 2026-10-09; do not automatically extend.",
       "expiresOn": "2026-10-09"
+    },
+    {
+      "id": "GHSA-VFJ7-8CJW-P6XM",
+      "package": "braces",
+      "reason": "No patched release exists (latest 3.0.3). The lockfile-declared braces consumer is micromatch 4.0.8; reviewed Jest/Metro matching APIs delegate to picomatch. resolve-workspace-root 2.0.1 also bundles braces; its workspace matching path uses bundled micromatch matching, with patterns read from local workspace configuration. tests/dependencyTooling.test.js guards versions, consumers, bundled code identity, app/config/script imports, and both matching paths with braces execution blocked. This is temporary risk acceptance, not a vulnerability fix or a guarantee about arbitrary plugins. Reassess upstream fixes and usage before 2026-10-09; do not automatically extend.",
+      "expiresOn": "2026-10-09"
     }
   ]
 }

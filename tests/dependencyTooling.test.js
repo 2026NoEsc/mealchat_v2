@@ -9,6 +9,12 @@ const runNode = (source) => JSON.parse(execFileSync(process.execPath, ['-e', sou
   timeout: 15000,
 }));
 
+const sourcePathsIn = (directory) => readdirSync(directory, { withFileTypes: true })
+  .flatMap((entry) => {
+    const path = resolve(directory, entry.name);
+    return entry.isDirectory() ? sourcePathsIn(path) : /\.[cm]?[jt]sx?$/.test(entry.name) ? [path] : [];
+  });
+
 describe('patched build dependencies', () => {
   it('reads PNG buffers and asset file paths through the Expo Metro wrapper', () => {
     const result = runNode(`
@@ -141,6 +147,131 @@ describe('patched build dependencies', () => {
 
 const auditAllowlist = JSON.parse(readFileSync(resolve(projectRoot, 'security/audit-allowlist.json'), 'utf8'));
 const forgeException = auditAllowlist.advisories.find((entry) => entry.id.toUpperCase() === 'GHSA-86W9-CPQP-85RV');
+const bracesException = auditAllowlist.advisories.find((entry) => entry.id.toUpperCase() === 'GHSA-VFJ7-8CJW-P6XM');
+
+(bracesException ? describe : describe.skip)('temporary braces exception boundary', () => {
+  it('requires reassessment before the reviewed expiry and any version change', () => {
+    expect(bracesException.package).toBe('braces');
+    expect(bracesException.expiresOn).toBe('2026-10-09');
+    const lock = JSON.parse(readFileSync(resolve(projectRoot, 'package-lock.json'), 'utf8'));
+    for (const target of ['braces', 'micromatch']) {
+      const entries = Object.entries(lock.packages).filter(([path]) => path.endsWith(`/node_modules/${target}`) || path === `node_modules/${target}`);
+      expect(entries).toHaveLength(1);
+      expect(entries[0][1].version).toBe(target === 'braces' ? '3.0.3' : '4.0.8');
+    }
+  });
+
+  it('limits consumers to the reviewed Jest and Metro tooling', () => {
+    const lock = JSON.parse(readFileSync(resolve(projectRoot, 'package-lock.json'), 'utf8'));
+    const consumers = (target) => Object.entries(lock.packages)
+      .filter(([, entry]) => [entry.dependencies, entry.optionalDependencies, entry.peerDependencies]
+        .some((dependencies) => Object.hasOwn(dependencies ?? {}, target)))
+      .map(([path]) => path).sort();
+    expect(consumers('braces')).toEqual(['node_modules/micromatch']);
+    const reviewedConsumers = [
+      'node_modules/@jest/core', 'node_modules/@jest/transform', 'node_modules/jest-config',
+      'node_modules/jest-haste-map', 'node_modules/jest-message-util', 'node_modules/metro-file-map',
+    ];
+    expect(consumers('micromatch')).toEqual(reviewedConsumers);
+    for (const path of reviewedConsumers) {
+      expect(lock.packages[path].version).toBe(path.endsWith('/metro-file-map') ? '0.83.8' : '29.7.0');
+    }
+    const manifest = JSON.parse(readFileSync(resolve(projectRoot, 'package.json'), 'utf8'));
+    for (const group of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
+      for (const name of ['braces', 'micromatch']) expect(manifest[group]?.[name]).toBeUndefined();
+    }
+  });
+
+  it('blocks glob package imports in app, config, and build scripts', () => {
+    const configs = readdirSync(projectRoot).filter((name) => /\.config\.[cm]?[jt]s$/.test(name)).map((name) => resolve(projectRoot, name));
+    const paths = [resolve(projectRoot, 'App.tsx'), resolve(projectRoot, 'index.js'), ...configs,
+      ...sourcePathsIn(resolve(projectRoot, 'src')), ...sourcePathsIn(resolve(projectRoot, 'scripts'))];
+    const imports = paths.filter((path) => /['"`](?:braces|micromatch|picomatch)(?:\/[^'"`]*)?['"`]/.test(readFileSync(path, 'utf8')));
+    expect(imports).toEqual([]);
+  });
+
+  it('matches through the reviewed APIs without executing braces', () => {
+    const result = runNode(`
+      const bracesPath = require.resolve('braces');
+      require(bracesPath);
+      let calls = 0;
+      const blocked = () => { calls++; throw new Error('Vulnerable braces execution is blocked'); };
+      require.cache[bracesPath].exports = new Proxy(blocked, { get: () => blocked });
+      const mm = require('micromatch');
+      const { createRequire } = require('node:module');
+      const picomatchVersion = createRequire(require.resolve('micromatch'))('picomatch/package.json').version;
+      const { includedByGlob } = require('./node_modules/metro-file-map/src/watchers/common.js');
+      const pattern = '**/*.{js,ts}';
+      const matches = [
+        mm(['src/app.ts', 'src/app.png'], pattern, { nocase: true, windows: false }),
+        mm.some('src/app.ts', pattern, { dot: true }), mm.isMatch('src/app.ts', pattern),
+        mm.any('src/app.ts', pattern),
+        includedByGlob('f', [pattern], false, 'src/app.ts'),
+        includedByGlob('f', [], false, 'src/app.ts'),
+        includedByGlob('f', [pattern], false, 'src/app.png'),
+      ];
+      const matchingCalls = calls;
+      let dangerousApiBlocked = false;
+      try { mm.braceExpand('{a,b}'); } catch { dangerousApiBlocked = true; }
+      console.log(JSON.stringify({ matches, matchingCalls, dangerousApiBlocked, picomatchVersion }));
+    `);
+    expect(result.matches).toEqual([['src/app.ts'], true, true, true, true, true, false]);
+    expect(result.matchingCalls).toBe(0);
+    expect(result.dangerousApiBlocked).toBe(true);
+    expect(result.picomatchVersion).toBe('2.3.2');
+  });
+
+  it('checks the bundled workspace resolver and blocks its braces execution during matching', () => {
+    const result = runNode(`
+      const { readFileSync } = require('node:fs');
+      const { createHash } = require('node:crypto');
+      const { runInNewContext } = require('node:vm');
+      const { dirname, join, resolve } = require('node:path');
+      const source = readFileSync(require.resolve('resolve-workspace-root'), 'utf8');
+      const marker = '610:(e,t,r)=>{';
+      if (source.split(marker).length !== 2) throw new Error('Bundled braces module changed');
+      const instrumented = source.replace(marker, marker + 'globalThis.bracesLoaded++;const blocked=()=>{globalThis.bracesCalls++;throw new Error("Bundled braces execution blocked");};e.exports=new Proxy(blocked,{get:()=>blocked});globalThis.blockedBraces=e.exports;return;');
+      const root = resolve('tmp/virtual-workspace');
+      const child = join(root, 'packages', 'app');
+      const files = new Map([[join(root, 'package.json'), JSON.stringify({ workspaces: ['packages/{app,lib}'] })]]);
+      const read = (path) => {
+        if (files.has(path)) return files.get(path);
+        throw Object.assign(new Error('Fixture file absent'), { code: 'ENOENT' });
+      };
+      const virtualFs = { readFileSync: read, promises: { readFile: async (path) => read(path) } };
+      const sandbox = { module: { exports: {} }, bracesLoaded: 0, bracesCalls: 0, process, console, Buffer, __dirname: dirname(require.resolve('resolve-workspace-root')),
+        require: (name) => name === 'node:fs' ? virtualFs : require(name) };
+      try { runInNewContext(instrumented, sandbox); }
+      catch (error) { console.error(error.message); process.exit(1); }
+      const resolver = sandbox.module.exports;
+      (async () => {
+        const sync = resolver.resolveWorkspaceRoot(child) === root;
+        const asyncMatch = await resolver.resolveWorkspaceRootAsync(child) === root;
+        const excluded = resolver.resolveWorkspaceRoot(join(root, 'other')) === null;
+        const matchingCalls = sandbox.bracesCalls;
+        let dangerousApiBlocked = false;
+        try { sandbox.blockedBraces('{a,b}'); } catch { dangerousApiBlocked = true; }
+        console.log(JSON.stringify({
+          sha256: createHash('sha256').update(source).digest('hex'),
+          version: require('resolve-workspace-root/package.json').version,
+          sync, async: asyncMatch, excluded, loaded: sandbox.bracesLoaded,
+          matchingCalls, dangerousApiBlocked, callsAfterControl: sandbox.bracesCalls,
+        }));
+      })().catch(error => { console.error(error); process.exitCode = 1; });
+    `);
+    expect(result).toEqual({
+      sha256: 'ee3be37ce5bce6f0de05ee538653d13f8cbf6a7ec8c8f4ed24466025e5e34f2e',
+      version: '2.0.1', sync: true, async: true, excluded: true,
+      loaded: 1, matchingCalls: 0, dangerousApiBlocked: true, callsAfterControl: 1,
+    });
+    const lock = JSON.parse(readFileSync(resolve(projectRoot, 'package-lock.json'), 'utf8'));
+    expect(Object.keys(lock.packages).filter((path) => /(?:^|\/)node_modules\/resolve-workspace-root$/.test(path))).toEqual(['node_modules/resolve-workspace-root']);
+    const consumers = Object.entries(lock.packages).filter(([, entry]) =>
+      [entry.dependencies, entry.optionalDependencies, entry.peerDependencies].some((group) => Object.hasOwn(group ?? {}, 'resolve-workspace-root')))
+      .map(([path, entry]) => [path, entry.version]).sort();
+    expect(consumers).toEqual([['node_modules/@expo/config', '12.0.14'], ['node_modules/@expo/package-manager', '1.13.1']]);
+  });
+});
 
 // Remove this conditional boundary guard when an upstream fix removes the exception.
 (forgeException ? describe : describe.skip)('temporary node-forge exception boundary', () => {
