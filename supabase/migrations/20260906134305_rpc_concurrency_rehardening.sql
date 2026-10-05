@@ -234,8 +234,17 @@ begin
     raise exception 'Only the room owner can close this room' using errcode = '42501';
   end if;
 
-  if room.stage = 'settling' then
-    raise exception 'Cannot close the room while a settlement is in progress'
+  -- stage는 과거 앱이 마음대로 바꿀 수 있었고 정산과 완전히 동기화되지 않는다.
+  -- 같은 room advisory lock을 쓰는 정산 완료 RPC와 직렬화한 뒤, 실제 snapshot
+  -- 수취인 중 미완료자가 한 명이라도 있으면 방을 지우지 않는다.
+  if exists (
+    select 1
+    from public.dutch_pay_bills bill
+    join public.dutch_pay_members member on member.bill_id = bill.id
+    where bill.room_id = target_room
+      and member.is_completed is not true
+  ) then
+    raise exception 'Cannot close the room while a settlement recipient is incomplete'
       using errcode = '42501';
   end if;
 
@@ -248,4 +257,4 @@ revoke all on function public.leave_room(uuid) from public, anon, authenticated;
 grant execute on function public.leave_room(uuid) to authenticated;
 
 comment on function public.leave_room(uuid) is
-  '방 잠금 아래에서 정산 중이 아닌 방을 방장만 닫는다.';
+  '방 잠금 아래에서 모든 정산 수취인이 완료한 방을 방장만 닫는다.';

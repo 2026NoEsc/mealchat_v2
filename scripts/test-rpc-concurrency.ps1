@@ -12,8 +12,14 @@ $roomId = 'dddddddd-1111-1111-1111-111111111111'
 function Invoke-LocalPsql {
   param([Parameter(Mandatory = $true)][string]$Sql)
 
-  $lines = & $DockerExe exec $Container psql -U postgres -d postgres -X -v ON_ERROR_STOP=1 -Atq -c $Sql 2>&1
-  if ($LASTEXITCODE -ne 0) {
+  # Keep SQL off the PowerShell/Docker command line. Otherwise JSON literals in
+  # request.jwt.claims can lose their quotes before psql receives the command.
+  $lines = @(
+    $Sql | & $DockerExe exec -i $Container psql -U postgres -d postgres -X `
+      -v ON_ERROR_STOP=1 -Atq -f - 2>&1
+  )
+  $exitCode = $LASTEXITCODE
+  if ($exitCode -ne 0) {
     throw ($lines -join "`n")
   }
   return ($lines -join "`n").Trim()
@@ -24,9 +30,14 @@ function Start-LocalPsqlJob {
 
   return Start-Job -ScriptBlock {
     param($DockerPath, $ContainerName, $Statement)
-    $lines = & $DockerPath exec $ContainerName psql -U postgres -d postgres -X -v ON_ERROR_STOP=1 -Atq -c $Statement 2>&1
+
+    $lines = @(
+      $Statement | & $DockerPath exec -i $ContainerName psql -U postgres -d postgres -X `
+        -v ON_ERROR_STOP=1 -Atq -f - 2>&1
+    )
+    $exitCode = $LASTEXITCODE
     [pscustomobject]@{
-      ExitCode = $LASTEXITCODE
+      ExitCode = $exitCode
       Output = ($lines -join "`n").Trim()
     }
   } -ArgumentList $DockerExe, $Container, $Sql

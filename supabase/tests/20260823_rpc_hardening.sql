@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(62);
+select plan(70);
 
 create temporary table test_ids (
   key text primary key,
@@ -109,9 +109,10 @@ select ok(
       'public.create_room_settlement(uuid,text,integer,text,text,text)'::regprocedure,
       'public.post_room_system_message(uuid,text)'::regprocedure
     ]) function_oid
-    where has_function_privilege('authenticated', function_oid, 'EXECUTE')
+    where not has_function_privilege('authenticated', function_oid, 'EXECUTE')
+       or has_function_privilege('anon', function_oid, 'EXECUTE')
   ),
-  'cutover removes stale forced-invite, settlement-v1, and generic-system RPCs'
+  'legacy forced-invite, settlement-v1, and generic-system RPCs are authenticated-only compatibility until cutover'
 );
 
 select ok(
@@ -149,11 +150,24 @@ select ok(
     from unnest(array[
       'room_id', 'title', 'message', 'bank_name', 'account_number', 'amount'
     ]) column_name
-    where has_column_privilege(
+    where not has_column_privilege(
       'authenticated', 'public.notifications', column_name, 'INSERT'
     )
   ),
-  'cutover removes the legacy notification column grant'
+  'legacy notification columns remain authenticated-only compatibility until cutover'
+);
+
+select ok(
+  not exists (
+    select 1
+    from unnest(array[
+      'room_id', 'title', 'message', 'bank_name', 'account_number', 'amount'
+    ]) column_name
+    where has_column_privilege(
+      'anon', 'public.notifications', column_name, 'INSERT'
+    )
+  ),
+  'anon cannot use the temporary legacy notification columns'
 );
 
 select ok(
@@ -647,23 +661,57 @@ select set_config(
 );
 
 select is(
-  public.leave_room((select id from pg_temp.test_ids where key = 'room')),
-  'left',
-  'user B leaves through the serialized RPC'
+  pg_temp.sqlstate_of(format(
+    'select public.leave_room(%L::uuid)',
+    (select id from pg_temp.test_ids where key = 'room')
+  )),
+  '42501',
+  'non-owner B cannot close the room'
+);
+
+select is(
+  (select count(*) from public.participants
+   where room_id = (select id from pg_temp.test_ids where key = 'room')
+     and profile_id = auth.uid()),
+  1::bigint,
+  'non-owner B remains a participant after close is rejected'
 );
 
 select is(
   (select count(*) from public.dutch_pay_bills
    where id = (select id from pg_temp.test_ids where key = 'bill')),
   1::bigint,
-  'recipient B still sees the settlement after leaving the room'
+  'recipient B sees the settlement while the room remains open'
 );
 
 select is(
   (select count(*) from public.notifications
    where settlement_id = (select id from pg_temp.test_ids where key = 'bill')),
   1::bigint,
-  'recipient B still sees the linked notification after leaving the room'
+  'recipient B sees the linked notification while the room remains open'
+);
+
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-0000000000a1', true);
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"aaaaaaaa-0000-0000-0000-0000000000a1","role":"authenticated"}',
+  true
+);
+
+select is(
+  pg_temp.sqlstate_of(format(
+    'select public.leave_room(%L::uuid)',
+    (select id from pg_temp.test_ids where key = 'room')
+  )),
+  '42501',
+  'owner cannot close while any settlement recipient is incomplete'
+);
+
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-0000-0000-0000-0000000000b2', true);
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"bbbbbbbb-0000-0000-0000-0000000000b2","role":"authenticated"}',
+  true
 );
 
 select is(
@@ -672,7 +720,7 @@ select is(
     (select id from pg_temp.test_ids where key = 'member_b')
   )),
   '00000',
-  'recipient B can complete their snapshotted settlement after leaving'
+  'recipient B can complete their snapshotted settlement while the room remains open'
 );
 
 select is(
@@ -680,6 +728,65 @@ select is(
    where id = (select id from pg_temp.test_ids where key = 'member_b')),
   true,
   'recipient completion state is persisted'
+);
+
+select set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-0000000000a1', true);
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"aaaaaaaa-0000-0000-0000-0000000000a1","role":"authenticated"}',
+  true
+);
+
+select is(
+  public.leave_room((select id from pg_temp.test_ids where key = 'room')),
+  'deleted',
+  'owner can close after all settlement recipients complete'
+);
+
+reset role;
+
+select ok(
+  not exists (
+    select 1 from public.participants
+    where room_id = (select id from pg_temp.test_ids where key = 'room')
+  )
+  and not exists (
+    select 1 from public.messages
+    where room_id = (select id from pg_temp.test_ids where key = 'room')
+  )
+  and not exists (
+    select 1 from public.notifications
+    where settlement_id = (select id from pg_temp.test_ids where key = 'bill')
+  ),
+  'room-owned participant, message, and notification rows cascade when the room closes'
+);
+
+select ok(
+  (select room_id is null from public.dutch_pay_bills
+   where id = (select id from pg_temp.test_ids where key = 'bill')),
+  'closing the room preserves the settlement and clears its room reference'
+);
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub', 'bbbbbbbb-0000-0000-0000-0000000000b2', true);
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"bbbbbbbb-0000-0000-0000-0000000000b2","role":"authenticated"}',
+  true
+);
+
+select is(
+  (select count(*) from public.dutch_pay_bills
+   where id = (select id from pg_temp.test_ids where key = 'bill')),
+  1::bigint,
+  'recipient B still sees the snapshotted settlement after the room closes'
+);
+
+select is(
+  (select count(*) from public.notifications
+   where settlement_id = (select id from pg_temp.test_ids where key = 'bill')),
+  0::bigint,
+  'linked notification is deleted with the closed room under the current cascade contract'
 );
 
 select set_config('request.jwt.claim.sub', 'cccccccc-0000-0000-0000-0000000000c3', true);
@@ -695,7 +802,7 @@ select is(
     (select id from pg_temp.test_ids where key = 'member_b')
   )),
   '42501',
-  'late joiner C cannot change B settlement completion'
+  'unrelated user C cannot change B settlement completion after room close'
 );
 
 select set_config('request.jwt.claim.sub', 'aaaaaaaa-0000-0000-0000-0000000000a1', true);

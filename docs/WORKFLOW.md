@@ -129,8 +129,9 @@ baseline 은 원격에 이미 존재하던 스키마를 `db dump` 로 보존한 
 `participants` 직접 INSERT 권한은 없다. `public.join_room_by_code(code)` 가 코드와
 `expires_at` 를 서버에서 검증하고, 호출자 `profiles` 에서 `name` 을 채워 넣는다
 (`participants.name` 은 기본값 없는 NOT NULL 이다). 방을 만들면 트리거가 방장을
-자동으로 참가자에 넣는다. 나가기는 자기 행 DELETE 정책으로 가능하고,
-남을 내보내는 기능은 아직 없다.
+자동으로 참가자에 넣는다. 현재 `leave_room`은 방장 전용 방 닫기 RPC이며, 방장 외 호출은
+`42501`로 거절되고 미완료 정산 수취인이 있으면 방장 호출도 거절된다. 방장 외 멤버의 자기
+탈퇴를 별도 RPC로 제공할지는 제품 결정으로 남겨 두며, 직접 participant DELETE는 허용하지 않는다.
 
 #### Dashboard 에서만 되는 설정 ⚠️ 일부 미완
 
@@ -413,11 +414,15 @@ Figma 화면은 전부 옮겼다. 프로필 수정(`309:1086`)·은행 드롭다
 [출시 준비 판정](./release-readiness-2026-08-23.md)을 우선해서 본다. 실제 앱의 비밀번호
 재설정은 첫 링크가 다른 기기에서 먼저 소비돼 재시도가 필요하고, 기능용 새 비밀번호 화면은
 있지만 Figma 노드·좌표 검수 기록은 없다. 추천 fixture와 RPC 권한 모델은 로컬에 구현됐지만
-운영 배포는 하지 않았다. 로컬 PostgreSQL 17.6에서 당시 19개 fresh 적용, 16→19 단계 업그레이드,
-pgTAP 62/62, additive v1/v2 호환, 별도 두 세션 동시성은 통과했다. 현재 소스의 테스트용
+운영 배포는 하지 않았다. 로컬 PostgreSQL 17.6에서 최신 29개 fresh 적용, 당시 운영과 같은
+27개 baseline에서 `include-all`로 29개까지의 out-of-order upgrade, pgTAP 70/70,
+additive v1/v2 호환, 별도 두 세션 동시성이 통과했다. 현재 소스의 테스트용
 release APK도 Android 15 에뮬레이터에서 오프라인 콜드 스타트·background/resume·hardware
 back을 통과했지만 실제 실기기와 인증된 주요 화면은 남아 있다. Redirect URL은 등록됐고
 유출 비밀번호 차단은 Pro 플랜 변경 승인이 있어야 진행할 수 있다.
+2026-09-07 read-only 확인에서 원격 migration은 28개로 늘었고 최신 identity는
+`20260907120000_update_settlement_amount`였지만 해당 SQL은 로컬에 없어 history drift로
+기록한다.
 
 ### 아직 눌러도 아무 일 없는 컨트롤
 

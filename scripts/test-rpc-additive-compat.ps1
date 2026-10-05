@@ -13,8 +13,14 @@ $roomV2 = 'a1a1a1a1-2222-2222-2222-222222222222'
 function Invoke-LocalPsql {
   param([Parameter(Mandatory = $true)][string]$Sql)
 
-  $lines = & $DockerExe exec $Container psql -U postgres -d postgres -X -v ON_ERROR_STOP=1 -Atq -c $Sql 2>&1
-  if ($LASTEXITCODE -ne 0) {
+  # Keep SQL off the PowerShell/Docker command line. Otherwise JSON literals in
+  # request.jwt.claims can lose their quotes before psql receives the command.
+  $lines = @(
+    $Sql | & $DockerExe exec -i $Container psql -U postgres -d postgres -X `
+      -v ON_ERROR_STOP=1 -Atq -f - 2>&1
+  )
+  $exitCode = $LASTEXITCODE
+  if ($exitCode -ne 0) {
     throw ($lines -join "`n")
   }
   return ($lines -join "`n").Trim()
@@ -39,11 +45,15 @@ delete from auth.users where id in ('$userA'::uuid, '$userB'::uuid);
 "@
 
 try {
-  $latestMigration = Invoke-LocalPsql -Sql @"
-select version from supabase_migrations.schema_migrations order by version desc limit 1;
+  $additiveMigrationPresent = Invoke-LocalPsql -Sql @"
+  select exists (
+    select 1
+    from supabase_migrations.schema_migrations
+    where version = '20260823072701'
+  )::text;
 "@
-  if ($latestMigration -ne '20260823072701') {
-    throw "Additive compatibility test requires migration 20260823072701, found $latestMigration."
+  if ($additiveMigrationPresent -ne 'true') {
+    throw 'Additive compatibility test requires migration 20260823072701 in local migration history.'
   }
 
   Invoke-LocalPsql -Sql $cleanupSql | Out-Null
