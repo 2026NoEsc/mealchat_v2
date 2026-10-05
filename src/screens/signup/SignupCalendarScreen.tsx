@@ -2,7 +2,7 @@ import { useNavigation } from '../../navigation/NavigationContext';
 import SignupIllustrationScreen from './SignupIllustrationScreen';
 
 const moa = require('../../../assets/brand/moa.png');
-const calendarMock = require('../../../assets/brand/calendar-mock.png');
+const calendarMock = require('../../../assets/brand/calendar-mock.jpg');
 
 /** Figma 회원가입/구글 캘린더 연동 (150:122) — moa x56 y158 104×85 */
 export default function SignupCalendarScreen() {

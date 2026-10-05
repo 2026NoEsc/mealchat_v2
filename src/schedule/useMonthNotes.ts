@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { useAuth } from '../auth/AuthProvider';
 import { fetchMonthNotes, type CalendarNote } from '../lib/calendarNotes';
+import { useForegroundRefreshToken } from '../lifecycle/AppLifecycleContext';
 import type { PersonalEvent } from '../screens/schedule/PersonalEventSheet';
 
 type Status = 'loading' | 'ready' | 'error';
@@ -9,6 +10,7 @@ type Status = 'loading' | 'ready' | 'error';
 export function useMonthNotes(year: number, month: number) {
   const { user } = useAuth();
   const userId = user?.id ?? null;
+  const foregroundRefreshToken = useForegroundRefreshToken();
 
   const [notes, setNotes] = useState<CalendarNote[]>([]);
   const [status, setStatus] = useState<Status>('loading');
@@ -46,7 +48,7 @@ export function useMonthNotes(year: number, month: number) {
     return () => {
       active = false;
     };
-  }, [userId, year, month, reloadToken]);
+  }, [userId, year, month, reloadToken, foregroundRefreshToken]);
 
   return { notes, status, reload };
 }

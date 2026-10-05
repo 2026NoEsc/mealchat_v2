@@ -1,38 +1,37 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { fs, s } from '../theme/scale';
+import { fs412, s412 } from '../theme/scale';
 import { colors, shadows } from '../theme/tokens';
-import { fontFamily, weight } from '../theme/typography';
-import { CalendarIcon, ChatIcon, HomeIcon, ProfileIcon } from './icons';
+import { fontFamily } from '../theme/typography';
+import { CalendarIcon, HomeIcon, ProfileIcon } from './icons';
 
-export type TabKey = 'home' | 'schedule' | 'chat' | 'profile';
+export type TabKey = 'home' | 'schedule' | 'profile';
 
+/* 채팅방은 홈에 합쳤다 — 시안 2154:584 부터 탭이 셋이다 */
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'home', label: '홈' },
   { key: 'schedule', label: '일정 조율' },
-  { key: 'chat', label: '채팅방' },
   { key: 'profile', label: '프로필' },
 ];
 
 function TabIcon({ tab, active }: { tab: TabKey; active: boolean }) {
   const color = active ? colors.primary : colors.textPrimary;
-  const size = s(14);
+  const size = s412(26);
 
   switch (tab) {
     case 'home':
       return <HomeIcon size={size} color={color} />;
     case 'schedule':
       return <CalendarIcon size={size} color={color} />;
-    case 'chat':
-      return <ChatIcon size={size} color={color} />;
     case 'profile':
-      return <ProfileIcon size={s(13)} color={color} />;
+      return <ProfileIcon size={s412(24)} color={color} />;
   }
 }
 
 /**
- * Figma BottomNav (83:403) — 220 x 38
- * 탭 4개 균등 배치, 활성 탭 하단에 25% 폭 오렌지 인디케이터
+ * Figma BottomNav1 (2169:828) — 412 x 62
+ * 탭 3개 균등 배치, 활성 탭 하단에 1/3 폭 오렌지 인디케이터
  */
 export default function BottomNav({
   active,
@@ -42,9 +41,14 @@ export default function BottomNav({
   onChange: (tab: TabKey) => void;
 }) {
   const activeIndex = TABS.findIndex((t) => t.key === active);
+  /*
+   * 갤럭시의 제스처 바가 탭 위에 겹쳐 앉는다. 탭 높이(62)는 그대로 두고 아래에
+   * 시스템 바만큼 덧대서, 글자와 아이콘이 가려지지 않게 한다.
+   */
+  const insets = useSafeAreaInsets();
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingBottom: insets.bottom }]}>
       {TABS.map((tab) => {
         const isActive = tab.key === active;
         return (
@@ -59,10 +63,11 @@ export default function BottomNav({
         );
       })}
 
+      {/* 인디케이터는 탭 아래에 붙는다 — 덧댄 시스템 바 영역보다 위 */}
       <View
         style={[
           styles.indicator,
-          { left: `${activeIndex * 25}%` },
+          { left: `${(activeIndex * 100) / TABS.length}%`, bottom: insets.bottom },
         ]}
       />
     </View>
@@ -72,27 +77,28 @@ export default function BottomNav({
 const styles = StyleSheet.create({
   container: {
     width: '100%',
-    height: s(38),
+    /* 높이 대신 아이템으로 62 를 채운다 — 아래 인셋이 더 붙을 수 있어서다 */
     flexDirection: 'row',
-    backgroundColor: colors.surface,
+    backgroundColor: colors.card,
     ...shadows.bar,
   },
   tab: {
     flex: 1,
+    height: s412(62),
     alignItems: 'center',
   },
+  /* 아이콘 y9, 글자 y39 */
   iconSlot: {
-    height: s(14),
-    marginTop: s(6),
+    height: s412(28),
+    marginTop: s412(9),
     alignItems: 'center',
     justifyContent: 'center',
   },
   label: {
-    marginTop: s(3),
-    fontFamily: fontFamily.body,
-    fontSize: fs(8),
-    lineHeight: fs(10),
-    fontWeight: weight.regular,
+    marginTop: s412(2),
+    fontFamily: fontFamily.regular,
+    fontSize: fs412(10),
+    lineHeight: fs412(13.5),
     color: colors.textPrimary,
     textAlign: 'center',
   },
@@ -101,10 +107,9 @@ const styles = StyleSheet.create({
   },
   indicator: {
     position: 'absolute',
-    bottom: 0,
-    width: '25%',
-    height: s(2),
-    borderRadius: s(3),
+    width: `${100 / TABS.length}%`,
+    height: s412(3.26),
+    borderRadius: s412(3),
     backgroundColor: colors.primary,
   },
 });

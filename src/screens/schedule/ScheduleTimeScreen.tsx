@@ -1,50 +1,85 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Pressable,
+  Alert,
   ScrollView,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useTopInset } from '../../theme/insets';
 
 import AppHeader from '../../components/AppHeader';
+import AvailabilityGrid from '../../components/AvailabilityGrid';
+import PickedSlotChips from '../../components/PickedSlotChips';
+import SubmissionStatus from '../../components/SubmissionStatus';
 import { CompleteButton } from '../../components/ui/Button';
+import {
+  fetchRoomAvailability,
+  saveMyAvailability,
+  type AvailabilityStatus,
+} from '../../lib/availability';
+import { leaveRoom } from '../../lib/rooms';
 import { useNavigation } from '../../navigation/NavigationContext';
 import {
   buildNextDays,
   cellKey,
-  HOURS,
   isPastCell,
   toSlots,
 } from '../../lib/scheduleSlots';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 import ScheduleStepHeader from './ScheduleStepHeader';
-import type { SchedulePlace } from './scheduleTypes';
+import type { MyLocation } from '../../lib/myLocation';
 
 type Params = {
+  /** STEP 1 에서 만든 방 — 메이트의 응답이 여기에 쌓인다 */
+  roomId?: string;
   name?: string;
   invitees?: string[];
-  place?: SchedulePlace;
+  /** STEP 1 에서 잡은 내 위치 — 중간 지점 계산에 쓴다 */
+  origin?: MyLocation;
 };
 
+/**
+ * STEP 2 — 언제 만날까요.
+ *
+ * 방은 STEP 1 에서 이미 만들어졌고, 여기서 각자 가능한 시간을 낸다. 남이 고른
+ * 칸은 회색으로 겹쳐 보이되 누가 골랐는지는 오지 않는다 — 내가 언제를 고를지
+ * 정하는 데 필요한 것은 "이 시간은 누군가 된다" 까지다.
+ */
+
 export default function ScheduleTimeScreen() {
-  const insets = useSafeAreaInsets();
-  const { navigate, current } = useNavigation();
+  /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
+  const topInset = useTopInset();
+  const { navigate, goBackWith, current } = useNavigation();
 
   const params = current.params as Params | undefined;
 
+  const roomId = params?.roomId ?? null;
   const name = params?.name ?? '';
   const invitees = params?.invitees ?? [];
-  const place = params?.place;
+  const origin = params?.origin;
 
   const days = useMemo(() => buildNextDays(5), []);
 
-  const [picked, setPicked] = useState<Set<string>>(
-    () => new Set(),
-  );
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [status, setStatus] = useState<AvailabilityStatus | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!roomId) return;
+    const { data, error } = await fetchRoomAvailability(roomId);
+    if (error || !data) return;
+
+    setStatus(data);
+    /* 전에 낸 답이 있으면 격자에 되살린다 */
+    setPicked(new Set(data.mySlots));
+  }, [roomId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const toggle = (date: string, hour: number) => {
     if (isPastCell(date, hour)) {
@@ -67,24 +102,45 @@ export default function ScheduleTimeScreen() {
 
   const slots = toSlots(picked, days);
 
-  const goRecommend = () => {
-    if (!place || slots.length === 0) {
+  const othersCells = useMemo(
+    () => new Set(status?.othersSlots ?? []),
+    [status],
+  );
+
+  /* 내 답을 방에 저장하고 AI 추천으로 넘어간다 */
+  const goNext = async () => {
+    if (!roomId || !origin || slots.length === 0) return;
+
+    setSaving(true);
+    const error = await saveMyAvailability(roomId, [...picked]);
+    setSaving(false);
+
+    if (error) {
+      Alert.alert('저장 실패', error.message);
       return;
     }
 
-    navigate('ScheduleRecommend', {
-      name,
-      invitees,
-      place,
-      slots,
-    });
+    navigate('ScheduleConfirmed', { roomId, name, invitees, origin });
+  };
+
+  /*
+   * 뒤로 갈 때 STEP 1 이 다시 채울 수 있게 입력값을 실어 보낸다.
+   *
+   * 방은 여기서 지운다. STEP 1 의 "다음" 이 방을 먼저 만들기 때문에 — 조율은
+   * 방이 있어야 시작되니 어쩔 수 없다 — 그냥 돌아가면 아무도 안 쓰는 방이
+   * 채팅 목록에 남고, 다시 "다음" 을 누르면 방이 하나 더 생겼다.
+   * leave_room 은 마지막 사람이 나가면 방까지 지운다.
+   */
+  const goPrev = () => {
+    if (roomId) void leaveRoom(roomId);
+    goBackWith({ name, invitees, origin });
   };
 
   return (
     <View style={styles.screen}>
       <View
         style={{
-          height: insets.top,
+          height: topInset,
           backgroundColor: colors.surface,
         }}
       />
@@ -99,100 +155,34 @@ export default function ScheduleTimeScreen() {
           step={2}
           title="언제 만날까요?"
           subtitle="가능한 시간을 탭해서 표시해 주세요"
+          onBack={goPrev}
         />
 
-        <View style={styles.card}>
-          <View style={styles.headRow}>
-            <View style={styles.hourLabel} />
+        <View style={styles.gridWrap}>
+          <AvailabilityGrid
+            days={days}
+            picked={picked}
+            others={othersCells}
+            onToggle={toggle}
+          />
+        </View>
 
-            {days.map((day) => (
-              <View key={day.date} style={styles.col}>
-                <Text
-                  style={[
-                    styles.headText,
-                    day.label === '일' &&
-                      styles.sunday,
-                  ]}
-                >
-                  {day.month}/{day.day}·{day.label}
-                </Text>
-              </View>
-            ))}
+        <View style={styles.chipsWrap}>
+          <PickedSlotChips slots={slots} />
+        </View>
+
+        {status ? (
+          <View style={styles.chipsWrap}>
+            <SubmissionStatus members={status.members} />
           </View>
-
-          {HOURS.map((hour) => (
-            <View key={hour} style={styles.gridRow}>
-              <Text style={styles.hourLabel}>
-                {hour}
-              </Text>
-
-              {days.map((day) => {
-                const k = cellKey(
-                  day.date,
-                  hour,
-                );
-
-                const on = picked.has(k);
-                const disabled = isPastCell(
-                  day.date,
-                  hour,
-                );
-
-                return (
-                  <View
-                    key={day.date}
-                    style={styles.col}
-                  >
-                    <Pressable
-                      disabled={disabled}
-                      style={[
-                        styles.cell,
-                        on && styles.cellOn,
-                        disabled &&
-                          styles.cellDisabled,
-                      ]}
-                      onPress={() =>
-                        toggle(day.date, hour)
-                      }
-                    />
-                  </View>
-                );
-              })}
-            </View>
-          ))}
-        </View>
-
-        <Text style={styles.pickedTitle}>
-          선택한 시간 {slots.length}개
-        </Text>
-
-        <View style={styles.chipRow}>
-          {slots.length === 0 ? (
-            <Text style={styles.emptyText}>
-              아직 선택한 시간이 없어요.
-            </Text>
-          ) : (
-            slots.map((slot) => (
-              <View
-                key={slot.id}
-                style={styles.chip}
-              >
-                <Text style={styles.chipText}>
-                  {slot.label}
-                </Text>
-              </View>
-            ))
-          )}
-        </View>
+        ) : null}
 
         <CompleteButton
-          label="AI 추천 받기"
+          label={saving ? '저장 중' : '선택 완료'}
           showNext
-          disabled={
-            slots.length === 0 || !place
-          }
+          disabled={saving || slots.length === 0 || !origin}
           style={styles.cta}
-          onPress={goRecommend}
+          onPress={() => void goNext()}
         />
       </ScrollView>
     </View>
@@ -209,13 +199,14 @@ const styles = StyleSheet.create({
     paddingBottom: s(16),
   },
 
-  card: {
+  gridWrap: {
     marginTop: s(10),
     marginHorizontal: s(11.5),
-    borderRadius: s(10),
-    backgroundColor: colors.card,
-    paddingHorizontal: s(8),
-    paddingVertical: s(8),
+  },
+
+  chipsWrap: {
+    marginTop: s(8),
+    marginHorizontal: s(11.5),
   },
 
   headRow: {
@@ -245,10 +236,9 @@ const styles = StyleSheet.create({
 
   headText: {
     textAlign: 'center',
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(5.5),
     lineHeight: fs(8),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
 
@@ -273,10 +263,9 @@ const styles = StyleSheet.create({
   pickedTitle: {
     marginTop: s(10),
     marginLeft: s(11.5),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(8),
     lineHeight: fs(11),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
 
@@ -296,10 +285,9 @@ const styles = StyleSheet.create({
   },
 
   chipText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(6),
     lineHeight: fs(8),
-    fontWeight: weight.semibold,
     color: colors.primary,
   },
 

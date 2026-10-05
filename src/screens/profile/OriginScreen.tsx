@@ -10,7 +10,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useTopInset } from '../../theme/insets';
 
 import AppHeader from '../../components/AppHeader';
 import TmapMap from '../../components/TmapMap';
@@ -21,7 +22,7 @@ import { useNavigation } from '../../navigation/NavigationContext';
 import { useMyProfile } from '../../profile/useMyProfile';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 /**
  * Figma 프로필/지도 위치 지정 (256:2333) — 220 x 486
@@ -32,7 +33,8 @@ import { fontFamily, weight } from '../../theme/typography';
  * 검색으로 고른 장소의 좌표를 `start_latitude/longitude` 까지 저장한다.
  */
 export default function OriginScreen() {
-  const insets = useSafeAreaInsets();
+  /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
+  const topInset = useTopInset();
   const { resetTo } = useNavigation();
   const { userId, bundle, reload } = useMyProfile();
 
@@ -61,6 +63,8 @@ export default function OriginScreen() {
         address: saved.startLocationName,
         lat: saved.startLat,
         lng: saved.startLng,
+        /* 저장된 값에는 업종이 없다 — 사는 곳이라 애초에 쓸 일도 없다 */
+        category: '',
       });
     }
     setLoaded(true);
@@ -107,7 +111,10 @@ export default function OriginScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
+      {/* 상태바 자리. 배경을 칠하지 않아 화면 배경이 그대로 비친다 —
+          헤더와 같은 색으로 칠하면 둘이 한 덩어리로 보여서 헤더가
+          어디서 시작하는지 알 수 없다 */}
+      <View style={{ height: topInset }} />
       <AppHeader />
 
       <ScrollView
@@ -126,7 +133,7 @@ export default function OriginScreen() {
               value={query}
               onChangeText={setQuery}
               placeholder="주소 또는 장소 검색"
-              placeholderTextColor={colors.textMuted}
+              placeholderTextColor={colors.placeholder}
               returnKeyType="search"
               onSubmitEditing={() => void runSearch()}
             />
@@ -223,10 +230,9 @@ const styles = StyleSheet.create({
     paddingBottom: s(20),
   },
   title: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(12),
     lineHeight: fs(16),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   sub: {
@@ -300,10 +306,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   searchButtonText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(7),
     lineHeight: fs(9),
-    fontWeight: weight.bold,
     color: colors.textOnAccent,
   },
   searchError: {
@@ -330,10 +335,9 @@ const styles = StyleSheet.create({
     borderTopColor: 'transparent',
   },
   resultName: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(7.5),
     lineHeight: fs(10),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   resultAddress: {
@@ -370,10 +374,9 @@ const styles = StyleSheet.create({
   },
   cardAddress: {
     marginTop: s(3),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(8),
     lineHeight: fs(11),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   cardDetail: {

@@ -2,7 +2,7 @@ import { StyleProp, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle
 
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 type Props = TextInputProps & {
   label: string;
@@ -18,7 +18,7 @@ export default function TextField({ label, containerStyle, style, ...rest }: Pro
       <Text style={styles.label}>{label}</Text>
       <TextInput
         style={[styles.input, style]}
-        placeholderTextColor={colors.textMuted}
+        placeholderTextColor={colors.placeholder}
         {...rest}
       />
     </View>
@@ -34,9 +34,8 @@ export const fieldStyles = StyleSheet.create({
     paddingHorizontal: s(8),
   },
   value: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(8),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
 });
@@ -55,9 +54,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     paddingHorizontal: s(8),
     paddingVertical: 0,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(8),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
 });

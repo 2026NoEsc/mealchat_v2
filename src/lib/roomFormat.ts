@@ -35,7 +35,20 @@ function durationText(ms: number): string {
 }
 
 /** 목록에 쓰는 짧은 표기 */
-export function remainingLabel(expiresAt: string, now: Date = new Date()): string | null {
+/**
+ * 방이 사라지기까지 남은 시간.
+ *
+ * 정산 전에는 세지 않는다. 방을 만들 때 잡아 둔 expires_at 은 임시값이고,
+ * 실제 기한은 정산이 끝나야 정해진다(그때 24시간으로 다시 잡힌다).
+ * 그 전에 "7일 남음" 이라고 세면 있지도 않은 마감을 알려 주는 셈이다.
+ */
+export function remainingLabel(
+  expiresAt: string,
+  settled: boolean,
+  now: Date = new Date(),
+): string | null {
+  if (!settled) return null;
+
   const expires = new Date(expiresAt);
   if (Number.isNaN(expires.getTime())) return null;
 
@@ -49,12 +62,40 @@ export function remainingLabel(expiresAt: string, now: Date = new Date()): strin
  * 채팅방 헤더에 쓰는 한 문장.
  * 목록용 표기를 그대로 문장에 넣으면 "종료됨 방이 사라져요" 처럼 어색해진다.
  */
-export function roomTimerLabel(expiresAt: string, now: Date = new Date()): string {
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** 시안(2111:16114) 의 `11:47:22` — 두 자리씩 끊어 붙인다 */
+function clockText(ms: number): string {
+  const total = Math.floor(ms / 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(Math.floor(total / 3600))}:${pad(Math.floor(total / 60) % 60)}:${pad(total % 60)}`;
+}
+
+/**
+ * 방이 사라지기까지 남은 시간.
+ *
+ * 정산을 마친 방은 24시간만 남으므로, 하루 안쪽이면 시안처럼 초까지 세어 준다.
+ * 그보다 많이 남았을 때까지 `168:00:00` 로 보여 주면 읽히지 않아서, 그때는
+ * 예전처럼 일·시간 단위로 뭉뚱그린다.
+ */
+export function roomTimerLabel(
+  expiresAt: string,
+  settled: boolean,
+  now: Date = new Date(),
+): string {
+  /*
+   * 정산 전에는 카운트다운이 아니라 규칙을 알려 준다. 기한은 정산이 끝나야
+   * 정해지므로, 그 전에 세는 숫자는 실제 마감과 아무 관계가 없다.
+   */
+  if (!settled) return '정산 후 24시간 뒤 사라져요';
+
   const expires = new Date(expiresAt);
   if (Number.isNaN(expires.getTime())) return '';
 
   const ms = expires.getTime() - now.getTime();
   if (ms <= 0) return '이미 종료된 밥약이에요';
+
+  if (ms < DAY_MS) return `${clockText(ms)} 후 방이 사라져요.`;
 
   return `${durationText(ms)} 뒤 방이 사라져요`;
 }
@@ -89,9 +130,10 @@ export function dayLabel(iso: string): string {
 export function participantMeta(
   participantCount: number,
   expiresAt: string,
+  settled: boolean,
   now: Date = new Date(),
 ): string {
-  const remaining = remainingLabel(expiresAt, now);
+  const remaining = remainingLabel(expiresAt, settled, now);
   const people = `${participantCount}명`;
   return remaining ? `${people} · ${remaining}` : people;
 }
@@ -115,6 +157,21 @@ export function upcomingBadge(meetingDate: string, now: Date = new Date()): Upco
   const days = daysUntil(meetingDate, now);
   if (days === null || days < 0) return null;
   return days === 0 ? { label: '오늘', tone: 'today' } : { label: `D-${days}`, tone: 'countdown' };
+}
+
+/**
+ * `8월 13일` — 채팅방 맨 위 띠처럼 좁은 자리에 쓸 짧은 날짜.
+ *
+ * 해가 다르면 `2027년 1월 2일` 처럼 해를 붙인다. 방은 길어야 며칠 살기 때문에
+ * 올해 날짜에 해를 적으면 자리만 먹는다.
+ */
+export function meetingDateText(meetingDate: string, now: Date = new Date()): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(meetingDate.trim());
+  if (!match) return meetingDate.trim();
+
+  const [, year, month, day] = match;
+  const short = `${Number(month)}월 ${Number(day)}일`;
+  return Number(year) === now.getFullYear() ? short : `${year}년 ${short}`;
 }
 
 /** `2026년 8월 13일 · 버거킹 하단점` — 장소가 없으면 날짜만 */

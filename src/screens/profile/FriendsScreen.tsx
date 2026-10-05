@@ -1,7 +1,6 @@
 import { ChevronDown, UserMinus } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,10 +8,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useTopInset } from '../../theme/insets';
 
 import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
+import { notify } from '../../lib/confirm';
 import {
   addFriend,
   fetchMyFriends,
@@ -23,17 +24,19 @@ import {
 import Toggle from '../../components/ui/Toggle';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 /** friends.ts 의 검색 결과 행 */
 type SearchedProfile = { id: string; name: string; tag: string; avatar_color: string };
 
 export default function FriendsScreen() {
-  const insets = useSafeAreaInsets();
+  /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
+  const topInset = useTopInset();
   const { user } = useAuth();
   const userId = user?.id ?? null;
 
   const [friends, setFriends] = useState<Friend[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [candidates, setCandidates] = useState<SearchedProfile[]>([]);
@@ -41,7 +44,12 @@ export default function FriendsScreen() {
 
   const load = useCallback(async () => {
     if (!userId) return;
-    const { data } = await fetchMyFriends(userId);
+    const { data, error } = await fetchMyFriends(userId);
+    if (error) {
+      setLoadError(error.message);
+      return;
+    }
+    setLoadError(null);
     setFriends(data ?? []);
   }, [userId]);
 
@@ -56,8 +64,19 @@ export default function FriendsScreen() {
   const search = async () => {
     if (!userId) return;
     setBusy(true);
-    const { data } = await searchProfilesByTag(keyword, userId);
+    const { data, error } = await searchProfilesByTag(keyword, userId);
     setBusy(false);
+
+    /*
+     * 실패를 삼키면 안 된다. 예전에는 error 를 버려서, 검색이 막히거나
+     * 끊겨도 화면에는 "결과 없음" 과 똑같이 보였다 — 사람은 그 사람이
+     * 없는 줄 안다.
+     */
+    if (error) {
+      setCandidates([]);
+      notify('검색하지 못했어요', error.message);
+      return;
+    }
 
     const already = new Set(friends.map((friend) => friend.profileId));
     setCandidates((data ?? []).filter((profile) => !already.has(profile.id)));
@@ -70,7 +89,7 @@ export default function FriendsScreen() {
     setBusy(false);
 
     if (error) {
-      Alert.alert('추가 실패', error.message);
+      notify('추가 실패', error.message);
       return;
     }
     setCandidates((prev) => prev.filter((profile) => profile.id !== targetId));
@@ -83,7 +102,7 @@ export default function FriendsScreen() {
     setBusy(false);
 
     if (error) {
-      Alert.alert('삭제 실패', error.message);
+      notify('삭제 실패', error.message);
       return;
     }
     void load();
@@ -91,7 +110,10 @@ export default function FriendsScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
+      {/* 상태바 자리. 배경을 칠하지 않아 화면 배경이 그대로 비친다 —
+          헤더와 같은 색으로 칠하면 둘이 한 덩어리로 보여서 헤더가
+          어디서 시작하는지 알 수 없다 */}
+      <View style={{ height: topInset }} />
       <AppHeader />
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
@@ -99,7 +121,9 @@ export default function FriendsScreen() {
         <Text style={styles.sub}>함께 밥약을 잡을 메이트 {friends.length}명</Text>
 
         <View style={styles.card}>
-          {friends.length === 0 ? (
+          {loadError ? (
+            <Text style={styles.empty}>친구 목록을 불러오지 못했어요: {loadError}</Text>
+          ) : friends.length === 0 ? (
             <Text style={styles.empty}>아직 등록된 메이트가 없어요</Text>
           ) : (
             friends.map((friend, i) => (
@@ -133,15 +157,15 @@ export default function FriendsScreen() {
 
         {inviteOpen ? (
           <View style={styles.card}>
-            <Text style={styles.inviteHint}>닉네임이나 태그로 찾아서 추가하세요</Text>
+            <Text style={styles.inviteHint}>닉네임이나 @로 시작하는 유저 코드로 찾아서 추가하세요</Text>
 
             <View style={styles.searchRow}>
               <TextInput
                 style={styles.searchInput}
                 value={keyword}
                 onChangeText={setKeyword}
-                placeholder="닉네임 또는 태그"
-                placeholderTextColor={colors.textMuted}
+                placeholder="닉네임 또는 @user-코드"
+                placeholderTextColor={colors.placeholder}
                 autoCapitalize="none"
                 onSubmitEditing={() => void search()}
               />
@@ -188,9 +212,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceSunken,
   },
   avatarInitial: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(11),
-    fontWeight: weight.bold,
     color: colors.textOnAccent,
   },
   searchRow: {
@@ -219,9 +242,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   searchButtonText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(7),
-    fontWeight: weight.bold,
     color: colors.textOnAccent,
   },
   body: {
@@ -230,10 +252,9 @@ const styles = StyleSheet.create({
     paddingBottom: s(20),
   },
   title: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(12),
     lineHeight: fs(16),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   sub: {
@@ -275,10 +296,9 @@ const styles = StyleSheet.create({
     marginLeft: s(8),
   },
   name: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(7.5),
     lineHeight: fs(10),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   status: {
@@ -316,10 +336,9 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: s(4),
   },
   inviteToggleText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.extrabold,
     fontSize: fs(9.5),
     lineHeight: fs(13),
-    fontWeight: weight.extrabold,
     color: colors.textOnAccent,
   },
   chevronOpen: {

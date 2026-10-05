@@ -1,11 +1,19 @@
 import { Clock, Lock, Pencil, Plus } from 'lucide-react-native';
 import { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useTopInset } from '../../theme/insets';
 
 import { useAuth } from '../../auth/AuthProvider';
-import AppHeader from '../../components/AppHeader';
-import { buildWeeksOf, columnOfIn, MONTH, shiftMonth, WEEKDAYS, YEAR } from '../../lib/calendar';
+import PageHeader from '../../components/PageHeader';
+import {
+  buildWeeksOf,
+  columnOfIn,
+  daysInMonth,
+  shiftMonth,
+  todayParts,
+  WEEKDAYS,
+} from '../../lib/calendar';
 import { createEvent, deleteNote, saveMemo as saveMemoNote, updateEvent } from '../../lib/calendarNotes';
 import { groupNotes, useMonthNotes } from '../../schedule/useMonthNotes';
 import { fs, s } from '../../theme/scale';
@@ -13,22 +21,36 @@ import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
 import { EventSheet, MemoSheet, type PersonalEvent } from './PersonalEventSheet';
 
-/** 연한 배경으로 강조된 날 (Figma 표현 유지) */
-const TINTED = [3, 18];
-
 /**
  * Figma 일정 조율 (309:1077) — 220 x 486
  * 타이틀 y79 / 서브 y102 / 캘린더 카드 x8 y116 206×325.8 /
  * 주 행 y37.4 부터 28.83 간격 / 구분선 y181.6 / 일정 행 y208.2 부터 28.8 간격
  */
 export default function ScheduleHomeScreen() {
-  const insets = useSafeAreaInsets();
+  /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
+  const topInset = useTopInset();
   const { user } = useAuth();
   const userId = user?.id ?? null;
-  const [month, setMonth] = useState({ year: YEAR, month: MONTH });
-  const [selected, setSelected] = useState(13);
+  /* 상수로 박아 두면 다음 달에 앱을 열어도 지난 달이 나온다 */
+  const [today] = useState(todayParts);
+  const [month, setMonth] = useState({ year: today.year, month: today.month });
+  const [selected, setSelected] = useState(today.day);
   const weeks = buildWeeksOf(month.year, month.month);
   const [autoSync, setAutoSync] = useState(true);
+
+  /**
+   * 달을 옮긴다. 고른 날이 새 달에 없으면 그 달의 마지막 날로 당긴다.
+   *
+   * 그냥 두면 8월 31일을 고른 채 9월로 넘어갔을 때 "9월 31일" 이 헤더에 뜨고,
+   * 그 날짜로 일정을 만들면 서버가 `date/time field value out of range` 로 거절한다.
+   * 달력 격자에는 그런 칸이 없으니 사용자는 무엇이 잘못됐는지 알 수도 없다.
+   */
+  const goMonth = (delta: number) =>
+    setMonth((current) => {
+      const next = shiftMonth(current.year, current.month, delta);
+      setSelected((day) => Math.min(day, daysInMonth(next.year, next.month)));
+      return next;
+    });
 
   const { notes, status, reload } = useMonthNotes(month.year, month.month);
   const { eventsByDay, memosByDay, memoIdByDay } = groupNotes(notes);
@@ -61,71 +83,90 @@ export default function ScheduleHomeScreen() {
   const dateOf = (day: number) =>
     `${month.year}-${String(month.month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
-  const saveEvent = async (event: PersonalEvent) => {
-    if (!userId) return;
-    const [start, end] = event.time.split('~').map((part) => part.trim());
-    /* id 가 서버에 있는 것이면 수정, 시트가 만든 임시 id 면 새로 만든다 */
-    const existing = events.some((item) => item.id === event.id);
+  /** 저장에 성공했을 때만 true — 실패하면 시트가 열린 채로 남는다 */
+  const saveEvent = async (event: PersonalEvent): Promise<boolean> => {
+    if (!userId) return false;
+    try {
+      const [start, end] = event.time.split('~').map((part) => part.trim());
+      /* id 가 서버에 있는 것이면 수정, 시트가 만든 임시 id 면 새로 만든다 */
+      const existing = events.some((item) => item.id === event.id);
 
-    const error = existing
-      ? await updateEvent(event.id, {
-          title: event.title,
-          time: start,
-          endTime: end,
-          color: event.color,
-        })
-      : (
-          await createEvent({
-            profileId: userId,
-            date: dateOf(selected),
+      const error = existing
+        ? await updateEvent(event.id, {
             title: event.title,
             time: start,
             endTime: end,
             color: event.color,
           })
-        ).error;
+        : (
+            await createEvent({
+              profileId: userId,
+              date: dateOf(selected),
+              title: event.title,
+              time: start,
+              endTime: end,
+              color: event.color,
+            })
+          ).error;
 
-    if (error) {
-      Alert.alert('저장 실패', error.message);
-      return;
+      if (error) {
+        Alert.alert('저장 실패', error.message);
+        return false;
+      }
+      reload();
+      return true;
+    } catch {
+      Alert.alert('저장 실패', '일정을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.');
+      return false;
     }
-    reload();
   };
 
   const deleteEvent = async (id: string) => {
-    const error = await deleteNote(id);
-    if (error) {
-      Alert.alert('삭제 실패', error.message);
-      return;
+    try {
+      const error = await deleteNote(id);
+      if (error) {
+        Alert.alert('삭제 실패', error.message);
+        return;
+      }
+      reload();
+    } catch {
+      Alert.alert('삭제 실패', '일정을 삭제하지 못했어요. 잠시 후 다시 시도해 주세요.');
     }
-    reload();
   };
 
-  const saveMemo = async (next: string) => {
-    if (!userId) return;
-    const error = await saveMemoNote({
-      profileId: userId,
-      date: dateOf(selected),
-      existingId: memoIdByDay[selected] ?? null,
-      content: next,
-    });
-    if (error) {
-      Alert.alert('저장 실패', error.message);
-      return;
+  const saveMemo = async (next: string): Promise<boolean> => {
+    if (!userId) return false;
+    try {
+      const error = await saveMemoNote({
+        profileId: userId,
+        date: dateOf(selected),
+        existingId: memoIdByDay[selected] ?? null,
+        content: next,
+      });
+      if (error) {
+        Alert.alert('저장 실패', error.message);
+        return false;
+      }
+      reload();
+      return true;
+    } catch {
+      Alert.alert('저장 실패', '메모를 저장하지 못했어요. 잠시 후 다시 시도해 주세요.');
+      return false;
     }
-    reload();
   };
 
   return (
     <View style={styles.screen}>
-      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
-      <AppHeader />
+      {/* 상태바 자리. 배경을 칠하지 않아 화면 배경이 그대로 비친다 —
+          헤더와 같은 색으로 칠하면 둘이 한 덩어리로 보여서 헤더가
+          어디서 시작하는지 알 수 없다 */}
+      <View style={{ height: topInset }} />
+      {/* 시안 2159:895 — 화면 이름이 헤더 자리에 들어간다 */}
+      <PageHeader title="실시간 캘린더 조율" />
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        <Text style={styles.title}>실시간 캘린더 조율</Text>
-
+        {/* 부제는 시안(2159:763)에서 빠졌다 — 화면 이름이 헤더로 올라가며 자리가 겹쳤다 */}
         <View style={styles.subRow}>
-          <Text style={styles.sub}>구체적인 약속 일정을 정해주세요</Text>
           <Text style={styles.syncLabel}>자동 연동</Text>
           <Pressable
             style={[styles.toggle, autoSync && styles.toggleOn]}
@@ -136,13 +177,13 @@ export default function ScheduleHomeScreen() {
 
         <View style={styles.card}>
           <View style={styles.nav}>
-            <Pressable hitSlop={s(8)} onPress={() => setMonth((m) => shiftMonth(m.year, m.month, -1))}>
+            <Pressable hitSlop={s(8)} onPress={() => goMonth(-1)}>
               <Text style={styles.navArrow}>‹</Text>
             </Pressable>
             <Text style={styles.navMonth}>
               {month.year}년 {month.month}월
             </Text>
-            <Pressable hitSlop={s(8)} onPress={() => setMonth((m) => shiftMonth(m.year, m.month, 1))}>
+            <Pressable hitSlop={s(8)} onPress={() => goMonth(1)}>
               <Text style={styles.navArrow}>›</Text>
             </Pressable>
           </View>
@@ -160,12 +201,16 @@ export default function ScheduleHomeScreen() {
               {week.map((day, di) => {
                 if (day === null) return <View key={di} style={styles.cell} />;
                 const isSelected = day === selected;
+                const isToday =
+                  day === today.day &&
+                  month.year === today.year &&
+                  month.month === today.month;
                 return (
                   <Pressable
                     key={di}
                     style={[
                       styles.cell,
-                      TINTED.includes(day) && styles.cellTinted,
+                      isToday && styles.cellToday,
                       isSelected && styles.cellSelected,
                     ]}
                     onPress={() => setSelected(day)}>
@@ -195,6 +240,14 @@ export default function ScheduleHomeScreen() {
 
           {status === 'loading' ? (
             <Text style={styles.emptyText}>불러오는 중...</Text>
+          ) : status === 'error' ? (
+            /* 못 불러온 것을 "없다" 고 적으면 사용자가 자기 일정이 지워진 줄 안다 */
+            <View style={styles.retryBox}>
+              <Text style={styles.emptyText}>일정을 불러오지 못했어요</Text>
+              <Pressable style={styles.retryButton} onPress={reload}>
+                <Text style={styles.retryText}>다시 시도</Text>
+              </Pressable>
+            </View>
           ) : events.length === 0 ? (
             <Text style={styles.emptyText}>등록된 일정이 없어요</Text>
           ) : (
@@ -236,21 +289,25 @@ export default function ScheduleHomeScreen() {
       <EventSheet
         visible={eventSheet.open}
         session={eventSheet.session}
+        year={month.year}
+        month={month.month}
         day={selected}
         editing={eventSheet.editing}
         // editing 을 남겨둬야 닫히는 동안 제목·버튼이 그대로 보인다
         onClose={() => setEventSheet((prev) => ({ ...prev, open: false }))}
-        onSave={(event) => void saveEvent(event)}
+        onSave={saveEvent}
         onDelete={(id) => void deleteEvent(id)}
       />
 
       <MemoSheet
         visible={memoSheet.open}
         session={memoSheet.session}
+        year={month.year}
+        month={month.month}
         day={selected}
         memo={memo}
         onClose={() => setMemoSheet((prev) => ({ ...prev, open: false }))}
-        onSave={(next) => void saveMemo(next)}
+        onSave={saveMemo}
       />
     </View>
   );
@@ -271,35 +328,20 @@ const styles = StyleSheet.create({
   body: {
     paddingBottom: s(16),
   },
-  title: {
-    // x14 y79 h24
-    marginTop: s(7),
-    marginLeft: s(14),
-    fontFamily: fontFamily.body,
-    fontSize: fs(14),
-    lineHeight: fs(24),
-    fontWeight: weight.bold,
-    color: colors.textPrimary,
-  },
+  /* 자동 연동 토글 — 시안 2159:892 (x194 y83.5). 헤더 하단(y72)에서 11 */
   subRow: {
+    marginTop: s(11),
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'flex-end',
     marginLeft: s(15),
-    marginRight: s(15),
-  },
-  sub: {
-    flex: 1,
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(9),
-    color: colors.textMuted,
+    marginRight: s(12),
   },
   syncLabel: {
     marginRight: s(3),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6),
     lineHeight: fs(8),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   toggle: {
@@ -323,9 +365,9 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
   },
   card: {
-    // x8 y116 w206
+    // x7 y96 w206 — 시안 2159:767
     marginTop: s(5),
-    marginHorizontal: s(8),
+    marginHorizontal: s(7),
     borderRadius: s(12),
     backgroundColor: colors.card,
     paddingHorizontal: s(7.2),
@@ -347,10 +389,9 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   navMonth: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(9),
     lineHeight: fs(11),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   weekRow: {
@@ -366,7 +407,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cellTinted: {
+  /* 오늘 — Figma 가 [3, 18] 을 연한 배경으로 강조하던 자리를 실제 정보로 쓴다 */
+  cellToday: {
     backgroundColor: '#FFF5EB',
   },
   cellSelected: {
@@ -413,10 +455,9 @@ const styles = StyleSheet.create({
   },
   dayTitle: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(8.5),
     lineHeight: fs(11),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   addButton: {
@@ -430,10 +471,9 @@ const styles = StyleSheet.create({
     gap: s(3),
   },
   addText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6.5),
     lineHeight: fs(9),
-    fontWeight: weight.bold,
     color: colors.textOnAccent,
   },
   eventRow: {
@@ -453,10 +493,9 @@ const styles = StyleSheet.create({
     marginLeft: s(6),
   },
   eventTitle: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(7.5),
     lineHeight: fs(10),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   eventTimeRow: {
@@ -514,6 +553,23 @@ const styles = StyleSheet.create({
     fontSize: fs(6.5),
     lineHeight: fs(9),
     color: colors.textMuted,
+  },
+  retryBox: {
+    alignItems: 'center',
+  },
+  retryButton: {
+    marginTop: s(-4),
+    paddingHorizontal: s(8),
+    paddingVertical: s(3),
+    borderRadius: s(6),
+    backgroundColor: colors.primarySoft,
+  },
+  retryText: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(6),
+    lineHeight: fs(8),
+    fontWeight: weight.bold,
+    color: colors.primary,
   },
   memoTextFilled: {
     color: colors.textPrimary,

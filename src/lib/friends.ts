@@ -76,13 +76,34 @@ export async function searchProfilesByTag(
   keyword: string,
   excludeId: string,
 ): Promise<{ data: PublicProfileRow[] | null; error: Error | null }> {
-  const trimmed = keyword.trim();
+  const trimmed = keyword.trim().replace(/^@/, '');
   if (!trimmed) return { data: [], error: null };
+
+  /* 프로필에 표시되는 @user-xxxxxxxx 는 정확한 코드로 찾는다. */
+  if (/^user-[0-9a-f]{8}$/i.test(trimmed)) {
+    const { data, error } = await supabase
+      .from('public_profiles')
+      .select('id, name, tag, avatar_color')
+      .ilike('tag', trimmed)
+      .neq('id', excludeId)
+      .returns<PublicProfileRow[]>();
+    return { data: data ?? null, error };
+  }
+
+  /*
+   * or() 는 쉼표로 조건을 가르고 괄호로 묶는 문법이다. 검색어에 , ( ) 가 섞이면
+   * 필터가 통째로 깨져 서버가 거절하고, 화면에는 "결과 없음" 처럼 보인다.
+   * 따옴표로 감싸고 안쪽 따옴표·역슬래시만 피해 주면 글자 그대로 넘어간다.
+   *
+   * 와일드카드는 % 가 아니라 * 다 — PostgREST 가 * 를 % 로 바꿔 준다.
+   */
+  const escaped = trimmed.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const pattern = `"*${escaped}*"`;
 
   const { data, error } = await supabase
     .from('public_profiles')
     .select('id, name, tag, avatar_color')
-    .or(`tag.ilike.%${trimmed}%,name.ilike.%${trimmed}%`)
+    .or(`tag.ilike.${pattern},name.ilike.${pattern}`)
     .neq('id', excludeId)
     .limit(20)
     .returns<PublicProfileRow[]>();

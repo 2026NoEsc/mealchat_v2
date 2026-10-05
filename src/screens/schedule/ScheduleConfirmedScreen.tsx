@@ -1,284 +1,263 @@
+import { CalendarDays, MapPin, Sparkles, Users } from 'lucide-react-native';
+import { useCallback, useEffect, useState } from 'react';
 import {
-  CalendarDays,
-  MapPin,
-  Sparkles,
-  Users,
-} from 'lucide-react-native';
-import { useState } from 'react';
-import {
+  ActivityIndicator,
   Alert,
   Image,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useAuth } from '../../auth/AuthProvider';
+import { useTopInset } from '../../theme/insets';
+
 import AppHeader from '../../components/AppHeader';
 import { CompleteButton } from '../../components/ui/Button';
-import {
-  createRoom,
-  inviteFriendToRoom,
-} from '../../lib/rooms';
-import { useNavigation } from '../../navigation/NavigationContext';
+import { BREAKTIME_NOTICE, hasBreaktimeRisk } from '../../lib/breaktime';
+import type { MyLocation } from '../../lib/myLocation';
+import { buildPlaceCandidates } from '../../lib/placeCandidates';
+import { advanceRoomStage, fetchRoom } from '../../lib/rooms';
 import { formatSlotDate } from '../../lib/scheduleSlots';
+import { supabase } from '../../lib/supabase';
+import { describeBasis } from '../../lib/tasteKeywords';
+import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors, shadows } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
-import type { RecommendationPick } from './scheduleTypes';
+import { fontFamily } from '../../theme/typography';
+import type { ScheduleRecommendResponse, SlotPick } from './scheduleTypes';
 
 const moa = require('../../../assets/brand/moa.png');
 
+/*
+ * Edge Function 은 최악의 경우 20 초짜리 시도를 세 번 하고 사이에 백오프가 붙어
+ * 약 61 초까지 간다. 그보다 짧게 끊으면 서버는 아직 답을 만드는 중인데 앱만
+ * 포기하는 꼴이라 여유를 두고 70 초로 잡는다.
+ */
+const INVOKE_TIMEOUT_MS = 70_000;
+
+/** supabase-js 가 감싼 오류에서 서버가 보낸 문구를 꺼낸다 */
+async function readFunctionError(error: unknown): Promise<string | null> {
+  const context = (error as { context?: unknown })?.context;
+  if (!(context instanceof Response)) return null;
+
+  try {
+    const body = await context.clone().json();
+    const message = (body as { error?: unknown })?.error;
+    return typeof message === 'string' && message.trim() ? message : null;
+  } catch {
+    return null;
+  }
+}
+
 type Params = {
-  pick?: RecommendationPick;
+  roomId?: string;
   name?: string;
   invitees?: string[];
+  origin?: MyLocation;
 };
 
+/**
+ * STEP 3 — AI 일정 추천과 확정.
+ *
+ * 방은 STEP 1 에서 이미 만들어졌고 STEP 2 에서 각자 시간을 냈다. 여기서는 모인
+ * 응답으로 시간을 추천받아 하나를 고르고, 확정하면 방이 '식당 결정' 단계로
+ * 넘어간다 — 어디서 먹을지는 방 안에서 정한다.
+ */
 export default function ScheduleConfirmedScreen() {
-  const insets = useSafeAreaInsets();
+  /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
+  const topInset = useTopInset();
 
-  const {
-    navigate,
-    current,
-  } = useNavigation();
+  const { navigate, goBackWith, current } = useNavigation();
 
-  const { user } = useAuth();
+  const params = current.params as Params | undefined;
 
-  const params =
-    current.params as Params | undefined;
+  const roomId = params?.roomId ?? null;
+  const title = params?.name || '새 밥약';
+  const invitees = params?.invitees ?? [];
+  const origin = params?.origin;
 
-  const pick =
-    params?.pick;
+  const [picks, setPicks] = useState<SlotPick[]>([]);
+  const [selected, setSelected] = useState(0);
+  const [basis, setBasis] = useState<string | null>(null);
 
-  const title =
-    params?.name || '새 밥약';
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
-  const invitees =
-    params?.invitees ?? [];
-
-  const [creating, setCreating] =
-    useState(false);
-
-  const openRoom = async () => {
-    if (!user?.id) {
-      Alert.alert(
-        '로그인 필요',
-        '로그인 정보를 확인해 주세요.',
-      );
-
+  const load = useCallback(async () => {
+    if (!roomId || !origin) {
+      setErrorMessage('방 정보가 없습니다.');
+      setLoading(false);
       return;
     }
 
-    if (!pick) {
-      Alert.alert(
-        '일정 정보 없음',
-        '확정할 일정 정보가 없습니다.',
-      );
-
-      return;
-    }
-
-    setCreating(true);
+    setLoading(true);
+    setErrorMessage(null);
 
     try {
-      const meetingDate =
-        pick.slot.date;
+      const room = await fetchRoom(roomId);
+      const memberIds = (room.data?.participants ?? [])
+        .map((participant) => participant.profileId)
+        .filter((id): id is string => Boolean(id));
 
-      const confirmedSlot =
-        `${pick.slot.date} ` +
-        `${pick.slot.startTime}~${pick.slot.endTime}` +
-        ` · ${pick.place.name}`;
+      /*
+       * 식당은 여기서 정하지 않지만, 엣지 함수가 후보를 요구한다 — 시간과 식당을
+       * 한 번에 평가하기 때문이다. 여기서는 시간 추천만 쓰고 식당은 버린다.
+       */
+      const candidates = await buildPlaceCandidates(memberIds, origin);
 
-      const {
-        roomId,
-        error,
-      } = await createRoom({
-        ownerId: user.id,
-        title,
-        meetingDate,
-
-        expiresAt: new Date(
-          `${meetingDate}T23:59:59`,
-        ).toISOString(),
-
-        locationName:
-          pick.place.name,
-
-        confirmedSlot,
-      });
-
-      if (error || !roomId) {
-        Alert.alert(
-          '방 만들기 실패',
-          error?.message ??
-            '잠시 후 다시 시도해 주세요.',
-        );
-
+      if (!candidates || candidates.candidates.length === 0) {
+        setErrorMessage('중간 지점 근처에서 후보를 찾지 못했어요.');
         return;
       }
 
-      const failed: string[] = [];
+      setBasis(describeBasis(candidates.midpoint.contributorCount, candidates.keywords[0]));
 
-      for (const friendId of invitees) {
-        const result =
-          await inviteFriendToRoom(
-            roomId,
-            friendId,
-          );
-
-        if (result.error) {
-          failed.push(friendId);
-        }
-      }
-
-      if (failed.length > 0) {
-        Alert.alert(
-          '일부 초대 실패',
-          `${failed.length}명을 넣지 못했어요. 방에서 초대 코드를 공유해 주세요.`,
-        );
-      }
-
-      navigate('ChatRoom', {
-        roomId,
-        title,
+      const { data, error } = await supabase.functions.invoke('schedule-recommend', {
+        body: { meetingName: title, roomId, placeCandidates: candidates.candidates },
+        timeout: INVOKE_TIMEOUT_MS,
       });
+
+      if (error) throw error;
+
+      const response = data as ScheduleRecommendResponse;
+      if (!response || !Array.isArray(response.slotRecommendations)) {
+        throw new Error('추천 응답 형식이 올바르지 않습니다.');
+      }
+
+      setPicks([...response.slotRecommendations].sort((a, b) => a.rank - b.rank));
+      setSelected(0);
+    } catch (error) {
+      console.error('schedule recommendation error:', error);
+      const detail = await readFunctionError(error);
+      setErrorMessage(detail ?? 'AI 추천을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
     } finally {
-      setCreating(false);
+      setLoading(false);
+    }
+  }, [roomId, origin, title]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const goPrev = () => goBackWith({ roomId, name: title, invitees, origin });
+
+  const chosen = picks[selected];
+
+  /*
+   * 일정을 확정하고 방을 '식당 결정' 단계로 넘긴다. 되돌릴 수 없어서 한 번 묻는다.
+   */
+  const confirmPlan = async () => {
+    if (!roomId || !chosen) return;
+
+    setConfirming(true);
+    try {
+      const { error } = await advanceRoomStage(roomId, 'place');
+      if (error) {
+        Alert.alert('확정하지 못했어요', error.message);
+        return;
+      }
+
+      navigate('ChatRoom', { roomId, title, openSheet: 'menu' });
+    } finally {
+      setConfirming(false);
     }
   };
 
   return (
     <View style={styles.screen}>
-      <View
-        style={{
-          height: insets.top,
-          backgroundColor: colors.surface,
-        }}
-      />
-
+      {/* 상태바 자리. 배경을 칠하지 않아 화면 배경이 그대로 비친다 —
+          헤더와 같은 색으로 칠하면 둘이 한 덩어리로 보여서 헤더가
+          어디서 시작하는지 알 수 없다 */}
+      <View style={{ height: topInset }} />
       <AppHeader />
 
-      <ScrollView
-        contentContainerStyle={styles.body}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <View style={styles.hero}>
-          <Image
-            source={moa}
-            style={styles.heroImage}
-            resizeMode="contain"
-          />
+          <Image source={moa} style={styles.heroImage} resizeMode="contain" />
         </View>
 
-        <Text style={styles.title}>
-          일정이 확정됐어요!
-        </Text>
+        <Text style={styles.title}>언제가 좋을까요?</Text>
+        <Text style={styles.subtitle}>{basis ?? '모인 일정으로 시간을 추천해 드려요'}</Text>
 
-        <Text style={styles.subtitle}>
-          선택한 일정으로 채팅방을 만들 수 있어요
-        </Text>
-
-        {pick ? (
+        {loading ? (
           <View style={styles.card}>
-            <View style={styles.cardHead}>
-              <Text style={styles.cardTitle}>
-                {title}
-              </Text>
-
-              <View style={styles.badge}>
-                <Text
-                  style={styles.badgeText}
-                >
-                  확정
-                </Text>
-              </View>
-            </View>
-
-            <InfoRow
-              icon={
-                <CalendarDays
-                  size={s(9)}
-                  color={colors.primary}
-                  strokeWidth={2}
-                />
-              }
-              text={formatSlotDate(pick.slot)}
-            />
-
-            <InfoRow
-              icon={
-                <MapPin
-                  size={s(9)}
-                  color={colors.primary}
-                  strokeWidth={2}
-                />
-              }
-              text={pick.place.name}
-            />
-
-            <InfoRow
-              icon={
-                <Users
-                  size={s(9)}
-                  color={colors.primary}
-                  strokeWidth={2}
-                />
-              }
-              text={
-                `${pick.availableCount} / ` +
-                `${pick.totalCount}명 참석 가능`
-              }
-            />
-
-            <InfoRow
-              icon={
-                <Sparkles
-                  size={s(9)}
-                  color={colors.primary}
-                  strokeWidth={2}
-                />
-              }
-              text={
-                `AI 적합도 ${Math.round(
-                  pick.score,
-                )}%`
-              }
-            />
-
-            <Text style={styles.reason}>
-              {pick.reason}
-            </Text>
+            <ActivityIndicator size="small" color={colors.primary} />
+            <Text style={styles.note}>가능한 시간을 분석하고 있어요.</Text>
+          </View>
+        ) : errorMessage ? (
+          <View style={styles.card}>
+            <Text style={styles.errorText}>{errorMessage}</Text>
+            <Pressable style={styles.retry} onPress={() => void load()}>
+              <Text style={styles.retryText}>다시 시도</Text>
+            </Pressable>
           </View>
         ) : (
-          <View style={styles.card}>
-            <Text style={styles.errorText}>
-              확정된 일정 정보를 찾을 수 없어요.
-            </Text>
-          </View>
+          picks.map((pick, i) => {
+            const on = i === selected;
+
+            return (
+              <Pressable
+                key={pick.slot.id}
+                style={[styles.card, styles.pick, on && styles.pickOn]}
+                onPress={() => setSelected(i)}>
+                <View style={styles.cardHead}>
+                  <Text style={styles.cardTitle}>{pick.rank}순위</Text>
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{Math.round(pick.score)}%</Text>
+                  </View>
+                </View>
+
+                <InfoRow
+                  icon={<CalendarDays size={s(9)} color={colors.primary} strokeWidth={2} />}
+                  text={formatSlotDate(pick.slot)}
+                />
+
+                <InfoRow
+                  icon={<Users size={s(9)} color={colors.primary} strokeWidth={2} />}
+                  text={`${pick.availableCount} / ${pick.totalCount}명 참석 가능`}
+                />
+
+                {pick.rainChance !== null ? (
+                  <InfoRow
+                    icon={<Sparkles size={s(9)} color={colors.primary} strokeWidth={2} />}
+                    text={`강수 확률 ${pick.rainChance}%`}
+                  />
+                ) : null}
+
+                <Text style={styles.reason}>{pick.reason}</Text>
+
+                {hasBreaktimeRisk(pick.slot.startTime) ? (
+                  <Text style={styles.warn}>{BREAKTIME_NOTICE}</Text>
+                ) : null}
+              </Pressable>
+            );
+          })
         )}
 
-        <Text style={styles.note}>
-          채팅방으로 이동하면 방을 생성하고 선택한 메이트를 초대해요.
-        </Text>
+        {!loading && !errorMessage && origin ? (
+          <View style={styles.card}>
+            <InfoRow
+              icon={<MapPin size={s(9)} color={colors.primary} strokeWidth={2} />}
+              text={`내 출발지 · ${origin.name}`}
+            />
+            <Text style={styles.note}>식당은 확정한 뒤 방에서 함께 정해요.</Text>
+          </View>
+        ) : null}
 
         <CompleteButton
-          label={
-            creating
-              ? '방 만드는 중'
-              : '채팅방으로 이동'
-          }
+          label={confirming ? '확정하는 중' : '이 시간으로 확정하기'}
           showNext
           style={styles.cta}
-          disabled={
-            creating || !pick
-          }
-          onPress={() =>
-            void openRoom()
-          }
+          disabled={confirming || loading || !chosen}
+          onPress={() => void confirmPlan()}
         />
+
+        <Text style={styles.backLink} onPress={goPrev}>
+          시간 다시 고르기
+        </Text>
       </ScrollView>
     </View>
   );
@@ -331,10 +310,9 @@ const styles = StyleSheet.create({
   title: {
     marginTop: s(10),
     textAlign: 'center',
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.extrabold,
     fontSize: fs(13),
     lineHeight: fs(17),
-    fontWeight: weight.extrabold,
     color: colors.textPrimary,
   },
 
@@ -366,10 +344,9 @@ const styles = StyleSheet.create({
 
   cardTitle: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.extrabold,
     fontSize: fs(10),
     lineHeight: fs(13),
-    fontWeight: weight.extrabold,
     color: colors.textPrimary,
   },
 
@@ -381,10 +358,9 @@ const styles = StyleSheet.create({
   },
 
   badgeText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6),
     lineHeight: fs(8),
-    fontWeight: weight.bold,
     color: colors.textOnAccent,
   },
 
@@ -428,6 +404,47 @@ const styles = StyleSheet.create({
     fontSize: fs(6),
     lineHeight: fs(8),
     color: colors.textMuted,
+  },
+
+  /* 되돌아가는 길은 눈에 덜 띄게 — 주된 동작은 방 만들기다 */
+  backLink: {
+    marginTop: s(10),
+    textAlign: 'center',
+    fontFamily: fontFamily.body,
+    fontSize: fs(7),
+    lineHeight: fs(10),
+    color: colors.textMuted,
+  },
+  /* 고른 순위는 테두리로 표시한다 — 카드가 여러 장이라 한눈에 갈려야 한다 */
+  pick: {
+    marginTop: s(6),
+    borderWidth: s(0.8),
+    borderColor: colors.border,
+  },
+  pickOn: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
+  },
+  warn: {
+    marginTop: s(4),
+    fontFamily: fontFamily.body,
+    fontSize: fs(6.5),
+    lineHeight: fs(9),
+    color: colors.danger,
+  },
+  retry: {
+    marginTop: s(8),
+    alignSelf: 'center',
+    paddingHorizontal: s(12),
+    paddingVertical: s(5),
+    borderRadius: s(8),
+    backgroundColor: colors.primary,
+  },
+  retryText: {
+    fontFamily: fontFamily.bold,
+    fontSize: fs(7),
+    lineHeight: fs(10),
+    color: colors.textOnAccent,
   },
 
   cta: {

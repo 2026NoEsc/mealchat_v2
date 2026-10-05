@@ -9,7 +9,7 @@ import {
 
 import { fs, s } from '../../theme/scale';
 import { colors, radii, shadows } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 type BaseProps = {
   label: string;
@@ -132,26 +132,23 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
   accentLabel: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.extrabold,
     fontSize: fs(10),
     lineHeight: fs(15),
-    fontWeight: weight.extrabold,
     color: colors.textOnAccent,
     textAlign: 'center',
   },
   solidLabel: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.extrabold,
     fontSize: fs(9.5),
     lineHeight: fs(20),
-    fontWeight: weight.extrabold,
     color: colors.textOnAccent,
     textAlign: 'center',
   },
   dangerLabel: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(8.5),
     lineHeight: fs(11.5),
-    fontWeight: weight.semibold,
     color: colors.danger,
     textAlign: 'center',
   },

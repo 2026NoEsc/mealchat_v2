@@ -1,13 +1,10 @@
-import { CalendarDays, ChevronLeft, MoreVertical, Send, Smile, Users, Utensils, Wallet } from 'lucide-react-native';
-import { useRef, useState } from 'react';
+import { CalendarDays, Send, Smile, Users, Utensils, Wallet } from 'lucide-react-native';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
+  FlatList,
   Image,
   ImageSourcePropType,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -15,17 +12,35 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useKeyboardOverlap } from '../../theme/keyboard';
+
 import { useAuth } from '../../auth/AuthProvider';
+import Avatar from '../../components/Avatar';
+import { MenuBarsIcon, RoomBackIcon } from '../../components/icons';
+import { buildPlaceCandidates } from '../../lib/placeCandidates';
+import { supabase } from '../../lib/supabase';
+import { useMyProfile } from '../../profile/useMyProfile';
+import type { ScheduleRecommendResponse } from '../schedule/scheduleTypes';
 import { parseEmoticonToken } from '../../lib/emoticon';
-import { dayKey, dayLabel, roomTimerLabel, timeLabel } from '../../lib/roomFormat';
-import { sendRoomMessage, sendRoomSticker, type RoomMessage } from '../../lib/rooms';
+import { confirmAction, notify } from '../../lib/confirm';
+import { roomCharacterFor } from '../../lib/roomCharacter';
+import { roomNoticeOf, type RoomNotice } from '../../lib/roomNotice';
+import { roomColor } from '../../lib/roomTheme';
+import { dayKey, dayLabel, meetingDateText, roomTimerLabel, timeLabel } from '../../lib/roomFormat';
+import {
+  advanceRoomStage,
+  sendRoomMessage,
+  sendRoomSticker,
+  type RoomMessage,
+} from '../../lib/rooms';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useRoom, useRoomMessages } from '../../rooms/useMyRooms';
 import { fs, s } from '../../theme/scale';
 import { colors, shadows } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 import { MembersSheet, SettlementSheet } from './ChatRoomSheets';
 import EmoticonPanel, { findSticker } from './EmoticonPanel';
+import ScheduleSheet from './ScheduleSheet';
 import VotingSheet from './VotingSheet';
 
 /** Figma 채팅방 색상 — 말풍선 시간 / 날짜 구분선 / 시스템 말풍선 글자 */
@@ -33,57 +48,121 @@ const TIME_GRAY = '#B4B2A8';
 const DIVIDER = '#D3D1C6';
 const SYS_TEXT = '#696969';
 
-type Message =
+type Message = { key: string } & (
   | { kind: 'date'; text: string }
   | { kind: 'sys'; text: string }
-  | { kind: 'msg'; mine: boolean; name?: string; color?: string; text: string; time: string }
-  | {
-      kind: 'sticker';
-      mine?: boolean;
-      name?: string;
-      avatar?: ImageSourcePropType;
-      sticker: ImageSourcePropType;
-      time: string;
-    }
-  | { kind: 'confirm'; title: string; date: string };
+  | ({ kind: 'msg'; mine: boolean; text: string } & Bubble)
+  | ({ kind: 'sticker'; mine?: boolean; sticker: ImageSourcePropType } & Bubble)
+  | { kind: 'notice'; notice: RoomNotice }
+);
+
+/** 상대 말풍선 옆 아바타를 그리는 데 필요한 것. 내 말풍선에는 아바타가 없다. */
+type Sender = { name?: string; senderId?: string | null; avatarUrl?: string | null };
+
+/** 말풍선 한 줄이 보낸 사람과 시각에 대해 들고 가는 것 */
+type Bubble = Sender & {
+  time: string;
+  /** 같은 사람이 같은 분에 이어 보낸 줄이면 false — 시각을 마지막 줄에만 남긴다 */
+  showTime: boolean;
+  /** 바로 위 줄과 한 묶음이면 true — 위 줄에 붙여 그린다 */
+  grouped?: boolean;
+};
+
+/**
+ * 상대 말풍선 옆 아바타 — 시안 2178:567 (20x20, 라운드 5, 옅은 주황 칸).
+ *
+ * 사진을 올렸으면 사진, 아니면 기본 캐릭터다. 사람을 가리키는 id 로 캐릭터를 골라
+ * 이름이 같은 사람이 둘이어도 얼굴이 섞이지 않는다.
+ */
+function SenderAvatar({ name, senderId, avatarUrl, grouped }: Sender & { grouped?: boolean }) {
+  /*
+   * 한 사람이 이어 보낸 줄마다 얼굴을 반복하면 지저분하다. 묶음의 첫 줄에만
+   * 그리고, 나머지 줄은 같은 너비의 빈 자리를 둬 말풍선 왼쪽 선을 맞춘다.
+   */
+  if (grouped) return <View style={styles.avatarSpacer} />;
+
+  return (
+    <Avatar
+      name={name ?? '?'}
+      url={avatarUrl}
+      seed={senderId ?? undefined}
+      size={s(20)}
+      radius={s(5)}
+      /* 시안의 옅은 주황 칸 — 기본 캐릭터에도 깔려야 해서 style 로 넘긴다 */
+      style={styles.msgAvatar}
+    />
+  );
+}
 
 /** 서버 메시지를 화면용 배열로 바꾼다. 날짜가 바뀌는 지점에 구분선을 넣는다. */
-function toDisplayMessages(rows: RoomMessage[], myId: string | null): Message[] {
+export function toDisplayMessages(
+  rows: RoomMessage[],
+  myId: string | null,
+  /* 보낸 사람 id → 프로필 사진. 방 참가자 목록에서 온다 */
+  avatars: Map<string, string | null>,
+): Message[] {
   const out: Message[] = [];
   let lastDay = '';
 
   for (const row of rows) {
     const day = dayKey(row.createdAt);
     if (day && day !== lastDay) {
-      out.push({ kind: 'date', text: dayLabel(row.createdAt) });
+      out.push({ key: `date:${day}`, kind: 'date', text: dayLabel(row.createdAt) });
       lastDay = day;
     }
 
+    if (row.kind === 'system') {
+      /* 카드로 세울 수 있는 것만 세운다. 알아보지 못한 안내는 회색 알약이다. */
+      const notice = roomNoticeOf(row.text);
+      out.push(
+        notice
+          ? { key: row.id, kind: 'notice', notice }
+          : { key: row.id, kind: 'sys', text: row.text },
+      );
+      continue;
+    }
+
     const mine = Boolean(myId) && row.senderId === myId;
-    // 내 말풍선에는 이름을 붙이지 않는다
-    const name = mine ? undefined : row.senderName;
+    // 내 말풍선에는 이름도 아바타도 붙이지 않는다
+    const sender: Sender = mine
+      ? { senderId: row.senderId }
+      : {
+          name: row.senderName,
+          senderId: row.senderId,
+          avatarUrl: row.senderId ? avatars.get(row.senderId) ?? null : null,
+        };
     const time = timeLabel(row.createdAt);
     const emoticon = parseEmoticonToken(row.text);
 
     if (emoticon) {
       const sticker = findSticker(emoticon);
       if (sticker) {
-        out.push({ kind: 'sticker', mine, name, sticker: sticker.source, time });
+        out.push({ key: row.id, kind: 'sticker', mine, sticker: sticker.source, time, showTime: true, ...sender });
       } else {
         // 앱에 없는 이모티콘 — 토큰을 그대로 보여주느니 사람이 읽을 말로 바꾼다
-        out.push({ kind: 'msg', mine, name, color: row.senderColor, text: '(이모티콘)', time });
+        out.push({ key: row.id, kind: 'msg', mine, text: '(이모티콘)', time, showTime: true, ...sender });
       }
       continue;
     }
 
-    out.push({
-      kind: 'msg',
-      mine,
-      name,
-      color: row.senderColor,
-      text: row.text,
-      time,
-    });
+    out.push({ key: row.id, kind: 'msg', mine, text: row.text, time, showTime: true, ...sender });
+  }
+
+  /*
+   * 한 사람이 같은 분에 여러 줄을 보내면 줄마다 같은 시각이 반복돼 눈에 걸린다.
+   * 묶음의 마지막 줄에만 남긴다 — 아래에 붙어 있는 시각이 그 묶음이 끝난 때다.
+   * 중간에 날짜 구분선이나 안내가 끼면 묶음이 끊긴다 (말풍선끼리만 본다).
+   */
+  for (let i = 0; i < out.length - 1; i += 1) {
+    const line = out[i];
+    const next = out[i + 1];
+    if (line.kind !== 'msg' && line.kind !== 'sticker') continue;
+    if (next.kind !== 'msg' && next.kind !== 'sticker') continue;
+    /* id 가 없는(탈퇴한) 사람은 id 로는 가릴 수 없어 이름까지 같아야 한 사람으로 본다 */
+    if (line.senderId === next.senderId && line.name === next.name && line.time === next.time) {
+      line.showTime = false;
+      next.grouped = true;
+    }
   }
 
   return out;
@@ -98,78 +177,289 @@ type SheetKey = 'schedule' | 'menu' | 'settlement' | 'members' | null;
  */
 export default function ChatRoomScreen() {
   const insets = useSafeAreaInsets();
+  /*
+   * 키보드가 가리는 만큼만 화면을 줄인다. 안드로이드가 스스로 줄여 주는 양이
+   * 기기마다 달라서, 창 크기 API 대신 이 화면을 직접 재서 넘긴다.
+   */
+  const screenRef = useRef<View>(null);
+  const { overlap: keyboard, remeasure } = useKeyboardOverlap(screenRef);
   const { goBack, navigate, current } = useNavigation();
   const { user } = useAuth();
+  const { bundle } = useMyProfile();
   const params = current.params as
     | { roomId?: string; title?: string; color?: string; openSheet?: SheetKey }
     | undefined;
 
   const roomId = params?.roomId ?? null;
 
-  const room = useRoom(roomId);
+  const { room, reload: reloadRoom } = useRoom(roomId);
   /*
    * 목록에서 들어오면 파라미터에 제목이 실려 있어 곧바로 보여줄 수 있고,
    * 홈의 정산 링크처럼 roomId 만 들고 들어오는 경로도 있어 불러온 값으로 채운다.
    */
   const title = params?.title ?? room?.title ?? '밥약';
-  const roomColor = params?.color ?? room?.color ?? colors.primary;
+  /*
+   * 방 테마 색 — 목록과 같은 값이어야 같은 방으로 보인다. 예전에 만든 방은
+   * 색을 전부 '#FF9900' 로 저장해서 roomColor() 가 id 로 골라 준다. 방을 아직
+   * 못 불러왔으면 목록에서 실어 보낸 색으로 버틴다.
+   */
+  const theme = room ? roomColor(room) : params?.color ?? colors.primary;
   const { messages: remoteMessages, status, reload } = useRoomMessages(roomId);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  // state 반영 전 같은 프레임의 연속 제출도 막는다.
+  const sendingRef = useRef(false);
+  const draftRevision = useRef(0);
+  const changeDraft = useCallback((text: string) => {
+    draftRevision.current += 1;
+    setDraft(text);
+  }, []);
   // 홈의 "미완료 정산 보기" 처럼 특정 시트를 펼친 채로 들어오는 경로가 있다
-  const [sheet, setSheet] = useState<SheetKey>(params?.openSheet ?? null);
-  const [emoticonOpen, setEmoticonOpen] = useState(false);
-  const scrollRef = useRef<ScrollView>(null);
+  const stage = room?.stage ?? 'scheduling';
 
   /*
-   * 스티커와 시스템 안내는 messages 테이블이 담을 수 없다 (텍스트 컬럼 하나뿐).
-   * 스키마가 생기기 전까지는 화면에만 남는 임시 항목으로 두고, 서버 목록 뒤에 붙인다.
+   * 식당 결정 단계에서 AI 추천을 미리 받아 둔다. 시트를 열 때마다 부르면
+   * 열 때마다 몇 초씩 기다려야 하고, Gemini 호출도 그만큼 늘어난다.
    */
-  const [localMessages, setLocalMessages] = useState<Message[]>([]);
-  const append = (message: Message) => setLocalMessages((prev) => [...prev, message]);
+  const [suggestions, setSuggestions] = useState<
+    { label: string; matchPercent: number }[]
+  >([]);
+
+  useEffect(() => {
+    /* 식당을 고르는 단계에서만, 그리고 한 번만 부른다 */
+    if (stage !== 'place' || !roomId || suggestions.length > 0) return;
+
+    const profile = bundle?.privateProfile;
+    if (!profile?.startLat || !profile?.startLng) return;
+
+    let active = true;
+
+    void (async () => {
+      try {
+        const memberIds = (room?.participants ?? [])
+          .map((participant) => participant.profileId)
+          .filter((id): id is string => Boolean(id));
+
+        const candidates = await buildPlaceCandidates(memberIds, {
+          name: profile.startLocationName?.trim() || '사는 곳',
+          address: '',
+          lat: profile.startLat!,
+          lng: profile.startLng!,
+          fromGps: false,
+        });
+
+        if (!active || !candidates || candidates.candidates.length === 0) return;
+
+        const { data, error } = await supabase.functions.invoke('schedule-recommend', {
+          body: { meetingName: title, roomId, placeCandidates: candidates.candidates },
+        });
+
+        if (!active || error) return;
+
+        const response = data as ScheduleRecommendResponse;
+        if (!Array.isArray(response?.placeRecommendations)) return;
+
+        setSuggestions(
+          [...response.placeRecommendations]
+            .sort((a, b) => a.rank - b.rank)
+            .map((pick) => ({
+              label: pick.place.name,
+              matchPercent: Math.round(pick.score),
+            })),
+        );
+      } catch (error) {
+        /* 추천이 없어도 직접 후보를 올릴 수 있다 — 화면을 막지 않는다 */
+        console.warn('place suggestion failed:', error);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [stage, roomId, room, bundle, title, suggestions.length]);
+
+  const isOwner = Boolean(user?.id && room?.ownerId && user.id === room.ownerId);
+
+  const [sheet, setSheet] = useState<SheetKey>(params?.openSheet ?? null);
+  const [emoticonOpen, setEmoticonOpen] = useState(false);
+  /* 입력창의 ＋ 로 여닫는다. 기본은 펴진 상태 — 방에 들어오면 뭘 할 수 있는지 보여야 한다 */
+  const [actionsOpen, setActionsOpen] = useState(true);
+  const scrollRef = useRef<FlatList<Message>>(null);
+  const nearLatest = useRef(true);
+  const userScrolling = useRef(false);
+  const followLatest = useCallback(() => {
+    if (nearLatest.current && !userScrolling.current) {
+      scrollRef.current?.scrollToOffset({ offset: 0, animated: false });
+    }
+  }, []);
+
+  /*
+   * 키보드가 열리거나 닫힐 때 최신 대화를 보던 상태를 유지한다.
+   * 목록 자체의 레이아웃 변경은 아래 onLayout에서도 처리한다.
+   */
+  useEffect(() => {
+    followLatest();
+  }, [keyboard, followLatest]);
+
+  /*
+   * 식당 결정을 마치고 약속을 확정한다. 방장만 누를 수 있고, 되돌릴 수 없어서
+   * 한 번 묻는다 — 확정하면 식당을 다시 고를 수 없다.
+   */
+  const confirmPlan = async () => {
+    if (!roomId) return;
+
+    /* Alert.alert 의 버튼 콜백은 react-native-web 에서 불리지 않는다 */
+    confirmAction({
+      title: '약속을 확정할까요?',
+      message: '확정하면 식당을 다시 고를 수 없어요.',
+      cancelLabel: '더 볼게요',
+      confirmLabel: '확정',
+      onConfirm: () => {
+        void (async () => {
+          const { error } = await advanceRoomStage(roomId, 'confirmed');
+          if (error) {
+            notify('확정하지 못했어요', error.message);
+            return;
+          }
+          reload();
+          void reloadRoom();
+        })();
+      },
+    });
+  };
+
+  /*
+   * 알림 카드의 배지. 방 안에서 할 수 있는 일로 이어 준다.
+   * 일정 카드의 "캘린더에 저장" 은 아직 붙일 곳이 없어 안내만 남긴다.
+   */
+  const onNoticeAction = useCallback((kind: RoomNotice['kind']) => {
+    if (kind === 'place') {
+      setSheet('menu');
+      return;
+    }
+    if (kind === 'settlement') {
+      setSheet('settlement');
+      return;
+    }
+    notify('아직 준비 중이에요', '캘린더 저장은 곧 붙일게요.');
+  }, []);
+
+  /*
+   * 방 위에 걸어 둘 확정 내용 — "9월 28일 · 리코리코" 처럼 때와 곳을 나란히 적는다.
+   *
+   * 시각(confirmed_slot)은 시간 투표를 확정해야 채워지는데, 지금 앱에는 그 단계가
+   * 없어 늘 비어 있다. 그래서 있으면 시각을, 없으면 방을 만들 때 정한 약속 날짜를
+   * 쓴다 - 날짜는 어느 방에나 있다.
+   */
+  const when = room?.confirmedSlot?.trim() || (room ? meetingDateText(room.meetingDate) : '');
+  const confirmedLine = [when, room?.locationName?.trim()].filter(Boolean).join(' · ');
+
+  /* 보낸 사람 id 로 프로필 사진을 찾을 수 있게 참가자 목록을 표로 바꿔 둔다 */
+  const avatarBySender = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const participant of room?.participants ?? []) {
+      if (participant.profileId) map.set(participant.profileId, participant.avatarUrl);
+    }
+    return map;
+  }, [room?.participants]);
 
   /* 서버가 준 목록에 날짜 구분선을 끼워 화면용 배열로 만든다 */
-  const messages = [...toDisplayMessages(remoteMessages, user?.id ?? null), ...localMessages];
+  const messages = useMemo(
+    // inverted 목록은 최신 줄부터 받는다. 긴 대화도 첫 렌더부터 끝부분을 보여 준다.
+    () => toDisplayMessages(remoteMessages, user?.id ?? null, avatarBySender).reverse(),
+    [remoteMessages, user?.id, avatarBySender],
+  );
+  const renderMessage = useCallback(
+    ({ item }: { item: Message }) => <Row message={item} onAction={onNoticeAction} />,
+    [onNoticeAction],
+  );
 
   const send = async () => {
     const text = draft.trim();
-    if (!text || !roomId) return;
+    if (!text || !roomId || sendingRef.current) return;
+    sendingRef.current = true;
+    const submittedRevision = draftRevision.current;
 
-    setSending(true);
-    const error = await sendRoomMessage(roomId, text);
-    setSending(false);
+    try {
+      setSending(true);
+      const error = await sendRoomMessage(roomId, text);
 
-    if (error) {
-      Alert.alert('전송 실패', error.message);
-      return;
+      if (error) {
+        notify('전송 실패', error.message);
+        return;
+      }
+
+      // 전송을 기다리는 동안 사용자가 쓴 다음 메시지는 보존한다.
+      if (draftRevision.current === submittedRevision) setDraft('');
+      reload();
+    } catch {
+      notify('전송 실패', '메시지를 보내지 못했어요. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
     }
-
-    setDraft('');
-    reload();
   };
 
   const sendSticker = async (stickerId: string) => {
-    if (!roomId) return;
-    const error = await sendRoomSticker(roomId, stickerId);
-    if (error) {
-      Alert.alert('전송 실패', error.message);
-      return;
+    if (!roomId || sendingRef.current) return;
+    sendingRef.current = true;
+    setSending(true);
+    try {
+      const error = await sendRoomSticker(roomId, stickerId);
+      if (error) {
+        notify('전송 실패', error.message);
+        return;
+      }
+      reload();
+    } catch {
+      notify('전송 실패', '이모티콘을 보내지 못했어요. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
     }
-    reload();
+  };
+
+  /** 초대 코드는 시스템 문장이 아니라 사용자가 보낸 일반 메시지로 남긴다. */
+  const shareInviteCode = async (code: string) => {
+    if (!roomId) return;
+    try {
+      const error = await sendRoomMessage(roomId, `초대 코드 ${code}를 메이트에게 알려 주세요.`);
+      if (error) {
+        notify('초대 코드를 보내지 못했어요', error.message);
+        return;
+      }
+      reload();
+    } catch {
+      notify('초대 코드를 보내지 못했어요', '잠시 후 다시 시도해 주세요.');
+    }
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.screen}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
+    /*
+     * 키보드가 가리는 만큼 화면 전체를 줄인다. 입력바에만 marginBottom 을 주면
+     * 위의 목록이 줄어드는 것과 겹쳐 두 배로 밀려 올라간다 (실측 690 → 169).
+     */
+    <View ref={screenRef} style={[styles.screen, { paddingBottom: keyboard }]} onLayout={remeasure}>
+      <View style={{ height: insets.top, backgroundColor: colors.screen }} />
 
       <View style={styles.header}>
         <Pressable onPress={goBack} hitSlop={s(8)}>
-          <ChevronLeft size={s(14)} color={SYS_TEXT} strokeWidth={2.5} />
+          <RoomBackIcon size={s(24)} />
         </Pressable>
 
-        <View style={[styles.headerAvatar, { backgroundColor: roomColor }]} />
+        {/*
+          * 방 대표 그림 — 목록 카드와 같은 캐릭터다. 색을 꽉 채우면 그림이 묻혀서
+          * 테마 색을 옅게(24 = 14%) 깔고 그 위에 올린다.
+          */}
+        <View style={[styles.headerAvatar, { backgroundColor: `${theme}24` }]}>
+          {roomId ? (
+            <Image
+              source={roomCharacterFor(roomId)}
+              style={styles.headerAvatarImage}
+              resizeMode="contain"
+            />
+          ) : null}
+        </View>
 
         <View style={styles.headerCenter}>
           <View style={styles.headerTitleRow}>
@@ -180,54 +470,115 @@ export default function ChatRoomScreen() {
               <Text style={styles.countText}>{room ? room.participants.length : '-'}</Text>
             </View>
           </View>
-          <Text style={styles.timer}>{room ? roomTimerLabel(room.expiresAt) : ' '}</Text>
+          {room ? (
+            <RoomTimer expiresAt={room.expiresAt} settled={room.stage === 'done'} />
+          ) : (
+            <Text style={styles.timer}> </Text>
+          )}
         </View>
 
         <Pressable hitSlop={s(8)} onPress={() => navigate('RoomDetail', { roomId, title })}>
-          <MoreVertical size={s(13)} color={SYS_TEXT} strokeWidth={2} />
+          <MenuBarsIcon size={s(24)} />
         </Pressable>
       </View>
 
-      {room?.isConfirmed && room.confirmedSlot ? (
+      {/*
+        * 확정된 것을 방 맨 위에 공지처럼 붙여 둔다 — 대화가 길어지면 확정 안내
+        * 메시지가 위로 밀려 올라가 다시 찾기 어렵다.
+        *
+        * 일정과 식당은 저장되는 곳이 다르다 (confirmed_slot / confirmed_menu).
+        * 예전에는 is_confirmed 와 일정만 보고 그려서, 식당만 정해진 방에서는
+        * 아무것도 뜨지 않았고 둘 다 정해져도 시간만 보였다.
+        */}
+      {confirmedLine ? (
         <View style={styles.banner}>
-          <Text style={styles.bannerText}>{room.confirmedSlot}</Text>
+          <Text style={styles.bannerText} numberOfLines={1}>
+            {confirmedLine}
+          </Text>
         </View>
       ) : null}
 
-      <ScrollView
+      <FlatList
         ref={scrollRef}
+        style={styles.messageList}
+        data={messages}
+        renderItem={renderMessage}
+        keyExtractor={messageKey}
+        inverted
+        initialNumToRender={20}
+        maxToRenderPerBatch={10}
+        windowSize={7}
+        ItemSeparatorComponent={MessageSeparator}
+        maintainVisibleContentPosition={visibleContentPosition}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
-        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}>
-        {status === 'loading' ? (
-          <Text style={styles.listNotice}>메시지를 불러오는 중...</Text>
-        ) : status === 'error' ? (
-          <Text style={styles.listNotice}>메시지를 불러오지 못했어요</Text>
-        ) : messages.length === 0 ? (
-          <Text style={styles.listNotice}>아직 대화가 없어요. 먼저 인사해 보세요!</Text>
-        ) : null}
-        {messages.map((message, i) => (
-          <Row key={i} message={message} />
-        ))}
-      </ScrollView>
+        keyboardShouldPersistTaps="handled"
+        scrollEventThrottle={16}
+        onScrollBeginDrag={(event) => {
+          userScrolling.current = true;
+          nearLatest.current = event.nativeEvent.contentOffset.y <= s(40);
+        }}
+        onScroll={(event) => {
+          // Native anchor/layout adjustments are not a request to read history.
+          if (userScrolling.current) {
+            nearLatest.current = event.nativeEvent.contentOffset.y <= s(40);
+          }
+        }}
+        onScrollEndDrag={(event) => {
+          nearLatest.current = event.nativeEvent.contentOffset.y <= s(40);
+          userScrolling.current = false;
+        }}
+        onMomentumScrollBegin={() => { userScrolling.current = true; }}
+        onMomentumScrollEnd={(event) => {
+          nearLatest.current = event.nativeEvent.contentOffset.y <= s(40);
+          userScrolling.current = false;
+        }}
+        onLayout={followLatest}
+        onContentSizeChange={followLatest}
+        ListFooterComponent={
+          status === 'loading' ? (
+            <Text style={styles.listNotice}>메시지를 불러오는 중...</Text>
+          ) : status === 'error' ? (
+            <View style={styles.retryBox}>
+              <Text style={styles.listNotice}>메시지를 불러오지 못했어요</Text>
+              <Pressable style={styles.retryButton} onPress={reload}>
+                <Text style={styles.retryText}>다시 시도</Text>
+              </Pressable>
+            </View>
+          ) : messages.length === 0 ? (
+            <Text style={styles.listNotice}>아직 대화가 없어요. 먼저 인사해 보세요!</Text>
+          ) : null
+        }
+      />
 
+      {/*
+        약속 단계에 따라 열 수 있는 것이 다르다. 정산까지 간 방에서 식당을 다시
+        고르거나, 식당도 안 정한 방에서 정산을 시작할 수는 없다.
+      */}
+      {actionsOpen ? (
       <View style={styles.actionBar}>
         <ActionButton
           icon={<CalendarDays size={s(13)} color={SYS_TEXT} strokeWidth={2} />}
           label="일정 조율"
+          disabled={stage !== 'scheduling'}
           onPress={() => setSheet('schedule')}
         />
         <View style={styles.actionDivider} />
         <ActionButton
           icon={<Utensils size={s(13)} color={SYS_TEXT} strokeWidth={2} />}
-          label="메뉴 정하기"
+          label="식당 정하기"
+          disabled={stage !== 'place'}
           onPress={() => setSheet('menu')}
         />
         <View style={styles.actionDivider} />
         <ActionButton
           icon={<Wallet size={s(13)} color={SYS_TEXT} strokeWidth={2} />}
-          label="N빵 정산"
-          onPress={() => setSheet('settlement')}
+          /* 식당을 정하는 중이면 확정으로, 확정된 뒤에는 정산으로 */
+          label={stage === 'place' ? '약속 확정' : 'N빵 정산'}
+          disabled={
+            stage === 'scheduling' || (stage === 'place' && !isOwner)
+          }
+          onPress={() => (stage === 'place' ? void confirmPlan() : setSheet('settlement'))}
         />
         <View style={styles.actionDivider} />
         <ActionButton
@@ -236,24 +587,47 @@ export default function ChatRoomScreen() {
           onPress={() => setSheet('members')}
         />
       </View>
+      ) : null}
 
-      <View style={[styles.inputBar, { paddingBottom: insets.bottom }]}>
-        {/* 대화 중 새 약속 잡기 — 일정 추가 플로우로 보낸다 */}
-        <Pressable style={styles.plusButton} onPress={() => navigate('ScheduleDetail')}>
-          <Text style={styles.plusText}>＋</Text>
+      {/*
+        인셋을 더한다. 예전엔 paddingBottom 을 insets.bottom 으로 덮어써서, 인셋이
+        0 인 웹·구형 안드로이드에서는 스타일의 아래 여백까지 같이 사라졌다.
+
+        키보드가 올라오면 그 높이만큼 통째로 띄운다. 이때 제스처바 인셋은 빼야
+        한다 — 키보드가 이미 그 자리를 덮고 있어서, 그대로 두면 입력바가 키보드
+        위에 한 칸 떠 보인다.
+      */}
+      <View
+        style={[
+          styles.inputBar,
+          /* 키보드가 제스처바까지 덮으므로 그때는 인셋을 더하지 않는다 */
+          { paddingBottom: s(7) + (keyboard > 0 ? 0 : insets.bottom) },
+        ]}>
+        {/*
+          위 액션 행을 여닫는다. 예전에는 ScheduleDetail 로 보냈는데, 그 화면은
+          createRoom 으로 새 방을 만드는 곳이라 대화 중에 누르면 지금 방을 두고
+          엉뚱한 방이 생겼다.
+        */}
+        <Pressable
+          style={styles.plusButton}
+          hitSlop={s(6)}
+          accessibilityRole="button"
+          accessibilityLabel={actionsOpen ? '메뉴 접기' : '메뉴 펼치기'}
+          onPress={() => setActionsOpen((v) => !v)}>
+          <Text style={[styles.plusText, actionsOpen && styles.plusTextOpen]}>＋</Text>
         </Pressable>
 
         <View style={styles.input}>
           <TextInput
             style={styles.inputText}
             value={draft}
-            onChangeText={setDraft}
+            onChangeText={changeDraft}
             placeholder="메시지를 입력해 주세요..."
             placeholderTextColor={TIME_GRAY}
             onSubmitEditing={send}
             returnKeyType="send"
           />
-          <Pressable onPress={() => setEmoticonOpen((v) => !v)} hitSlop={s(6)}>
+          <Pressable accessibilityLabel="이모티콘 선택" disabled={sending} onPress={() => setEmoticonOpen((v) => !v)} hitSlop={s(6)}>
             <Smile size={s(10)} color={emoticonOpen ? colors.primary : TIME_GRAY} strokeWidth={2} />
           </Pressable>
         </View>
@@ -269,53 +643,97 @@ export default function ChatRoomScreen() {
       {emoticonOpen ? (
         <EmoticonPanel
           onPick={(sticker) => {
+            if (sendingRef.current) return;
             setEmoticonOpen(false);
             void sendSticker(sticker.id);
           }}
         />
       ) : null}
 
-      <VotingSheet
+      <ScheduleSheet
         visible={sheet === 'schedule'}
         roomId={roomId}
-        kind="time"
-        title="일정 조율"
-        subtitle="가능한 시간대에 투표해 주세요"
-        placeholder="예: 12:30 – 13:30"
-        confirmMessage={(label) => `${label} 로 일정을 제안했어요`}
+        isOwner={isOwner}
         onClose={() => setSheet(null)}
-        onConfirm={(text) => append({ kind: 'sys', text })}
+        onStateChanged={() => {
+          reload();
+          void reloadRoom();
+        }}
       />
+
       <VotingSheet
         visible={sheet === 'menu'}
         roomId={roomId}
         kind="menu"
-        title="메뉴 정하기"
-        subtitle="먹고 싶은 메뉴에 투표해 주세요"
-        placeholder="예: 칼국수"
-        confirmMessage={(label) => `오늘 메뉴는 '${label}' 로 정해졌어요`}
+        title="식당 정하기"
+        subtitle="가고 싶은 식당에 투표해 주세요"
+        placeholder="예: 조선칼국수 하단점"
+        suggestionTitle="AI 추천 식당"
+        suggestions={suggestions}
         onClose={() => setSheet(null)}
-        onConfirm={(text) => append({ kind: 'sys', text })}
+        onConfirm={() => {
+          reload();
+          void reloadRoom();
+        }}
+        onVoted={() => void reloadRoom()}
       />
       <SettlementSheet
         roomId={roomId}
         visible={sheet === 'settlement'}
         onClose={() => setSheet(null)}
-        onConfirm={(text) => append({ kind: 'sys', text })}
+        onStateChanged={() => {
+          reload();
+          void reloadRoom();
+        }}
       />
       <MembersSheet
         visible={sheet === 'members'}
+        participants={room?.participants ?? []}
+        code={room?.code ?? null}
+        myId={user?.id ?? null}
         onClose={() => setSheet(null)}
-        onInvite={() => {
+        onInvite={(code) => {
           setSheet(null);
-          append({ kind: 'sys', text: '초대 코드를 복사했어요 — VF4HLD' });
+          void shareInviteCode(code);
         }}
       />
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
-function Row({ message }: { message: Message }) {
+/*
+ * 헤더 타이머. 정산을 마친 방은 24시간만 남아 초까지 세는데, 화면 전체를 1초마다
+ * 다시 그리면 채팅 목록까지 딸려 들어간다. 그래서 이 줄만 따로 떼어 낸다.
+ */
+function RoomTimer({ expiresAt, settled }: { expiresAt: string; settled: boolean }) {
+  const [label, setLabel] = useState(() => roomTimerLabel(expiresAt, settled));
+
+  useEffect(() => {
+    setLabel(roomTimerLabel(expiresAt, settled));
+    /* 정산 전에는 문구가 고정이라 셀 것이 없다 */
+    if (!settled) return;
+
+    const id = setInterval(() => setLabel(roomTimerLabel(expiresAt, settled)), 1000);
+    return () => clearInterval(id);
+  }, [expiresAt, settled]);
+
+  return <Text style={styles.timer}>{label}</Text>;
+}
+
+const messageKey = (message: Message) => message.key;
+const visibleContentPosition = { minIndexForVisible: 0 };
+
+function MessageSeparator() {
+  return <View style={styles.messageSeparator} />;
+}
+
+const Row = memo(function Row({
+  message,
+  onAction,
+}: {
+  message: Message;
+  onAction: (kind: RoomNotice['kind']) => void;
+}) {
   switch (message.kind) {
     case 'date':
       return (
@@ -338,8 +756,8 @@ function Row({ message }: { message: Message }) {
     case 'msg':
       if (message.mine) {
         return (
-          <View style={styles.mineRow}>
-            <Text style={styles.time}>{message.time}</Text>
+          <View style={[styles.mineRow, message.grouped && styles.grouped]}>
+            {message.showTime ? <Text style={styles.time}>{message.time}</Text> : null}
             <View style={[styles.bubble, styles.bubbleMine]}>
               <Text style={styles.bubbleTextMine}>{message.text}</Text>
             </View>
@@ -347,20 +765,20 @@ function Row({ message }: { message: Message }) {
         );
       }
       return (
-        <View style={styles.otherRow}>
-          {/* 아바타 업로드 전까지는 sender_color 원에 이름 첫 글자를 넣는다 */}
-          <View style={[styles.avatar, { backgroundColor: message.color ?? colors.primary }]}>
-            <Text style={styles.avatarInitial}>
-              {[...(message.name ?? '?').trim()][0] ?? '?'}
-            </Text>
-          </View>
+        <View style={[styles.otherRow, message.grouped && styles.grouped]}>
+          <SenderAvatar
+            name={message.name}
+            senderId={message.senderId}
+            avatarUrl={message.avatarUrl}
+            grouped={message.grouped}
+          />
           <View style={styles.otherCol}>
-            <Text style={styles.name}>{message.name}</Text>
+            {message.grouped ? null : <Text style={styles.name}>{message.name}</Text>}
             <View style={styles.otherLine}>
               <View style={[styles.bubble, styles.bubbleOther]}>
                 <Text style={styles.bubbleText}>{message.text}</Text>
               </View>
-              <Text style={styles.time}>{message.time}</Text>
+              {message.showTime ? <Text style={styles.time}>{message.time}</Text> : null}
             </View>
           </View>
         </View>
@@ -369,8 +787,8 @@ function Row({ message }: { message: Message }) {
     case 'sticker':
       if (message.mine) {
         return (
-          <View style={styles.mineRow}>
-            <Text style={styles.time}>{message.time}</Text>
+          <View style={[styles.mineRow, message.grouped && styles.grouped]}>
+            {message.showTime ? <Text style={styles.time}>{message.time}</Text> : null}
             <View style={styles.sticker}>
               <Image source={message.sticker} style={styles.stickerImage} resizeMode="contain" />
             </View>
@@ -378,48 +796,62 @@ function Row({ message }: { message: Message }) {
         );
       }
       return (
-        <View style={styles.otherRow}>
-          <View style={styles.avatar}>
-            <Image source={message.avatar} style={styles.avatarImage} resizeMode="contain" />
-          </View>
+        <View style={[styles.otherRow, message.grouped && styles.grouped]}>
+          <SenderAvatar
+            name={message.name}
+            senderId={message.senderId}
+            avatarUrl={message.avatarUrl}
+            grouped={message.grouped}
+          />
           <View style={styles.otherCol}>
-            <Text style={styles.name}>{message.name}</Text>
+            {message.grouped ? null : <Text style={styles.name}>{message.name}</Text>}
             <View style={styles.otherLine}>
               <View style={styles.sticker}>
                 <Image source={message.sticker} style={styles.stickerImage} resizeMode="contain" />
               </View>
-              <Text style={styles.time}>{message.time}</Text>
+              {message.showTime ? <Text style={styles.time}>{message.time}</Text> : null}
             </View>
           </View>
         </View>
       );
 
-    case 'confirm':
+    case 'notice': {
+      const { title, detail, action } = message.notice;
       return (
-        <View style={styles.confirmRow}>
-          <View style={styles.confirmCard}>
-            <Text style={styles.confirmTitle}>🎉 {message.title}</Text>
-            <Text style={styles.confirmDate}>{message.date}</Text>
-            <View style={styles.confirmBadge}>
-              <Text style={styles.confirmBadgeText}>캘린더에 저장</Text>
-            </View>
+        <View style={styles.noticeRow}>
+          <View style={styles.noticeCard}>
+            {/* 시안은 🎉 를 벡터로 내보냈지만 양옆에 하나씩 두는 그림이다 */}
+            <Text style={styles.noticeTitle}>🎉 {title} 🎉</Text>
+            {detail ? <Text style={styles.noticeDetail}>{detail}</Text> : null}
+            <Pressable
+              style={styles.noticeBadge}
+              hitSlop={s(4)}
+              onPress={() => onAction(message.notice.kind)}>
+              <Text style={styles.noticeBadgeText}>{action}</Text>
+            </Pressable>
           </View>
         </View>
       );
+    }
   }
-}
+});
 
 function ActionButton({
   icon,
   label,
   onPress,
+  disabled,
 }: {
   icon: React.ReactNode;
   label: string;
   onPress?: () => void;
+  disabled?: boolean;
 }) {
   return (
-    <Pressable style={styles.action} onPress={onPress}>
+    <Pressable
+      style={[styles.action, disabled && styles.actionOff]}
+      disabled={disabled}
+      onPress={onPress}>
       {icon}
       <Text style={styles.actionLabel}>{label}</Text>
     </Pressable>
@@ -429,18 +861,22 @@ function ActionButton({
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: colors.surfaceSunken,
+    /* 시안 2178:556 주석 "배경 색상 변경" — 화면과 헤더가 같은 #F8F6F2 다 */
+    backgroundColor: colors.screen,
   },
 
   // roomHeader y30 h44
   header: {
     height: s(44),
-    backgroundColor: colors.surface,
+    backgroundColor: colors.screen,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: s(10),
     gap: s(7),
-    ...shadows.bar,
+    /*
+     * 그림자를 뺀다. 본문과 같은 색이 되면서 그림자가 회색 띠처럼 보였고,
+     * 시안에도 헤더 아래 구분선이 없다.
+     */
     zIndex: 2,
   },
   headerAvatar: {
@@ -451,9 +887,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  /*
+   * 시안 값(16.8 x 18.24)은 여백이 넓은 원본에 맞춰 잰 것이라, 여백을 떼어낸
+   * 그림을 넣으면 칸 한가운데 조그맣게 떠 보였다. 칸(24)의 대부분을 쓰게 키운다.
+   * contain 이라 가로로 넓은 캐릭터든 세로로 긴 캐릭터든 잘리지 않는다.
+   */
   headerAvatarImage: {
-    width: s(16.8),
-    height: s(18.24),
+    width: s(20),
+    height: s(20),
   },
   headerCenter: {
     flex: 1,
@@ -465,10 +906,9 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     flexShrink: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.extrabold,
     fontSize: fs(9.5),
     lineHeight: fs(13),
-    fontWeight: weight.extrabold,
     color: colors.textPrimary,
   },
   countChip: {
@@ -478,18 +918,16 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceSunken,
   },
   countText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(5.8),
     lineHeight: fs(8),
-    fontWeight: weight.semibold,
     color: SYS_TEXT,
   },
   timer: {
     marginTop: s(1),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(5.8),
     lineHeight: fs(8),
-    fontWeight: weight.semibold,
     color: colors.danger,
   },
 
@@ -498,6 +936,8 @@ const styles = StyleSheet.create({
     marginTop: s(11),
     marginHorizontal: s(9),
     height: s(18),
+    /* 식당 이름이 길어도 글자가 테두리에 닿지 않게 */
+    paddingHorizontal: s(10),
     borderRadius: s(9),
     borderWidth: s(0.8),
     borderColor: colors.primary,
@@ -506,19 +946,31 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   bannerText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(6.7),
     lineHeight: fs(9),
-    fontWeight: weight.semibold,
     color: '#FF8C3A',
   },
 
-  // chatScroll x11.5 gap8
+  /*
+   * chatScroll x11.5 — 시안 줄간격은 8 이지만 말풍선이 띄엄띄엄 떨어져 보여
+   * 5 로 좁혔다. 한 사람이 이어 보낸 줄(grouped)은 한 덩어리로 보이게 더 붙인다.
+   */
+  messageList: {
+    flex: 1,
+  },
+  messageSeparator: {
+    height: s(5),
+  },
   list: {
     paddingHorizontal: s(11.5),
-    paddingTop: s(14),
-    paddingBottom: s(10),
-    gap: s(8),
+    // inverted 목록이라 화면 위·아래 여백도 반대로 준다.
+    paddingTop: s(10),
+    paddingBottom: s(14),
+  },
+  /* 위 줄과 같은 사람·같은 분이면 gap 을 덜어내 붙여 놓는다 */
+  grouped: {
+    marginTop: s(-2.5),
   },
   dateRow: {
     flexDirection: 'row',
@@ -556,33 +1008,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: s(5),
   },
-  avatar: {
-    width: s(20),
-    height: s(20),
-    borderRadius: s(5),
+  msgAvatar: {
     backgroundColor: colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  avatarInitial: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(9),
-    fontWeight: weight.bold,
-    color: colors.textOnAccent,
-  },
-  avatarImage: {
-    width: s(14),
-    height: s(15.2),
+  /* 아바타(20)를 안 그리는 줄이 왼쪽으로 밀리지 않게 자리를 지킨다 */
+  avatarSpacer: {
+    width: s(20),
   },
   otherCol: {
     flexShrink: 1,
     gap: s(2),
   },
   name: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(6),
     lineHeight: fs(8),
-    fontWeight: weight.semibold,
     color: SYS_TEXT,
   },
   otherLine: {
@@ -647,46 +1087,46 @@ const styles = StyleSheet.create({
     width: s(34),
     height: s(40),
   },
-  confirmRow: {
+  // 알림 카드 — 시안 2111:16085 (w181 h57)
+  noticeRow: {
     alignItems: 'center',
   },
-  confirmCard: {
+  noticeCard: {
     width: s(181),
     borderRadius: s(9),
-    borderWidth: s(0.8),
+    borderWidth: s(1),
     borderColor: colors.primary,
     backgroundColor: colors.card,
     alignItems: 'center',
-    paddingVertical: s(7),
+    paddingTop: s(7),
+    paddingBottom: s(7.3),
     ...shadows.button,
   },
-  confirmTitle: {
-    fontFamily: fontFamily.body,
+  noticeTitle: {
+    fontFamily: fontFamily.extrabold,
     fontSize: fs(7.2),
-    lineHeight: fs(10),
-    fontWeight: weight.extrabold,
+    lineHeight: fs(9.94),
     color: colors.textPrimary,
   },
-  confirmDate: {
-    marginTop: s(3),
+  noticeDetail: {
+    marginTop: s(4),
     fontFamily: fontFamily.body,
     fontSize: fs(6.5),
-    lineHeight: fs(9),
+    lineHeight: fs(8.97),
     color: SYS_TEXT,
   },
-  confirmBadge: {
+  noticeBadge: {
     marginTop: s(4),
     paddingHorizontal: s(9),
     paddingVertical: s(3),
     borderRadius: s(5),
     backgroundColor: colors.primarySoft,
   },
-  confirmBadgeText: {
-    fontFamily: fontFamily.body,
+  noticeBadgeText: {
+    fontFamily: fontFamily.semibold,
     fontSize: fs(6),
-    lineHeight: fs(8),
-    fontWeight: weight.semibold,
-    color: '#FF8C3A',
+    lineHeight: fs(8.28),
+    color: colors.primaryVivid,
   },
 
   // 액션바 y407 h43
@@ -705,12 +1145,16 @@ const styles = StyleSheet.create({
     gap: s(2),
   },
   actionLabel: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(5.6),
     lineHeight: fs(8),
-    fontWeight: weight.semibold,
     color: SYS_TEXT,
   },
+  /* 아직 열 수 없는 단계는 눌리지 않는 것을 눈으로도 알 수 있게 한다 */
+  actionOff: {
+    opacity: 0.35,
+  },
+
   actionDivider: {
     width: s(0.6),
     height: s(26),
@@ -739,6 +1183,10 @@ const styles = StyleSheet.create({
     fontSize: fs(9),
     lineHeight: fs(11),
     color: SYS_TEXT,
+  },
+  /* 펴져 있을 때는 ＋ 를 돌려 × 로 보여 준다 — 다시 누르면 접힌다는 뜻 */
+  plusTextOpen: {
+    transform: [{ rotate: '45deg' }],
   },
   input: {
     flex: 1,
@@ -778,5 +1226,21 @@ const styles = StyleSheet.create({
     fontSize: fs(7),
     lineHeight: fs(10),
     color: SYS_TEXT,
+  },
+  retryBox: {
+    alignItems: 'center',
+  },
+  retryButton: {
+    marginTop: s(-10),
+    paddingHorizontal: s(8),
+    paddingVertical: s(3),
+    borderRadius: s(6),
+    backgroundColor: colors.primarySoft,
+  },
+  retryText: {
+    fontFamily: fontFamily.bold,
+    fontSize: fs(6),
+    lineHeight: fs(8),
+    color: colors.primary,
   },
 });

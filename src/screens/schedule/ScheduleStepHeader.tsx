@@ -1,9 +1,10 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet, Text, View } from 'react-native';
 
+import BackButton from '../../components/BackButton';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 /**
  * Figma 일정 추가 STEP 1 (309:1065) / STEP 2 (160:733) 상단.
@@ -13,10 +14,12 @@ export default function ScheduleStepHeader({
   step,
   title,
   subtitle,
+  onBack,
 }: {
   step: 1 | 2;
   title: string;
   subtitle: string;
+  onBack?: () => void;
 }) {
   return (
     <View>
@@ -31,7 +34,13 @@ export default function ScheduleStepHeader({
       </View>
 
       <Text style={styles.step}>STEP {step}</Text>
-      <Text style={styles.title}>{title}</Text>
+
+      {/* 뒤로가기는 타이틀 왼쪽에 붙는다 — 무엇에서 돌아가는지가 바로 읽힌다 */}
+      <View style={styles.titleRow}>
+        {onBack ? <BackButton onPress={onBack} /> : null}
+        <Text style={styles.title}>{title}</Text>
+      </View>
+
       <Text style={styles.subtitle}>{subtitle}</Text>
     </View>
   );
@@ -54,19 +63,26 @@ const styles = StyleSheet.create({
     marginTop: s(4),
     marginRight: s(11.5),
     textAlign: 'right',
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6.5),
     lineHeight: fs(9),
-    fontWeight: weight.bold,
     color: colors.primary,
   },
-  title: {
+  /*
+   * 타이틀 줄. 칩(13)이 글자 줄(16)보다 낮아 줄 높이를 밀지 않으므로,
+   * 뒤로가기가 있든 없든 시안(2111:15252) 의 y 좌표가 그대로 유지된다.
+   */
+  titleRow: {
     marginTop: s(4),
     marginLeft: s(11.5),
-    fontFamily: fontFamily.body,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: s(5),
+  },
+  title: {
+    fontFamily: fontFamily.extrabold,
     fontSize: fs(12),
     lineHeight: fs(16),
-    fontWeight: weight.extrabold,
     color: colors.textPrimary,
   },
   subtitle: {

@@ -2,8 +2,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { useState } from 'react';
 import {
   Alert,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,7 +9,9 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import KeyboardSafeScreen from '../../components/KeyboardSafeScreen';
+import { useTopInset } from '../../theme/insets';
 
 import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
@@ -19,13 +19,29 @@ import Avatar from '../../components/Avatar';
 import BankSelect from '../../components/ui/BankSelect';
 import { CompleteButton } from '../../components/ui/Button';
 import { removeAvatar, uploadAvatar } from '../../lib/avatar';
-import { fromBirthDate } from '../../lib/birthDate';
-import { saveMyPrivateProfile, updateMyName } from '../../lib/profile';
+import {
+  BIRTH_LENGTH,
+  formatBirthInput,
+  fromBirthDate,
+  type BirthField,
+} from '../../lib/birthDate';
+import { saveMyGender, saveMyPrivateProfile, updateMyName } from '../../lib/profile';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useMyProfile } from '../../profile/useMyProfile';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
+
+type Gender = 'male' | 'female' | 'none';
+const GENDER_OPTIONS: { value: Gender; label: string }[] = [
+  { value: 'male', label: '남성' },
+  { value: 'female', label: '여성' },
+  { value: 'none', label: '밝히지 않음' },
+];
+
+function savedGender(value: unknown): Gender | null {
+  return value === 'male' || value === 'female' || value === 'none' ? value : null;
+}
 
 /**
  * Figma 프로필/프로필 수정 (309:1086) — 220 x 486
@@ -54,7 +70,8 @@ function ProfileEditForm({
   userId: string;
   bundle: NonNullable<ReturnType<typeof useMyProfile>['bundle']>;
 }) {
-  const insets = useSafeAreaInsets();
+  /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
+  const topInset = useTopInset();
   const { resetTo } = useNavigation();
   const { user, updatePassword } = useAuth();
 
@@ -64,6 +81,9 @@ function ProfileEditForm({
   const [bank, setBank] = useState<string | null>(bundle.privateProfile.bankName);
   const [account, setAccount] = useState(bundle.privateProfile.accountNumber ?? '');
   const [birth, setBirth] = useState(fromBirthDate(bundle.privateProfile.birthDate));
+  const [gender, setGender] = useState<Gender | null>(
+    savedGender(bundle.privateProfile.personalData.gender),
+  );
   const [saving, setSaving] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState(bundle.profile.avatarUrl);
   const [uploading, setUploading] = useState(false);
@@ -126,16 +146,18 @@ function ProfileEditForm({
     setSaving(true);
 
     const nameError = await updateMyName(userId, nickname);
-    const privateError = nameError
+    const privateError = nameError ? null : await saveMyPrivateProfile(userId, { bank, account, birth });
+    const genderError = nameError || privateError || !gender ||
+      gender === savedGender(bundle.privateProfile.personalData.gender)
       ? null
-      : await saveMyPrivateProfile(userId, { bank, account, birth });
-    const passwordError = nameError || privateError || !password
+      : await saveMyGender(userId, gender, bundle.privateProfile.personalData.gender);
+    const passwordError = nameError || privateError || genderError || !password
       ? null
       : await updatePassword(password);
 
     setSaving(false);
 
-    const failure = nameError ?? privateError ?? passwordError;
+    const failure = nameError ?? privateError ?? genderError ?? passwordError;
     if (failure) {
       Alert.alert('저장 실패', failure.message);
       return;
@@ -145,13 +167,14 @@ function ProfileEditForm({
   };
 
   return (
-    <View style={styles.screen}>
-      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
+    <KeyboardSafeScreen style={styles.screen}>
+      {/* 상태바 자리. 배경을 칠하지 않아 화면 배경이 그대로 비친다 —
+          헤더와 같은 색으로 칠하면 둘이 한 덩어리로 보여서 헤더가
+          어디서 시작하는지 알 수 없다 */}
+      <View style={{ height: topInset }} />
       <AppHeader />
 
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={styles.flex}>
         <ScrollView
           contentContainerStyle={styles.body}
           keyboardShouldPersistTaps="handled"
@@ -163,7 +186,7 @@ function ProfileEditForm({
               onPress={() => void pickAvatar()}>
               <Avatar
                 name={nickname || bundle.profile.name}
-                color={bundle.profile.avatarColor}
+                seed={bundle.profile.id}
                 url={avatarUrl}
                 size={s(46)}
                 radius={s(12)}
@@ -209,7 +232,7 @@ function ProfileEditForm({
                 value={account}
                 onChangeText={setAccount}
                 placeholder="계좌번호 입력"
-                placeholderTextColor={colors.textMuted}
+                placeholderTextColor={colors.placeholder}
                 keyboardType="number-pad"
               />
             </View>
@@ -217,20 +240,39 @@ function ProfileEditForm({
             <Text style={styles.label}>생년월일</Text>
             <View style={styles.birthRow}>
               <BirthBox
+                field="year"
                 value={birth.year}
                 unit="년"
                 onChange={(v) => setBirth((p) => ({ ...p, year: v }))}
               />
               <BirthBox
+                field="month"
                 value={birth.month}
                 unit="월"
                 onChange={(v) => setBirth((p) => ({ ...p, month: v }))}
               />
               <BirthBox
+                field="day"
                 value={birth.day}
                 unit="일"
                 onChange={(v) => setBirth((p) => ({ ...p, day: v }))}
               />
+            </View>
+
+            <Text style={styles.label}>성별</Text>
+            <View style={styles.genderRow}>
+              {GENDER_OPTIONS.map((option) => (
+                <Pressable
+                  key={option.value}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: gender === option.value }}
+                  onPress={() => setGender(option.value)}
+                  style={[styles.genderOption, gender === option.value && styles.genderSelected]}>
+                  <Text style={[styles.genderText, gender === option.value && styles.genderTextSelected]}>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              ))}
             </View>
           </View>
 
@@ -241,18 +283,22 @@ function ProfileEditForm({
             onPress={() => void save()}
           />
         </ScrollView>
-      </KeyboardAvoidingView>
-    </View>
+      </View>
+    </KeyboardSafeScreen>
   );
 }
 
 /** 불러오는 동안과 실패했을 때의 화면 */
 function ProfileEditFallback({ failed }: { failed: boolean }) {
-  const insets = useSafeAreaInsets();
+  /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
+  const topInset = useTopInset();
 
   return (
     <View style={styles.screen}>
-      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
+      {/* 상태바 자리. 배경을 칠하지 않아 화면 배경이 그대로 비친다 —
+          헤더와 같은 색으로 칠하면 둘이 한 덩어리로 보여서 헤더가
+          어디서 시작하는지 알 수 없다 */}
+      <View style={{ height: topInset }} />
       <AppHeader />
       <View style={styles.fallback}>
         <Text style={styles.fallbackText}>
@@ -270,16 +316,18 @@ function Field({
   return (
     <>
       <Text style={styles.label}>{label}</Text>
-      <TextInput style={styles.input} placeholderTextColor={colors.textMuted} {...rest} />
+      <TextInput style={styles.input} placeholderTextColor={colors.placeholder} {...rest} />
     </>
   );
 }
 
 function BirthBox({
+  field,
   value,
   unit,
   onChange,
 }: {
+  field: BirthField;
   value: string;
   unit: string;
   onChange: (v: string) => void;
@@ -289,8 +337,10 @@ function BirthBox({
       <TextInput
         style={styles.birthValue}
         value={value}
-        onChangeText={onChange}
+        onChangeText={(text) => onChange(formatBirthInput(field, text))}
         keyboardType="number-pad"
+        /* 숫자판을 띄워도 붙여넣기로는 글자가 들어온다 - 길이는 여기서도 막는다 */
+        maxLength={BIRTH_LENGTH[field]}
       />
       <Text style={styles.birthUnit}>{unit}</Text>
     </View>
@@ -328,10 +378,9 @@ const styles = StyleSheet.create({
     // y134
     marginTop: s(2),
     textAlign: 'center',
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(11),
     lineHeight: fs(15),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   label: {
@@ -349,9 +398,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     paddingHorizontal: s(8),
     paddingVertical: 0,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(8),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   accountRow: {
@@ -390,9 +438,8 @@ const styles = StyleSheet.create({
   birthValue: {
     flex: 1,
     minWidth: 0,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(9),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
     padding: 0,
   },
@@ -400,6 +447,30 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.body,
     fontSize: fs(6.5),
     color: colors.textMuted,
+  },
+  genderRow: {
+    flexDirection: 'row',
+    gap: s(4),
+  },
+  genderOption: {
+    flex: 1,
+    minHeight: s(23),
+    borderRadius: s(9),
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  genderSelected: {
+    backgroundColor: colors.primarySoft,
+  },
+  genderText: {
+    fontFamily: fontFamily.body,
+    fontSize: fs(7),
+    color: colors.textMuted,
+  },
+  genderTextSelected: {
+    fontFamily: fontFamily.bold,
+    color: colors.primary,
   },
   cta: {
     marginTop: s(10),
@@ -409,9 +480,8 @@ const styles = StyleSheet.create({
     gap: s(4),
   },
   avatarHint: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6.5),
-    fontWeight: weight.bold,
     color: colors.primary,
   },
   avatarRemove: {

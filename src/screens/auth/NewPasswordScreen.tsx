@@ -1,8 +1,6 @@
 import { useState } from 'react';
 import {
   Alert,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,12 +10,13 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import KeyboardSafeScreen from '../../components/KeyboardSafeScreen';
 import { useAuth } from '../../auth/AuthProvider';
 import ScreenHeader from '../../components/ScreenHeader';
 import { AccentButton } from '../../components/ui/Button';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 /** Supabase 기본 최소 길이 — Dashboard 에서 올리면 서버가 다시 거른다 */
 const MIN_LENGTH = 6;
@@ -63,12 +62,10 @@ export default function NewPasswordScreen() {
   };
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top }]}>
+    <KeyboardSafeScreen style={[styles.screen, { paddingTop: insets.top }]}>
       <ScreenHeader title="새 비밀번호 설정" />
 
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={styles.flex}>
         <ScrollView
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
@@ -83,7 +80,7 @@ export default function NewPasswordScreen() {
             value={password}
             onChangeText={setPassword}
             placeholder="새 비밀번호를 입력하세요"
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={colors.placeholder}
             secureTextEntry
             autoCapitalize="none"
             autoCorrect={false}
@@ -96,7 +93,7 @@ export default function NewPasswordScreen() {
             value={confirm}
             onChangeText={setConfirm}
             placeholder="한 번 더 입력하세요"
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={colors.placeholder}
             secureTextEntry
             autoCapitalize="none"
             autoCorrect={false}
@@ -113,8 +110,8 @@ export default function NewPasswordScreen() {
             <Text style={styles.helper}>나중에 하기 (로그인 화면으로)</Text>
           </Pressable>
         </ScrollView>
-      </KeyboardAvoidingView>
-    </View>
+      </View>
+    </KeyboardSafeScreen>
   );
 }
 
@@ -140,10 +137,9 @@ const styles = StyleSheet.create({
   },
   label: {
     marginTop: s(4),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(7),
     lineHeight: fs(10),
-    fontWeight: weight.medium,
     color: colors.textPrimary,
   },
   labelSpacing: {
@@ -156,9 +152,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     paddingHorizontal: s(8),
     paddingVertical: 0,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(8),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   submit: {

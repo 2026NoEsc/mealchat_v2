@@ -9,7 +9,7 @@ import { AccentButton } from '../../components/ui/Button';
 import { recordTermsConsent } from '../../lib/consents';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 const TERMS = [
   { key: 'service', label: '서비스 이용약관 동의', required: true },
@@ -142,9 +142,8 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   allLabel: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(8),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   terms: {

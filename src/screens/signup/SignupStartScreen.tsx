@@ -5,7 +5,7 @@ import { AccentButton } from '../../components/ui/Button';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 const logo = require('../../../assets/brand/logo-main.png');
 
@@ -60,16 +60,14 @@ const styles = StyleSheet.create({
   title: {
     // 로고 하단(y151) → 타이틀(y166)
     marginTop: s(15),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(12),
     lineHeight: fs(16),
-    fontWeight: weight.medium,
     color: colors.primary,
     textAlign: 'center',
   },
   titleBrand: {
     fontFamily: fontFamily.wordmark,
-    fontWeight: weight.extrabold,
   },
   sub: {
     marginTop: s(6),
@@ -96,10 +94,9 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   helperLink: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6.5),
     lineHeight: fs(10),
-    fontWeight: weight.bold,
     color: colors.primary,
   },
 });

@@ -3,10 +3,12 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import BottomSheet from '../../components/BottomSheet';
 import { CompleteButton, DangerButton } from '../../components/ui/Button';
-import { formatDate } from '../../lib/calendar';
+import { formatDateIn } from '../../lib/calendar';
+import { notify } from '../../lib/confirm';
+import { formatTimeInput, isCompleteTime } from '../../lib/timeInput';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 export type PersonalEvent = {
   id: string;
@@ -27,11 +29,14 @@ type EventSheetProps = {
    * `visible` 로 초기화하면 닫는 순간 Modal 까지 언마운트돼 iOS 슬라이드 애니메이션이 끊긴다.
    */
   session: number;
+  year: number;
+  month: number;
   day: number;
   /** 값이 있으면 수정, 없으면 새로 추가 */
   editing?: PersonalEvent | null;
   onClose: () => void;
-  onSave: (event: PersonalEvent) => void;
+  /** 저장에 성공했을 때만 true. 실패하면 시트를 열어 둬 입력을 잃지 않는다 */
+  onSave: (event: PersonalEvent) => Promise<boolean>;
   onDelete?: (id: string) => void;
 };
 
@@ -39,6 +44,8 @@ type EventSheetProps = {
 export function EventSheet({
   visible,
   session,
+  year,
+  month,
   day,
   editing,
   onClose,
@@ -49,7 +56,7 @@ export function EventSheet({
     <BottomSheet
       visible={visible}
       title={editing ? '일정 수정' : '일정 추가'}
-      subtitle={formatDate(day)}
+      subtitle={formatDateIn(year, month, day)}
       onClose={onClose}>
       <EventSheetFields
         key={session}
@@ -71,16 +78,35 @@ function EventSheetFields({ editing, onClose, onSave, onDelete }: EventSheetFiel
   const [end, setEnd] = useState(initial.end);
   const [color, setColor] = useState(initial.color);
 
-  const save = () => {
+  const [saving, setSaving] = useState(false);
+
+  /*
+   * 예전에는 onSave 를 부르고 곧바로 닫았다. 저장이 실패해도 시트가 사라져서
+   * 사용자는 방금 적은 것을 통째로 다시 입력해야 했다. 성공했을 때만 닫는다.
+   */
+  const save = async () => {
     const trimmed = title.trim();
-    if (!trimmed) return;
-    onSave({
+    if (!trimmed || saving) return;
+
+    /*
+     * 덜 친 시간이 그대로 저장되면 "09:3 ~ 10:0" 같은 값이 남아, 시간으로 읽는
+     * 쪽이 조용히 실패한다. 여기서 막고 이유를 알려 준다.
+     */
+    if (!isCompleteTime(start) || !isCompleteTime(end)) {
+      notify('시간을 확인해 주세요', '시작과 끝을 09:00 처럼 네 자리로 넣어 주세요.');
+      return;
+    }
+
+    setSaving(true);
+    const saved = await onSave({
       id: editing?.id ?? `${Date.now()}`,
       title: trimmed,
       time: `${start} ~ ${end}`,
       color,
     });
-    onClose();
+    setSaving(false);
+
+    if (saved) onClose();
   };
 
   return (
@@ -91,7 +117,7 @@ function EventSheetFields({ editing, onClose, onSave, onDelete }: EventSheetFiel
         value={title}
         onChangeText={setTitle}
         placeholder="예: 알바, 스터디"
-        placeholderTextColor={colors.textMuted}
+        placeholderTextColor={colors.placeholder}
         autoFocus
       />
 
@@ -100,17 +126,22 @@ function EventSheetFields({ editing, onClose, onSave, onDelete }: EventSheetFiel
         <TextInput
           style={[styles.input, styles.timeInput]}
           value={start}
-          onChangeText={setStart}
+          /* 숫자만 받고 콜론은 알아서 넣는다 — 예전에는 아무 글자나 들어갔다 */
+          onChangeText={(text) => setStart(formatTimeInput(text))}
           placeholder="09:00"
-          placeholderTextColor={colors.textMuted}
+          placeholderTextColor={colors.placeholder}
+          keyboardType="number-pad"
+          maxLength={5}
         />
         <Text style={styles.tilde}>~</Text>
         <TextInput
           style={[styles.input, styles.timeInput]}
           value={end}
-          onChangeText={setEnd}
+          onChangeText={(text) => setEnd(formatTimeInput(text))}
           placeholder="10:00"
-          placeholderTextColor={colors.textMuted}
+          placeholderTextColor={colors.placeholder}
+          keyboardType="number-pad"
+          maxLength={5}
         />
       </View>
 
@@ -132,8 +163,8 @@ function EventSheetFields({ editing, onClose, onSave, onDelete }: EventSheetFiel
       <CompleteButton
         label={editing ? '수정하기' : '추가하기'}
         style={styles.cta}
-        disabled={title.trim().length === 0}
-        onPress={save}
+        disabled={saving || title.trim().length === 0}
+        onPress={() => void save()}
       />
 
       {editing && onDelete ? (
@@ -150,16 +181,20 @@ function EventSheetFields({ editing, onClose, onSave, onDelete }: EventSheetFiel
   );
 }
 
+/*
+ * 새 일정은 시간 칸을 비워 둔다. 예전에는 09:00 / 10:00 이 값으로 들어가 있어서
+ * 안내 문구(09:00)가 나올 자리가 없었고, 고치려면 지우고 다시 쳐야 했다.
+ */
 function initialEventDraft(editing: PersonalEvent | null | undefined) {
   if (!editing) {
-    return { title: '', start: '09:00', end: '10:00', color: EVENT_COLORS[0] };
+    return { title: '', start: '', end: '', color: EVENT_COLORS[0] };
   }
 
   const [start, end] = editing.time.split('~').map((time) => time.trim());
   return {
     title: editing.title,
-    start: start || '09:00',
-    end: end || '10:00',
+    start: start ?? '',
+    end: end ?? '',
     color: editing.color,
   };
 }
@@ -168,19 +203,31 @@ type MemoSheetProps = {
   visible: boolean;
   /** EventSheet 과 같은 이유로 열 때마다 증가한다 */
   session: number;
+  year: number;
+  month: number;
   day: number;
   memo: string;
   onClose: () => void;
-  onSave: (memo: string) => void;
+  /** 저장에 성공했을 때만 true */
+  onSave: (memo: string) => Promise<boolean>;
 };
 
 /** Figma "＋ 이 날짜에 약속 메모 남기기" 에 대응하는 메모 입력 시트 */
-export function MemoSheet({ visible, session, day, memo, onClose, onSave }: MemoSheetProps) {
+export function MemoSheet({
+  visible,
+  session,
+  year,
+  month,
+  day,
+  memo,
+  onClose,
+  onSave,
+}: MemoSheetProps) {
   return (
     <BottomSheet
       visible={visible}
       title="약속 메모"
-      subtitle={`${formatDate(day)} 에 남길 메모`}
+      subtitle={`${formatDateIn(year, month, day)} 에 남길 메모`}
       onClose={onClose}>
       <MemoSheetFields key={session} memo={memo} onClose={onClose} onSave={onSave} />
     </BottomSheet>
@@ -191,6 +238,16 @@ type MemoSheetFieldsProps = Pick<MemoSheetProps, 'memo' | 'onClose' | 'onSave'>;
 
 function MemoSheetFields({ memo, onClose, onSave }: MemoSheetFieldsProps) {
   const [draft, setDraft] = useState(memo);
+  const [saving, setSaving] = useState(false);
+
+  /* 일정 시트와 같은 이유로 성공했을 때만 닫는다 */
+  const save = async () => {
+    if (saving) return;
+    setSaving(true);
+    const saved = await onSave(draft.trim());
+    setSaving(false);
+    if (saved) onClose();
+  };
 
   return (
     <>
@@ -199,7 +256,7 @@ function MemoSheetFields({ memo, onClose, onSave }: MemoSheetFieldsProps) {
         value={draft}
         onChangeText={setDraft}
         placeholder="예: 저녁 약속 잡기 좋은 날"
-        placeholderTextColor={colors.textMuted}
+        placeholderTextColor={colors.placeholder}
         multiline
         autoFocus
       />
@@ -207,10 +264,8 @@ function MemoSheetFields({ memo, onClose, onSave }: MemoSheetFieldsProps) {
       <CompleteButton
         label="저장하기"
         style={styles.cta}
-        onPress={() => {
-          onSave(draft.trim());
-          onClose();
-        }}
+        disabled={saving}
+        onPress={() => void save()}
       />
 
       {memo ? (
@@ -231,10 +286,9 @@ const styles = StyleSheet.create({
   label: {
     marginTop: s(12),
     marginBottom: s(3),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(7),
     lineHeight: fs(10),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   input: {

@@ -1,26 +1,30 @@
 import { ChevronLeft } from 'lucide-react-native';
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+
+import { useTopInset } from '../../theme/insets';
 
 import { useAuth } from '../../auth/AuthProvider';
+import Avatar from '../../components/Avatar';
 import { DangerButton } from '../../components/ui/Button';
 import { meetingLine } from '../../lib/roomFormat';
+import { confirmAction, notify } from '../../lib/confirm';
 import { leaveRoom } from '../../lib/rooms';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useRoom } from '../../rooms/useMyRooms';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 export default function RoomDetailScreen() {
-  const insets = useSafeAreaInsets();
+  /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
+  const topInset = useTopInset();
   const { goBack, navigate, resetTo, current } = useNavigation();
   const { user } = useAuth();
   const params = current.params as { roomId?: string; title?: string } | undefined;
   const roomId = params?.roomId ?? null;
 
-  const room = useRoom(roomId);
+  const { room } = useRoom(roomId);
   const title = params?.title ?? room?.title ?? '밥약';
 
   const [copied, setCopied] = useState(false);
@@ -28,25 +32,52 @@ export default function RoomDetailScreen() {
 
   const members = room?.participants ?? [];
 
+  /*
+   * 나가기는 "방장이 방을 닫는" 행위다. 방장이 나가면 방이 통째로 사라지므로
+   * 다른 사람에게는 버튼을 보여 주지 않는다. 서버(leave_room)도 같은 조건으로
+   * 막지만, 누를 수 있게 두고 거절하면 왜 안 되는지가 전달되지 않는다.
+   */
+  const isOwner = Boolean(user?.id && room?.ownerId && user.id === room.ownerId);
+  /* 돈이 오가는 중에 방이 사라지면 얼마를 보내야 하는지 확인할 자리가 없어진다 */
+  const settling = room?.stage === 'settling';
+
   /* expo-clipboard 를 아직 넣지 않아 실제 복사는 못 한다. 코드를 그대로 보여준다. */
   const copyCode = () => setCopied(true);
 
-  const leave = async () => {
+  const leave = () => {
     if (!roomId || !user?.id) return;
-    setLeaving(true);
-    const error = await leaveRoom(roomId);
-    setLeaving(false);
 
-    if (error) {
-      Alert.alert('나가기 실패', error.message);
-      return;
-    }
-    resetTo('Chat');
+    /* 되돌릴 수 없고 남은 사람들에게서도 방이 사라진다 — 한 번 묻는다 */
+    confirmAction({
+      title: '방을 없앨까요?',
+      message: '메이트 모두에게서 방이 사라져요. 정산 내역은 남아 있어요.',
+      cancelLabel: '그대로 둘게요',
+      confirmLabel: '없애기',
+      destructive: true,
+      onConfirm: () => {
+        void (async () => {
+          setLeaving(true);
+          const error = await leaveRoom(roomId);
+          setLeaving(false);
+
+          if (error) {
+            /* Alert.alert 은 웹에서 빈 함수라, 거절 사유가 통째로 사라진다 */
+            notify('없애지 못했어요', error.message);
+            return;
+          }
+          /* 목록은 홈으로 합쳤다 */
+          resetTo('Home');
+        })();
+      },
+    });
   };
 
   return (
     <View style={styles.screen}>
-      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
+      {/* 상태바 자리. 배경을 칠하지 않아 화면 배경이 그대로 비친다 —
+          헤더와 같은 색으로 칠하면 둘이 한 덩어리로 보여서 헤더가
+          어디서 시작하는지 알 수 없다 */}
+      <View style={{ height: topInset }} />
 
       <View style={styles.header}>
         <Pressable onPress={goBack} hitSlop={s(8)}>
@@ -98,11 +129,18 @@ export default function RoomDetailScreen() {
             const mine = member.profileId === user?.id;
             return (
               <View key={member.id} style={styles.memberRow}>
-                <View style={[styles.avatarBox, { backgroundColor: member.avatarColor }]}>
-                  <Text style={styles.avatarInitial}>
-                    {[...member.name.trim()][0] ?? '?'}
-                  </Text>
-                </View>
+                {/*
+                  * 올린 사진이 있으면 사진, 없으면 기본 캐릭터 — 채팅방·멤버 목록과
+                  * 같은 얼굴이다. 예전에는 avatar_color 칸에 이름 첫 글자를 넣어서
+                  * 사진이 한 번도 뜨지 않았고, 색이 진한 계정은 칸이 초록으로 보였다.
+                  */}
+                <Avatar
+                  name={member.name}
+                  url={member.avatarUrl}
+                  seed={member.profileId ?? member.id}
+                  size={s(20)}
+                  radius={s(5)}
+                />
                 <Text style={styles.memberName}>{member.name}</Text>
                 {/* 방장 개념이 없다 — 나와 남만 구분한다 */}
                 <Text style={[styles.memberRole, mine && styles.memberRoleOwner]}>
@@ -113,12 +151,23 @@ export default function RoomDetailScreen() {
           })}
         </View>
 
-        <DangerButton
-          label={leaving ? '나가는 중' : '방 나가기'}
-          style={styles.leave}
-          disabled={leaving}
-          onPress={() => void leave()}
-        />
+        {isOwner ? (
+          <>
+            <DangerButton
+              label={leaving ? '없애는 중' : '방 없애기'}
+              style={styles.leave}
+              disabled={leaving || settling}
+              onPress={leave}
+            />
+            <Text style={styles.leaveHint}>
+              {settling
+                ? '정산이 끝나면 없앨 수 있어요.'
+                : '없애면 메이트 모두에게서 방이 사라져요.'}
+            </Text>
+          </>
+        ) : (
+          <Text style={styles.leaveHint}>방은 방장만 없앨 수 있어요.</Text>
+        )}
       </ScrollView>
     </View>
   );
@@ -139,10 +188,9 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(9),
     lineHeight: fs(13),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   body: {
@@ -151,10 +199,9 @@ const styles = StyleSheet.create({
     paddingBottom: s(20),
   },
   title: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(12),
     lineHeight: fs(16),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   card: {
@@ -180,10 +227,9 @@ const styles = StyleSheet.create({
   },
   code: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.extrabold,
     fontSize: fs(11),
     lineHeight: fs(15),
-    fontWeight: weight.extrabold,
     letterSpacing: fs(1),
     color: colors.primary,
   },
@@ -194,10 +240,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primarySoft,
   },
   copyText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6.5),
     lineHeight: fs(9),
-    fontWeight: weight.bold,
     color: colors.primary,
   },
   placeHeader: {
@@ -206,25 +251,22 @@ const styles = StyleSheet.create({
   },
   placeTitle: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(8),
     lineHeight: fs(11),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   changeText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(6.5),
     lineHeight: fs(9),
-    fontWeight: weight.semibold,
     color: colors.primary,
   },
   placeName: {
     marginTop: s(6),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(7.5),
     lineHeight: fs(10),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   placeDetail: {
@@ -238,24 +280,6 @@ const styles = StyleSheet.create({
     marginTop: s(7),
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  avatarInitial: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(9),
-    fontWeight: weight.bold,
-    color: colors.textOnAccent,
-  },
-  avatarBox: {
-    width: s(16),
-    height: s(16),
-    borderRadius: s(5),
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatar: {
-    width: s(11),
-    height: s(12),
   },
   memberName: {
     flex: 1,
@@ -272,10 +296,18 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   memberRoleOwner: {
-    fontWeight: weight.bold,
+    fontFamily: fontFamily.bold,
     color: colors.primary,
   },
   leave: {
     marginTop: s(12),
+  },
+  leaveHint: {
+    marginTop: s(6),
+    textAlign: 'center',
+    fontFamily: fontFamily.body,
+    fontSize: fs(6.5),
+    lineHeight: fs(9),
+    color: colors.textMuted,
   },
 });

@@ -1,9 +1,6 @@
 import { Camera } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import {
-  Alert,
-  Image,
-  ImageSourcePropType,
   Pressable,
   StyleSheet,
   Text,
@@ -12,26 +9,28 @@ import {
 } from 'react-native';
 
 import { useAuth } from '../../auth/AuthProvider';
+import Avatar from '../../components/Avatar';
 import BottomSheet from '../../components/BottomSheet';
 import { CompleteButton } from '../../components/ui/Button';
 
+import { notify } from '../../lib/confirm';
 import { formatAmount } from '../../lib/format';
+import { useMyProfile } from '../../profile/useMyProfile';
+import type { RoomParticipant } from '../../lib/rooms';
 import {
+  canEditSettlement,
   createRoomSettlement,
-  fetchRoomSettlement,
-  sendSettlementNotification,
+  fetchRoomSettlements,
   setSettlementCompleted,
+  settlementMutationErrorMessage,
   type Settlement,
   type SettlementMember,
 } from '../../lib/settlements';
+import { pickActiveSettlement } from '../../lib/settlementSummary';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
-const moa = require('../../../assets/brand/moa.png');
-const ddori = require('../../../assets/brand/ddori.png');
-const dudu = require('../../../assets/brand/dudu.png');
-const welling = require('../../../assets/brand/welling2.png');
 
 /** 선택된 카드 배경 — 일정 조율 화면과 동일한 오렌지 틴트 */
 const TINT = '#FFF5EB';
@@ -39,8 +38,12 @@ const TINT = '#FFF5EB';
 type SheetProps = {
   visible: boolean;
   onClose: () => void;
-  /** 확정 시 채팅방에 남길 시스템 메시지 */
-  onConfirm: (message: string) => void;
+  /**
+   * 방의 상태가 바뀌었을 때. 전원이 정산을 마치면 서버 트리거가 방을 'done'
+   * 으로 넘기는데, 앱이 방을 다시 읽지 않으면 단계가 바뀐 줄 모른 채 예전
+   * 화면을 그대로 그린다.
+   */
+  onStateChanged?: () => void;
 };
 
 /* ------------------------------------------------------------------ 일정 조율 */
@@ -53,9 +56,10 @@ export function SettlementSheet({
   visible,
   roomId,
   onClose,
-  onConfirm,
+  onStateChanged,
 }: SheetProps & { roomId: string | null }) {
   const { user } = useAuth();
+  const { bundle } = useMyProfile();
   const [settlement, setSettlement] = useState<Settlement | null>(null);
   const [amountText, setAmountText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -65,11 +69,13 @@ export function SettlementSheet({
     if (!visible || !roomId) return;
 
     let active = true;
-    void fetchRoomSettlement(roomId)
+    void fetchRoomSettlements(roomId)
       .then(({ data }) => {
         if (!active) return;
-        setSettlement(data);
-        if (data) setAmountText(String(data.totalAmount));
+        /* 방에 정산이 여러 건이면 지금 할 일이 남은 것을 띄운다 */
+        const picked = pickActiveSettlement(data ?? [], user?.id ?? null);
+        setSettlement(picked);
+        if (picked) setAmountText(String(picked.totalAmount));
       })
       .catch(() => {
         if (active) setSettlement(null);
@@ -78,36 +84,60 @@ export function SettlementSheet({
     return () => {
       active = false;
     };
-  }, [visible, roomId, reloadToken]);
+  }, [visible, roomId, reloadToken, user?.id]);
 
   const amount = Number(amountText.replace(/[^0-9]/g, '')) || 0;
   const members = settlement?.members ?? [];
+  const editable = canEditSettlement(settlement, user?.id ?? null);
+
+  /*
+   * 전원이 보내고 나면 완료를 되돌릴 수 없다. 마지막 한 명이 완료하는 순간
+   * 서버 트리거가 방을 '정산 완료' 로 넘기고 24시간 카운트다운을 시작하는데,
+   * 여기서 되돌려도 그 방은 done 인 채로 남는다 — 화면은 미완료인데 방은
+   * 사라지는 중인, 서로 어긋난 상태가 된다.
+   */
+  const finished = members.length > 0 && members.every((member) => member.isCompleted);
   /* 아직 정산이 없으면 나눌 인원을 알 수 없어 1 로 둔다 */
   const splitCount = settlement?.splitCount ?? members.length ?? 1;
   const each = splitCount > 0 ? Math.ceil(amount / splitCount) : amount;
 
   const request = async () => {
-    if (!roomId || amount <= 0) return;
+    if (!roomId || amount <= 0 || !editable) return;
+
+    /*
+     * 계좌가 없으면 요청을 만들지 않는다. 계좌는 profile_private 에 있고 본인만
+     * 읽을 수 있어서, 여기서 비워 두면 받는 사람들은 어디로 보낼지 영영 알 수
+     * 없는 정산을 받는다. 나중에 채울 방법도 없다.
+     */
+    const bankName = bundle?.privateProfile.bankName ?? null;
+    const accountNumber = bundle?.privateProfile.accountNumber ?? null;
+    if (!bankName || !accountNumber) {
+      notify(
+        '계좌를 먼저 등록해 주세요',
+        '프로필 → 내 정보에서 계좌를 넣으면 메이트가 바로 보낼 수 있어요.',
+      );
+      return;
+    }
 
     setBusy(true);
-    const { error } = await createRoomSettlement({ roomId, title: '식사 정산', amount });
-    if (!error) {
-      await sendSettlementNotification({
-        roomId,
-        title: 'N빵 정산 요청이 도착했어요!',
-        message: `1인당 ${formatAmount(each)}`,
-        amount: each,
-      });
-    }
+    /* 계좌를 정산표에 옮겨 적는다 — 토스 송금 링크가 이 값을 쓴다 */
+    const { error } = await createRoomSettlement({
+      roomId,
+      title: '식사 정산',
+      amount,
+      bankName,
+      accountNumber,
+      accountHolder: bundle?.profile.name ?? null,
+    });
     setBusy(false);
 
     if (error) {
-      Alert.alert('정산 요청 실패', error.message);
+      notify('정산 요청 실패', settlementMutationErrorMessage(error));
       return;
     }
 
     setReloadToken((token) => token + 1);
-    onConfirm(`1인당 ${formatAmount(each)} 정산 요청을 보냈어요`);
+    onStateChanged?.();
     onClose();
   };
 
@@ -117,10 +147,12 @@ export function SettlementSheet({
     setBusy(false);
 
     if (error) {
-      Alert.alert('변경 실패', error.message);
+      notify('변경 실패', settlementMutationErrorMessage(error));
       return;
     }
     setReloadToken((token) => token + 1);
+    /* 마지막 한 명이 완료하면 서버가 방을 '정산 완료' 로 넘긴다 */
+    onStateChanged?.();
   };
 
   return (
@@ -136,9 +168,10 @@ export function SettlementSheet({
             style={styles.amountInput}
             value={amountText}
             onChangeText={setAmountText}
+            editable={editable}
             keyboardType="number-pad"
             placeholder="0"
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={colors.placeholder}
           />
         </View>
         <View style={styles.amountRight}>
@@ -159,7 +192,7 @@ export function SettlementSheet({
               <Pressable
                 key={member.id}
                 style={styles.memberCard}
-                disabled={busy || !mine}
+                disabled={busy || !mine || finished}
                 onPress={() => void toggleMine(member)}>
                 <View style={[styles.memberDot, member.isCompleted && styles.memberDotDone]}>
                   <Text style={styles.memberInitial}>
@@ -183,13 +216,21 @@ export function SettlementSheet({
         <Text style={styles.receiptText}>영수증 촬영하여 자동 입력</Text>
       </View>
 
-      <CompleteButton
-        label={busy ? '보내는 중' : '정산 요청 보내기'}
-        showNext
-        style={styles.cta}
-        disabled={busy || amount <= 0 || !roomId}
-        onPress={() => void request()}
-      />
+      {finished ? (
+        <Text style={styles.settlementLocked}>정산이 끝났어요. 되돌릴 수 없어요.</Text>
+      ) : null}
+
+      {editable ? (
+        <CompleteButton
+          label={busy ? '보내는 중' : settlement ? '정산 내용 수정' : '정산 요청 보내기'}
+          showNext
+          style={styles.cta}
+          disabled={busy || amount <= 0 || !roomId}
+          onPress={() => void request()}
+        />
+      ) : (
+        <Text style={styles.settlementLocked}>정산 내용은 만든 사람만 수정할 수 있어요.</Text>
+      )}
     </BottomSheet>
   );
 }
@@ -203,9 +244,8 @@ const styles = StyleSheet.create({
   },
   amountInput: {
     paddingVertical: 0,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.extrabold,
     fontSize: fs(14),
-    fontWeight: weight.extrabold,
     color: colors.textPrimary,
   },
   settlementEmpty: {
@@ -213,6 +253,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontFamily: fontFamily.body,
     fontSize: fs(7),
+    color: colors.textMuted,
+  },
+  settlementLocked: {
+    marginTop: s(12),
+    textAlign: 'center',
+    fontFamily: fontFamily.body,
+    fontSize: fs(6.5),
     color: colors.textMuted,
   },
   memberDot: {
@@ -227,9 +274,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   memberInitial: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(8),
-    fontWeight: weight.bold,
     color: colors.textOnAccent,
   },
   rowOn: {
@@ -261,10 +307,9 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
   },
   dayNum: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(10),
     lineHeight: fs(13),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   dayLabel: {
@@ -287,10 +332,9 @@ const styles = StyleSheet.create({
   },
   slotTime: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(8),
     lineHeight: fs(11),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   slotCount: {
@@ -315,10 +359,9 @@ const styles = StyleSheet.create({
   },
   menuName: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(8),
     lineHeight: fs(11),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   voteStack: {
@@ -383,10 +426,9 @@ const styles = StyleSheet.create({
   },
   amountTotal: {
     marginTop: s(1),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.extrabold,
     fontSize: fs(13),
     lineHeight: fs(17),
-    fontWeight: weight.extrabold,
     color: colors.textPrimary,
   },
   memberRow: {
@@ -408,10 +450,9 @@ const styles = StyleSheet.create({
   },
   memberName: {
     marginTop: s(1),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(6),
     lineHeight: fs(8),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   memberState: {
@@ -434,78 +475,110 @@ const styles = StyleSheet.create({
     gap: s(4),
   },
   receiptText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(6.5),
     lineHeight: fs(9),
-    fontWeight: weight.semibold,
     color: colors.primary,
   },
 });
 
 /* ------------------------------------------------------------------ 참여 멤버 */
 
-type RoomMember = {
-  name: string;
-  status: string;
-  role: '방장' | '메이트';
-  avatar: ImageSourcePropType;
-  me?: boolean;
-};
-
-/** Figma 채팅/멤버 패널 (553:768) */
-const ROOM_MEMBERS: RoomMember[] = [
-  { name: '모아(나)', status: '온라인', role: '방장', avatar: moa, me: true },
-  { name: '두두', status: '온라인', role: '메이트', avatar: dudu },
-  { name: '또리', status: '3시간 전', role: '메이트', avatar: ddori },
-  { name: '웰링', status: '온라인', role: '메이트', avatar: welling },
-];
-
+/**
+ * Figma 채팅/멤버 패널 (553:768)
+ *
+ * 예전에는 브랜드 캐릭터 네 명과 초대코드 `VF4HLD` 가 그대로 박혀 있었다. Figma
+ * 시안을 옮기면서 남은 값인데, 실제 방과 아무 상관이 없다. 초대 코드는 사람을
+ * 불러들이는 유일한 통로라 가짜 코드를 보여 주면 아무도 들어오지 못한다.
+ */
 export function MembersSheet({
   visible,
+  participants,
+  code,
+  myId,
   onClose,
   onInvite,
 }: {
   visible: boolean;
+  participants: RoomParticipant[];
+  code: string | null;
+  myId: string | null;
   onClose: () => void;
-  onInvite: () => void;
+  onInvite: (code: string) => void;
 }) {
   return (
     <BottomSheet
       visible={visible}
       title="참여 멤버"
-      subtitle={`멤버 ${ROOM_MEMBERS.length}명 · 초대코드 VF4HLD`}
+      subtitle={
+        code ? `멤버 ${participants.length}명 · 초대코드 ${code}` : `멤버 ${participants.length}명`
+      }
       onClose={onClose}>
       <View style={memberStyles.list}>
-        {ROOM_MEMBERS.map((member) => (
-          <View
-            key={member.name}
-            style={[memberStyles.row, member.me && memberStyles.rowMe]}>
-            <View style={memberStyles.avatarBox}>
-              <Image source={member.avatar} style={memberStyles.avatar} resizeMode="contain" />
-            </View>
+        {participants.length === 0 ? (
+          <Text style={memberStyles.empty}>참여 멤버를 불러오지 못했어요</Text>
+        ) : (
+          participants.map((participant) => {
+            const mine = participant.profileId !== null && participant.profileId === myId;
+            return (
+              <View
+                key={participant.id}
+                style={[memberStyles.row, mine && memberStyles.rowMe]}>
+                {/*
+                  * url 을 안 넘겨서 올린 사진이 한 번도 뜨지 않았고, style 의
+                  * 12x14 가 size(26) 를 덮어써서 얼굴이 작게 눌려 있었다.
+                  * seed 는 사람을 가리키는 값이어야 이름이 같은 사람이 둘일 때
+                  * 기본 캐릭터가 겹치지 않는다 — 방·프로필과도 같은 얼굴이 된다.
+                  */}
+                <Avatar
+                  name={participant.name}
+                  url={participant.avatarUrl}
+                  seed={participant.profileId ?? participant.id}
+                  size={s(26)}
+                  radius={s(6.5)}
+                />
 
-            <View style={memberStyles.body}>
-              <Text style={memberStyles.name}>{member.name}</Text>
-              <Text style={memberStyles.status}>{member.status}</Text>
-            </View>
+                <View style={memberStyles.body}>
+                  <Text style={memberStyles.name}>
+                    {participant.name}
+                    {mine ? ' (나)' : ''}
+                  </Text>
+                </View>
 
-            {member.role === '방장' ? (
-              <View style={memberStyles.badge}>
-                <Text style={memberStyles.badgeText}>방장</Text>
+                {mine ? (
+                  <View style={memberStyles.badge}>
+                    <Text style={memberStyles.badgeText}>나</Text>
+                  </View>
+                ) : (
+                  <Text style={memberStyles.role}>메이트</Text>
+                )}
               </View>
-            ) : (
-              <Text style={memberStyles.role}>메이트</Text>
-            )}
-          </View>
-        ))}
+            );
+          })
+        )}
       </View>
 
-      <CompleteButton label="＋ 메이트 초대" style={memberStyles.cta} onPress={onInvite} />
+      {/* 코드가 없으면 알려 줄 것이 없으므로 버튼도 내린다 */}
+      {code ? (
+        <CompleteButton
+          label="＋ 메이트 초대"
+          style={memberStyles.cta}
+          onPress={() => onInvite(code)}
+        />
+      ) : null}
     </BottomSheet>
   );
 }
 
 const memberStyles = StyleSheet.create({
+  empty: {
+    paddingVertical: s(12),
+    textAlign: 'center',
+    fontFamily: fontFamily.body,
+    fontSize: fs(7),
+    lineHeight: fs(10),
+    color: colors.textMuted,
+  },
   list: {
     marginTop: s(10),
     gap: s(5),
@@ -523,27 +596,14 @@ const memberStyles = StyleSheet.create({
     borderWidth: s(0.8),
     borderColor: colors.primary,
   },
-  avatarBox: {
-    width: s(18),
-    height: s(18),
-    borderRadius: s(6),
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatar: {
-    width: s(12),
-    height: s(14),
-  },
   body: {
     flex: 1,
     marginLeft: s(7),
   },
   name: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(7),
     lineHeight: fs(9),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   status: {
@@ -559,10 +619,9 @@ const memberStyles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   badgeText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(5.5),
     lineHeight: fs(7),
-    fontWeight: weight.bold,
     color: colors.textOnAccent,
   },
   role: {

@@ -1,6 +1,8 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { BackHandler, Platform } from 'react-native';
 
 import type { Route, RouteName } from './routes';
+import { popStack } from './stack';
 
 type NavigationValue = {
   current: Route;
@@ -8,11 +10,28 @@ type NavigationValue = {
   navigate: (name: RouteName, params?: Record<string, unknown>) => void;
   replace: (name: RouteName, params?: Record<string, unknown>) => void;
   goBack: () => void;
+  /**
+   * 뒤로 가면서 돌아가는 화면의 params 에 값을 병합한다 (입력값 복원용).
+   *
+   * goBack 에 인자를 받게 하지 않은 것은, 대부분의 호출부가 `onPress={goBack}` 처럼
+   * 넘겨 쓰고 있어서 터치 이벤트 객체가 그대로 params 로 들어가 버리기 때문이다.
+   */
+  goBackWith: (params: Record<string, unknown>) => void;
   /** 탭 전환 — 스택을 해당 루트로 초기화한다 */
   resetTo: (name: RouteName) => void;
 };
 
 const NavigationContext = createContext<NavigationValue | null>(null);
+
+/**
+ * Android hardware back은 우리가 쌓은 route stack만 소비한다. root에서 false를
+ * 돌려야 Android가 평소처럼 Activity를 종료할 수 있다.
+ */
+export function handleHardwareBackPress(canGoBack: boolean, goBack: () => void): boolean {
+  if (!canGoBack) return false;
+  goBack();
+  return true;
+}
 
 export function NavigationProvider({
   initialRoute,
@@ -32,23 +51,39 @@ export function NavigationProvider({
   }, []);
 
   const goBack = useCallback(() => {
-    setStack((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
+    setStack((prev) => popStack(prev));
+  }, []);
+
+  const goBackWith = useCallback((params: Record<string, unknown>) => {
+    setStack((prev) => popStack(prev, params));
   }, []);
 
   const resetTo = useCallback((name: RouteName) => {
     setStack([{ name }]);
   }, []);
 
+  const canGoBack = stack.length > 1;
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () =>
+      handleHardwareBackPress(canGoBack, goBack),
+    );
+    return () => subscription.remove();
+  }, [canGoBack, goBack]);
+
   const value = useMemo<NavigationValue>(
     () => ({
       current: stack[stack.length - 1],
-      canGoBack: stack.length > 1,
+      canGoBack,
       navigate,
       replace,
       goBack,
+      goBackWith,
       resetTo,
     }),
-    [stack, navigate, replace, goBack, resetTo],
+    [stack, canGoBack, navigate, replace, goBack, goBackWith, resetTo],
   );
 
   return <NavigationContext.Provider value={value}>{children}</NavigationContext.Provider>;

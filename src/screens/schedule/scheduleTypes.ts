@@ -15,13 +15,29 @@ export type CandidateSlot = {
 
 export type ScheduleRecommendRequest = {
   meetingName: string;
-  inviteeIds: string[];
-  place: SchedulePlace;
-  candidateSlots: CandidateSlot[];
+  /** 후보 시간대는 서버가 이 방의 제출을 겹쳐서 만든다 */
+  roomId: string;
+  /** Tmap 에서 받아 온 실재하는 식당들. AI 는 이 안에서만 고를 수 있다. */
+  placeCandidates: {
+    id: string;
+    name: string;
+    address: string;
+    latitude: number;
+    longitude: number;
+    category: string;
+  }[];
 };
 
-export type ScheduleRecommendation = {
-  slotId: string;
+/**
+ * 시간 추천 한 건.
+ *
+ * 후보 시간대는 서버가 참가자들의 제출을 교차해 만든다. 그래서 slotId 만
+ * 오면 앱이 되짚을 방법이 없어, 날짜·시각을 함께 실어 보낸다.
+ */
+export type SlotRecommendation = {
+  slot: CandidateSlot;
+  /** 강수확률(%). 예보를 못 받았으면 null */
+  rainChance: number | null;
   rank: number;
   score: number;
   reason: string;
@@ -29,17 +45,25 @@ export type ScheduleRecommendation = {
   availableCount: number;
   totalCount: number;
   attendanceRate: number;
+};
+
+/** 식당 추천 한 건 — 시간과 무관하게 따로 고른다 */
+export type PlaceRecommendation = {
+  place: SchedulePlace;
+  rank: number;
+  score: number;
+  reason: string;
 
   averageTravelMinutes: number | null;
 };
 
 export type ScheduleRecommendResponse = {
-  recommendations: ScheduleRecommendation[];
+  slotRecommendations: SlotRecommendation[];
+  placeRecommendations: PlaceRecommendation[];
   modelVersion?: string | null;
   usage?: unknown;
 };
 
-export type RecommendationPick = ScheduleRecommendation & {
-  slot: CandidateSlot;
-  place: SchedulePlace;
-};
+export type SlotPick = SlotRecommendation;
+
+export type PlacePick = PlaceRecommendation;

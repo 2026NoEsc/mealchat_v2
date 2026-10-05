@@ -11,7 +11,7 @@ import SignupHeader from '../../components/SignupHeader';
 import { AccentButton } from '../../components/ui/Button';
 import { fs, s } from '../../theme/scale';
 import { colors, radii, shadows } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 type Props = {
   title: string;
@@ -135,15 +135,13 @@ const styles = StyleSheet.create({
     // 카드 기준 y26 (프레임 y153)
     marginTop: s(26),
     textAlign: 'center',
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(11),
     lineHeight: fs(14),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   cardTitleBrand: {
     fontFamily: fontFamily.wordmark,
-    fontWeight: weight.extrabold,
     color: colors.primary,
   },
   description: {
@@ -160,7 +158,6 @@ const styles = StyleSheet.create({
   },
   descriptionBrand: {
     fontFamily: fontFamily.wordmark,
-    fontWeight: weight.extrabold,
     color: colors.textPrimary,
   },
   footnote: {

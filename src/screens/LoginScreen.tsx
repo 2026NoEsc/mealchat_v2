@@ -1,9 +1,6 @@
 import { useState } from 'react';
 import {
-  Alert,
   Image,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,13 +10,16 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import KeyboardSafeScreen from '../components/KeyboardSafeScreen';
 import { useAuth } from '../auth/AuthProvider';
 import ScreenHeader from '../components/ScreenHeader';
+import { notify } from '../lib/confirm';
+import { authErrorMessage } from '../lib/password';
 import { AccentButton } from '../components/ui/Button';
 import { useNavigation } from '../navigation/NavigationContext';
 import { fs, s } from '../theme/scale';
 import { colors } from '../theme/tokens';
-import { fontFamily, weight } from '../theme/typography';
+import { fontFamily } from '../theme/typography';
 
 const logo = require('../../assets/brand/logo-main.png');
 
@@ -46,30 +46,29 @@ export default function LoginScreen() {
     const error = await signInWithEmail(email, password);
     setSubmitting(false);
 
-    if (error) Alert.alert('로그인 실패', error.message);
+    /* 서버는 영어로 던진다. Alert 는 웹에서 빈 함수라 이유가 통째로 사라졌다 */
+    if (error) notify('로그인 실패', authErrorMessage(error.message));
   };
 
   const resetPassword = async () => {
     if (!email.trim()) {
-      Alert.alert('이메일 입력', '비밀번호 재설정 메일을 받을 이메일을 입력해 주세요.');
+      notify('이메일 입력', '비밀번호 재설정 메일을 받을 이메일을 입력해 주세요.');
       return;
     }
 
     const error = await sendPasswordReset(email);
     if (error) {
-      Alert.alert('재설정 메일 전송 실패', error.message);
+      notify('재설정 메일 전송 실패', authErrorMessage(error.message));
     } else {
-      Alert.alert('메일 전송 완료', '이메일의 재설정 링크를 열어 새 비밀번호를 설정해 주세요.');
+      notify('메일 전송 완료', '이메일의 재설정 링크를 열어 새 비밀번호를 설정해 주세요.');
     }
   };
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top }]}>
+    <KeyboardSafeScreen style={[styles.screen, { paddingTop: insets.top }]}>
       <ScreenHeader title="로그인" onBack={canGoBack ? goBack : undefined} />
 
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={styles.flex}>
         <ScrollView
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
@@ -86,7 +85,7 @@ export default function LoginScreen() {
             value={email}
             onChangeText={setEmail}
             placeholder="이메일을 입력하세요"
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={colors.placeholder}
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
@@ -98,7 +97,7 @@ export default function LoginScreen() {
             value={password}
             onChangeText={setPassword}
             placeholder="비밀번호를 입력하세요"
-            placeholderTextColor={colors.textMuted}
+            placeholderTextColor={colors.placeholder}
             secureTextEntry
           />
 
@@ -120,8 +119,8 @@ export default function LoginScreen() {
             <Text style={styles.helper}>아이디 비밀번호 찾기</Text>
           </Pressable>
         </ScrollView>
-      </KeyboardAvoidingView>
-    </View>
+      </View>
+    </KeyboardSafeScreen>
   );
 }
 
@@ -153,9 +152,7 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.wordmark,
     fontSize: fs(10.8),
     lineHeight: fs(13),
-    fontWeight: weight.extrabold,
     color: colors.primary,
-    letterSpacing: fs(-0.1),
   },
   tagline: {
     marginTop: s(6),
@@ -166,10 +163,9 @@ const styles = StyleSheet.create({
   },
   label: {
     marginTop: s(4),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(7),
     lineHeight: fs(10),
-    fontWeight: weight.medium,
     color: colors.textPrimary,
   },
   labelSpacing: {
@@ -183,9 +179,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     paddingHorizontal: s(8),
     paddingVertical: 0,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(8),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   submit: {
@@ -206,10 +201,9 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   signupLink: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6.5),
     lineHeight: fs(10),
-    fontWeight: weight.bold,
     color: colors.primary,
   },
   findRow: {

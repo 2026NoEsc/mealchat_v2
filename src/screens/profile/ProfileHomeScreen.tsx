@@ -1,5 +1,6 @@
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useTopInset } from '../../theme/insets';
 
 import { useAuth } from '../../auth/AuthProvider';
 import AppHeader from '../../components/AppHeader';
@@ -15,7 +16,7 @@ import type { RouteName } from '../../navigation/routes';
 import { useMyProfile } from '../../profile/useMyProfile';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { fontFamily } from '../../theme/typography';
 
 
 type InfoRow = { label: string; value: string; danger?: boolean };
@@ -33,7 +34,8 @@ const LINKS: { label: string; route: RouteName }[] = [
  * body x11.5 y82 w197 / 카드 y82 h145, y233 h98, y337 h71.2 / 푸터 y414
  */
 export default function ProfileHomeScreen() {
-  const insets = useSafeAreaInsets();
+  /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
+  const topInset = useTopInset();
   const { navigate } = useNavigation();
   const { signOut } = useAuth();
   const { status, bundle } = useMyProfile();
@@ -76,7 +78,10 @@ export default function ProfileHomeScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
+      {/* 상태바 자리. 배경을 칠하지 않아 화면 배경이 그대로 비친다 —
+          헤더와 같은 색으로 칠하면 둘이 한 덩어리로 보여서 헤더가
+          어디서 시작하는지 알 수 없다 */}
+      <View style={{ height: topInset }} />
       <AppHeader />
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
@@ -85,7 +90,7 @@ export default function ProfileHomeScreen() {
           <Pressable style={styles.identity} onPress={() => navigate('ProfileEdit')}>
             <Avatar
               name={bundle?.profile.name ?? '?'}
-              color={bundle?.profile.avatarColor ?? colors.primary}
+              seed={bundle?.profile.id}
               url={bundle?.profile.avatarUrl}
               size={s(46)}
               radius={s(12)}
@@ -119,9 +124,12 @@ export default function ProfileHomeScreen() {
           </View>
 
           <View style={styles.track}>
-            {/* 진행 막대는 실제 완료 개수를 따른다 */}
-            <View style={[styles.fill, { flex: doneCount, minWidth: 0 }]} />
-            <View style={{ flex: steps.length - doneCount }} />
+            {/*
+              완료 개수를 폭 비율로 그린다. 예전에는 flex 로 나눴는데 track 에
+              flexDirection 이 없어 기본값(column)이라, 폭이 아니라 높이가 나뉘었다.
+              그래서 게이지가 차지 않고 늘 같은 모양이었다.
+            */}
+            <View style={[styles.fill, { width: `${(doneCount / steps.length) * 100}%` }]} />
           </View>
 
           {steps.map((step) => (
@@ -195,10 +203,9 @@ const styles = StyleSheet.create({
     // ph 기준 y40
     marginTop: s(2),
     textAlign: 'center',
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(11),
     lineHeight: fs(14),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   bio: {
@@ -227,10 +234,9 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   infoValue: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(7),
     lineHeight: fs(10),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   infoValueDanger: {
@@ -242,10 +248,9 @@ const styles = StyleSheet.create({
   },
   completeTitle: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(8),
     lineHeight: fs(11),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   completeCount: {
@@ -262,8 +267,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceSunken,
     overflow: 'hidden',
   },
+  /* 폭은 완료 개수가 정한다 — 여기에 고정 폭을 두면 게이지가 움직이지 않는다 */
   fill: {
-    width: `${(60 / 179) * 100}%`,
     height: '100%',
     borderRadius: s(4),
     backgroundColor: colors.primary,
@@ -284,7 +289,7 @@ const styles = StyleSheet.create({
   },
   stepMarkDone: {
     color: colors.primary,
-    fontWeight: weight.bold,
+    fontFamily: fontFamily.bold,
   },
   stepLabel: {
     flex: 1,
@@ -307,10 +312,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primarySoft,
   },
   badgeText: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6),
     lineHeight: fs(9),
-    fontWeight: weight.bold,
   },
   badgeTextDone: {
     color: colors.textMuted,
@@ -359,10 +363,9 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   deleteAccount: {
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(6.5),
     lineHeight: fs(9),
-    fontWeight: weight.bold,
     color: colors.danger,
   },
 });

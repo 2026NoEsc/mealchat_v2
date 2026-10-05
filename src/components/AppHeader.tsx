@@ -2,7 +2,7 @@ import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { fs, s } from '../theme/scale';
 import { colors, radii, shadows } from '../theme/tokens';
-import { fontFamily, weight } from '../theme/typography';
+import { fontFamily } from '../theme/typography';
 import { BellIcon } from './icons';
 import { useNotifications } from './NotificationsProvider';
 
@@ -35,6 +35,8 @@ export default function AppHeader() {
 const styles = StyleSheet.create({
   container: {
     width: '100%',
+    /* 상태바와 붙어 보이지 않게 한 칸 띄운다 */
+    marginTop: s(8),
     height: s(42),
     backgroundColor: colors.surface,
     ...shadows.bar,
@@ -64,9 +66,7 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.wordmark,
     fontSize: fs(12),
     lineHeight: fs(20),
-    fontWeight: weight.extrabold,
     color: colors.primary,
-    letterSpacing: fs(-0.1),
   },
   bell: {
     position: 'absolute',
