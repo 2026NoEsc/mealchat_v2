@@ -8,7 +8,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import SignupHeader from '../../components/SignupHeader';
-import { AccentButton } from '../../components/ui/Button';
+import { PrimaryButton } from '../../components/ui/Button';
 import { fs, s } from '../../theme/scale';
 import { colors, radii, shadows } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
@@ -96,7 +96,7 @@ export default function SignupIllustrationScreen({
         {children}
       </View>
 
-      <AccentButton
+      <PrimaryButton
         label={ctaLabel}
         showNext
         style={styles.cta}

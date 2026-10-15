@@ -1,4 +1,4 @@
-import { ChevronDown, UserMinus } from 'lucide-react-native';
+import { ChevronDown, UserMinus, UserPlus } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import {
   Pressable,
@@ -21,9 +21,8 @@ import {
   searchProfilesByTag,
   type Friend,
 } from '../../lib/friends';
-import Toggle from '../../components/ui/Toggle';
-import { fs, s } from '../../theme/scale';
-import { colors } from '../../theme/tokens';
+import { fs, s, v3Layout } from '../../theme/scale';
+import { colors, v3Colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 
 /** friends.ts 의 검색 결과 행 */
@@ -186,7 +185,17 @@ export default function FriendsScreen() {
                     <Text style={styles.name}>{person.name}</Text>
                     <Text style={styles.status}>@{person.tag}</Text>
                   </View>
-                  <Toggle value={false} onChange={() => void add(person.id)} size="sm" />
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`${person.name} 메이트 추가`}
+                    accessibilityState={{ disabled: busy }}
+                    disabled={busy}
+                    onPress={() => void add(person.id)}
+                    style={({ pressed }) => [styles.addFriendButton, pressed && { opacity: 0.8 }, busy && { opacity: 0.4 }]}>
+                    <View accessible={false} importantForAccessibility="no-hide-descendants">
+                      <UserPlus size={20} color={v3Colors.selectedText} />
+                    </View>
+                  </Pressable>
                 </View>
               ))
             )}
@@ -207,6 +216,16 @@ function Avatar({ name, color }: { name: string; color: string }) {
 }
 
 const styles = StyleSheet.create({
+  addFriendButton: {
+    width: v3Layout.minTouchTarget,
+    height: v3Layout.minTouchTarget,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: v3Colors.border,
+    backgroundColor: v3Colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   screen: {
     flex: 1,
     backgroundColor: colors.surfaceSunken,

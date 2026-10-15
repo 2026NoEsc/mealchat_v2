@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { formatAmount, relativeTime } from '../lib/format';
 import type { RoomNotification } from '../lib/settlements';
-import { fs, s } from '../theme/scale';
+import { useTopInset } from '../theme/insets';
+import { fs, s, v3Layout } from '../theme/scale';
 import { colors } from '../theme/tokens';
 import { fontFamily } from '../theme/typography';
 
@@ -34,7 +34,7 @@ export default function NotificationPanel({
   onClose: () => void;
   onMarkAllRead?: () => void;
 }) {
-  const insets = useSafeAreaInsets();
+  const topInset = useTopInset();
   const [filter, setFilter] = useState<Filter>('전체');
 
   const visible =
@@ -44,8 +44,8 @@ export default function NotificationPanel({
     <View style={styles.overlay}>
       <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
 
-      {/* 헤더(높이 42) 바로 아래에 패널이 걸리도록 배치 */}
-      <View style={[styles.panel, { marginTop: insets.top + s(48) }]}>
+      {/* 헤더 화면과 같은 상태바 보정값 및 v3 헤더(60) 바로 아래에 붙인다. */}
+      <View testID="notification-panel" style={[styles.panel, { marginTop: topInset + v3Layout.headerHeight }]}>
         <View style={styles.header}>
           <Text style={styles.title}>알림</Text>
           <Pressable onPress={onMarkAllRead} hitSlop={s(8)}>

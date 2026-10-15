@@ -6,7 +6,7 @@ import { useTopInset } from '../../theme/insets';
 
 import AppHeader from '../../components/AppHeader';
 import { CompleteButton } from '../../components/ui/Button';
-import Toggle from '../../components/ui/Toggle';
+import { Switch } from '../../components/ui/Switch';
 import { savePrivacySettings } from '../../lib/profile';
 import { useMyProfile } from '../../profile/useMyProfile';
 import { useNavigation } from '../../navigation/NavigationContext';
@@ -146,7 +146,7 @@ function Row({
         <Text style={styles.rowLabel}>{field.label}</Text>
         <Text style={styles.rowDetail}>{field.detail}</Text>
       </View>
-      <Toggle value={value} onChange={onChange} />
+      <Switch value={value} onChange={onChange} accessibilityLabel={field.label} />
     </View>
   );
 }

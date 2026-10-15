@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../auth/AuthProvider';
 import ScreenHeader from '../../components/ScreenHeader';
-import { AccentButton } from '../../components/ui/Button';
+import { PrimaryButton } from '../../components/ui/Button';
 import { recordTermsConsent } from '../../lib/consents';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
@@ -93,7 +93,7 @@ export default function ReConsentScreen({ onDone }: { onDone: () => void }) {
           ))}
         </View>
 
-        <AccentButton
+        <PrimaryButton
           label={submitting ? '저장 중' : '동의하고 계속하기'}
           style={styles.submit}
           disabled={!canSubmit || submitting}

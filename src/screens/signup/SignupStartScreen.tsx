@@ -1,7 +1,7 @@
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AccentButton } from '../../components/ui/Button';
+import { PrimaryButton } from '../../components/ui/Button';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
@@ -27,7 +27,7 @@ export default function SignupStartScreen() {
       </Text>
       <Text style={styles.sub}>&apos;앱 한 끼 먹자&apos; 실제로 이루어집니다</Text>
 
-      <AccentButton
+      <PrimaryButton
         label="가입하기"
         showNext
         style={styles.cta}

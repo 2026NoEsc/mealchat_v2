@@ -23,21 +23,26 @@ type Props = {
   onChange: (bank: string) => void;
   /** 회원가입은 h19, 프로필 수정은 h24 로 쓰인다 */
   height?: number;
+  /** Unscaled dimensions for the v3 signup form; legacy callers keep height. */
+  logicalHeight?: number;
+  fontSize?: number;
 };
 
 /**
  * 회원가입 개인정보 입력(150:121)과 프로필 수정(309:1086)이 공유하는 은행 선택.
  * Figma 는 인라인 드롭다운이지만, 목록이 잘리지 않도록 모달로 띄운다.
  */
-export default function BankSelect({ value, onChange, height = 19 }: Props) {
+export default function BankSelect({ value, onChange, height = 19, logicalHeight, fontSize }: Props) {
   const [open, setOpen] = useState(false);
 
   return (
     <>
       <Pressable
-        style={[styles.trigger, { height: s(height) }]}
+        accessibilityRole="button"
+        accessibilityLabel={`은행 선택${value ? `, ${value}` : ''}`}
+        style={[styles.trigger, { height: logicalHeight ?? s(height) }]}
         onPress={() => setOpen(true)}>
-        <Text style={[styles.triggerText, !value && styles.placeholder]} numberOfLines={1}>
+        <Text style={[styles.triggerText, !value && styles.placeholder, fontSize !== undefined && { fontSize }]} numberOfLines={1}>
           {value ?? '은행 선택'}
         </Text>
         <ChevronDown size={s(7)} color={colors.textMuted} strokeWidth={2.5} />

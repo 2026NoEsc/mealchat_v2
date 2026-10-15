@@ -4,6 +4,35 @@
  * 주의: Figma의 `Design System` 페이지에는 Teal 계열 팔레트가 남아 있으나
  * 실제 Application UI 화면은 전부 오렌지/앰버 계열을 쓰고 있어 후자를 기준으로 한다.
  */
+/** Mealchat v3: supplied handoff palette. Legacy colors below stay independent. */
+export const v3Colors = {
+  bg: '#F8F6F2',
+  surface: '#FFFFFF',
+  border: '#E8E3DC',
+  primary: '#FF9900',
+  onPrimary: '#1C1A17',
+  ink: '#1C1A17',
+  sub: '#6B665F',
+  selectedBg: '#FFF3E0',
+  selectedText: '#8A4B00',
+  safeBg: '#E8F5EC',
+  safeText: '#1E6B34',
+  mutedBg: '#F1EEE9',
+} as const;
+
+/** Component feedback colors outside the 12-color Mealchat v3 variable palette. */
+export const v3FeedbackColors = {
+  error: '#C62828',
+} as const;
+
+/** Mealchat v3 component geometry measured in Figma and supplied by the coordinator. */
+export const v3Radii = {
+  button: 14,
+  field: 12,
+  chip: 22,
+  checkbox: 6,
+} as const;
+
 export const colors = {
   /** 브랜드 메인 (#f90) */
   primary: '#FF9900',

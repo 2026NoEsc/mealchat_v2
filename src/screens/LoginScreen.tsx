@@ -15,7 +15,7 @@ import { useAuth } from '../auth/AuthProvider';
 import ScreenHeader from '../components/ScreenHeader';
 import { notify } from '../lib/confirm';
 import { authErrorMessage } from '../lib/password';
-import { AccentButton } from '../components/ui/Button';
+import { PrimaryButton } from '../components/ui/Button';
 import { useNavigation } from '../navigation/NavigationContext';
 import { fs, s } from '../theme/scale';
 import { colors } from '../theme/tokens';
@@ -101,7 +101,7 @@ export default function LoginScreen() {
             secureTextEntry
           />
 
-          <AccentButton
+          <PrimaryButton
             label={submitting ? '로그인 중' : '로그인'}
             style={styles.submit}
             onPress={() => void signIn()}

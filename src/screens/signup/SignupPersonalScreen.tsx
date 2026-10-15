@@ -12,7 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import KeyboardSafeScreen from '../../components/KeyboardSafeScreen';
 import SignupHeader from '../../components/SignupHeader';
 import BankSelect from '../../components/ui/BankSelect';
-import { AccentButton } from '../../components/ui/Button';
+import { PrimaryButton } from '../../components/ui/Button';
 import { BIRTH_LENGTH, formatBirthInput, type BirthField } from '../../lib/birthDate';
 import { notify } from '../../lib/confirm';
 import { checkEmailAvailable, type EmailCheck } from '../../lib/email';
@@ -21,8 +21,8 @@ import { confirmProblem, passwordProblem } from '../../lib/password';
 import TextField, { fieldStyles } from '../../components/ui/TextField';
 import { useSignupDraft } from '../../auth/SignupDraftProvider';
 import { useNavigation } from '../../navigation/NavigationContext';
-import { fs, s } from '../../theme/scale';
-import { colors } from '../../theme/tokens';
+import { fs, s, v3Layout } from '../../theme/scale';
+import { colors, v3Colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 
 /**
@@ -188,10 +188,12 @@ export default function SignupPersonalScreen() {
           <Text style={[styles.label, styles.accountLabel]}>계좌번호</Text>
           <View style={styles.accountRow}>
             <View style={styles.bankChip}>
-              <BankSelect value={draft.bank} onChange={(bank) => updateDraft({ bank })} />
+              <BankSelect value={draft.bank} onChange={(bank) => updateDraft({ bank })}
+                logicalHeight={v3Layout.fieldHeight} fontSize={16} />
             </View>
             <TextInput
               style={styles.accountInput}
+              accessibilityLabel="계좌번호"
               value={draft.account}
               onChangeText={(account) => updateDraft({ account })}
               placeholder="'-' 없이 숫자만"
@@ -225,7 +227,7 @@ export default function SignupPersonalScreen() {
             />
           </View>
 
-          <AccentButton
+          <PrimaryButton
             label="다음"
             showNext
             style={styles.cta}
@@ -254,6 +256,7 @@ function BirthBox({
     <View style={styles.birthBox}>
       <TextInput
         style={styles.birthValue}
+        accessibilityLabel={`생년월일 ${unit}`}
         value={value}
         onChangeText={(text) => onChange(formatBirthInput(field, text))}
         placeholder={placeholder}
@@ -279,7 +282,7 @@ const styles = StyleSheet.create({
   },
   /* 입력창과 같은 높이로 맞춰 한 줄로 보이게 한다 */
   checkButton: {
-    height: s(23),
+    height: v3Layout.fieldHeight,
     paddingHorizontal: s(8),
     borderRadius: s(9),
     backgroundColor: colors.primary,
@@ -295,7 +298,7 @@ const styles = StyleSheet.create({
   checkButtonText: {
     fontFamily: fontFamily.bold,
     fontSize: fs(6.5),
-    color: colors.textOnAccent,
+    color: v3Colors.onPrimary,
   },
   hint: {
     marginTop: s(2),
@@ -305,7 +308,7 @@ const styles = StyleSheet.create({
     color: colors.danger,
   },
   hintOk: {
-    color: colors.primary,
+    color: v3Colors.safeText,
   },
   screen: {
     flex: 1,
@@ -341,7 +344,8 @@ const styles = StyleSheet.create({
     gap: s(3),
   },
   bankChip: {
-    width: s(51),
+    // A five-character bank name needs room at the form's 16-unit text size.
+    width: 112,
   },
   bankText: {
     fontFamily: fontFamily.bold,
@@ -351,13 +355,13 @@ const styles = StyleSheet.create({
   accountInput: {
     flex: 1,
     minWidth: 0,
-    height: s(19),
+    height: v3Layout.fieldHeight,
     borderRadius: s(8),
     backgroundColor: colors.card,
     paddingHorizontal: s(8),
     paddingVertical: 0,
     fontFamily: fontFamily.body,
-    fontSize: fs(7),
+    fontSize: 16,
     color: colors.textPrimary,
   },
   birthLabel: {
@@ -372,6 +376,7 @@ const styles = StyleSheet.create({
   },
   birthBox: {
     ...fieldStyles.box,
+    height: v3Layout.fieldHeight,
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
@@ -382,13 +387,14 @@ const styles = StyleSheet.create({
     // 웹에서 input 의 기본 min-width 때문에 축소되지 않아 명시한다
     minWidth: 0,
     fontFamily: fontFamily.bold,
-    fontSize: fs(9),
+    fontSize: 16,
+    height: v3Layout.fieldHeight,
     color: colors.textPrimary,
     padding: 0,
   },
   birthUnit: {
     fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
+    fontSize: 16,
     color: colors.textMuted,
   },
   cta: {

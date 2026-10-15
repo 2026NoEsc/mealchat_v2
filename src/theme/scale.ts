@@ -45,3 +45,29 @@ export const s412 = (n: number) => PixelRatio.roundToNearestPixel(n * wideRatio)
 
 /** 412 프레임의 폰트 크기를 변환한다. */
 export const fs412 = (n: number) => PixelRatio.roundToNearestPixel(n * wideRatio);
+
+/**
+ * V3 uses the 412 frame's numbers as React Native logical units. Widths use flex
+ * layout; controls and text must not shrink with screen width. Keep s/fs and
+ * s412/fs412 unchanged for screens that still use the older coordinate systems.
+ */
+export const v3Layout = {
+  designWidth: DESIGN_WIDTH_WIDE,
+  designHeight: DESIGN_HEIGHT_WIDE,
+  minTouchTarget: 44,
+  buttonHeight: 52,
+  fieldHeight: 52,
+  rowHeight: 56,
+  headerHeight: 60,
+  bottomNavHeight: 72,
+} as const;
+
+/** Bottom navigation dimensions include its design padding, but not OS insets. */
+const bottomNavPaddingTop = 6;
+const bottomNavPaddingBottom = 14;
+export const v3BottomNavLayout = {
+  paddingTop: bottomNavPaddingTop,
+  paddingHorizontal: 8,
+  paddingBottom: bottomNavPaddingBottom,
+  tabHeight: v3Layout.bottomNavHeight - bottomNavPaddingTop - bottomNavPaddingBottom,
+} as const;

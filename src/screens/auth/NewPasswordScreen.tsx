@@ -13,7 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import KeyboardSafeScreen from '../../components/KeyboardSafeScreen';
 import { useAuth } from '../../auth/AuthProvider';
 import ScreenHeader from '../../components/ScreenHeader';
-import { AccentButton } from '../../components/ui/Button';
+import { PrimaryButton } from '../../components/ui/Button';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
@@ -99,7 +99,7 @@ export default function NewPasswordScreen() {
             autoCorrect={false}
           />
 
-          <AccentButton
+          <PrimaryButton
             label={submitting ? '변경 중' : '비밀번호 변경'}
             style={styles.submit}
             onPress={() => void submit()}
