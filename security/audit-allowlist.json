@@ -1,17 +1,26 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "advisories": [
     {
       "id": "GHSA-86W9-CPQP-85RV",
       "package": "node-forge",
-      "reason": "No patched release exists. Expo CLI development tooling only: verification checks local self-signatures or signatures it just generated; default RSA exponent is 65537. This app has no update code signing or EAS project ID, and node-forge is absent from exported bundles. tests/dependencyTooling.test.js guards consumers, configuration, and runtime imports. Reassess upstream fixes and these boundaries before 2026-10-09; do not automatically extend.",
-      "expiresOn": "2026-10-09"
+      "reviewedOn": "2026-10-15",
+      "reason": "Reassessed on 2026-10-15: npm view still reports latest node-forge 1.4.0 and npm audit reports <=1.4.0 affected, with no patched release. Re-read @expo/code-signing-certificates 0.0.6 verification and @expo/cli 54.0.27 signing/iOS certificate paths: reviewed verification checks self-signatures or signatures just generated; iOS tooling parses local Keychain certificates; default RSA exponent remains 65537. Reran tests/dependencyTooling.test.js consumer, configuration, and import guards; added version pins. This app has no expo-updates, update code signing, or EAS project ID. Fresh Android/iOS/web export source maps exclude node-forge. Temporary risk acceptance only. Reassess upstream fixes, consumer code, exported bundles, and signing configuration before 2026-10-29 or any guarded version/configuration change; do not automatically extend.",
+      "expiresOn": "2026-10-29"
     },
     {
       "id": "GHSA-VFJ7-8CJW-P6XM",
       "package": "braces",
-      "reason": "No patched release exists (latest 3.0.3). The lockfile-declared braces consumer is micromatch 4.0.8; reviewed Jest/Metro matching APIs delegate to picomatch. resolve-workspace-root 2.0.1 also bundles braces; its workspace matching path uses bundled micromatch matching, with patterns read from local workspace configuration. tests/dependencyTooling.test.js guards versions, consumers, bundled code identity, app/config/script imports, and both matching paths with braces execution blocked. This is temporary risk acceptance, not a vulnerability fix or a guarantee about arbitrary plugins. Reassess upstream fixes and usage before 2026-10-09; do not automatically extend.",
-      "expiresOn": "2026-10-09"
+      "reviewedOn": "2026-10-15",
+      "reason": "Reassessed on 2026-10-15: npm view still reports latest braces 3.0.3 and npm audit reports <=3.0.3 affected, with no patched release. Rechecked the lockfile consumer micromatch 4.0.8 and reran tests/dependencyTooling.test.js: reviewed Jest/Metro matching APIs delegate to picomatch without executing braces; resolve-workspace-root 2.0.1 bundled-code identity and both workspace matching paths still pass with braces execution blocked. Tests guard versions, consumers, app/config/script imports, and dangerous-API positive controls. Workspace patterns come from local configuration. Fresh Android/iOS/web export source maps exclude standalone braces and micromatch. Temporary risk acceptance, not a vulnerability fix or a guarantee about arbitrary plugins. Reassess upstream fixes, usage, bundled-code identity, and exported bundles before 2026-10-29 or any guarded version/consumer change; do not automatically extend.",
+      "expiresOn": "2026-10-29"
+    },
+    {
+      "id": "GHSA-HP3W-G68C-FV3C",
+      "package": "sprintf-js",
+      "reviewedOn": "2026-10-15",
+      "reason": "Reviewed on 2026-10-15: npm view reports latest sprintf-js 1.1.3; npm audit reports <=1.1.3 affected with no patched release. Installed 1.0.3 is consumed only by argparse 1.0.10 under @istanbuljs/load-nyc-config 1.1.0 -> js-yaml 3.15.2, reached from babel-plugin-istanbul 6.1.1/Jest 29 tooling. Inspected argparse sprintf() calls: HelpFormatter accepts developer-controlled usage/text/help format templates; the js-yaml CLI supplies fixed templates, and CLI arguments/YAML values do not become precision specifiers. The actual Istanbul path calls js-yaml.load(), whose library entry does not load argparse or sprintf-js. New tests pin this chain and expiry, block app/config/script imports, and load YAML containing %.1000000f with argparse/sprintf loading blocked and a positive control. Fresh Android/iOS/web export source maps exclude sprintf-js and argparse. Temporary risk acceptance for this reviewed path; arbitrary argparse help templates are not covered. Reassess upstream patches, the Jest/Expo-compatible removal path, consumer/API changes, format-string inputs, and exported bundles before 2026-10-29; do not automatically extend or upgrade to Jest 30 without compatibility review.",
+      "expiresOn": "2026-10-29"
     }
   ]
 }

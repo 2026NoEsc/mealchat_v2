@@ -15,6 +15,78 @@ const sourcePathsIn = (directory) => readdirSync(directory, { withFileTypes: tru
     return entry.isDirectory() ? sourcePathsIn(path) : /\.[cm]?[jt]sx?$/.test(entry.name) ? [path] : [];
   });
 
+const packageImportsIn = (source) => [...source.matchAll(
+  /\b(?:require(?:\.resolve)?\s*\(\s*|import\s*\(\s*|import\s+|from\s+)['"`]([^'"`]+)['"`]/g,
+)].map((match) => match[1]);
+
+const importsPackage = (source, packages) => packages.some((name) => source.includes(name))
+  && packageImportsIn(source).some((specifier) => packages.some((name) => specifier === name || specifier.startsWith(`${name}/`)));
+
+describe('dependency audit gate', () => {
+  const entry = {
+    id: 'GHSA-HP3W-G68C-FV3C', package: 'sprintf-js', reason: 'Reviewed test boundary',
+    reviewedOn: '2026-10-15', expiresOn: '2026-10-29',
+  };
+  const allowlist = { schemaVersion: 2, advisories: [entry] };
+  const finding = { via: [{ url: `https://github.com/advisories/${entry.id}` }] };
+  const report = { vulnerabilities: { 'sprintf-js': finding }, metadata: { vulnerabilities: { total: 1 } } };
+  const checkCases = (cases) => runNode(`
+    (async () => {
+      const { checkAuditReport } = await import('./scripts/check-dependency-audit.mjs');
+      console.log(JSON.stringify(${JSON.stringify(cases)}.map(({ allowlist, report }) => {
+        try { checkAuditReport(allowlist, report, '2026-10-15'); return 'PASS'; }
+        catch (error) { return error.message; }
+      })));
+    })().catch(error => { console.error(error.message); process.exitCode = 1; });
+  `);
+
+  it('accepts an exact package match and the inclusive 30-day limit', () => {
+    expect(checkCases([
+      { allowlist, report },
+      { allowlist: { ...allowlist, advisories: [{ ...entry, expiresOn: '2026-11-14' }] }, report },
+      { allowlist, report: { ...report, vulnerabilities: { ...report.vulnerabilities, argparse: { via: ['sprintf-js'] } } } },
+    ])).toEqual(['PASS', 'PASS', 'PASS']);
+  });
+
+  it('rejects a substituted package and a second package sharing an allowed GHSA', () => {
+    const results = checkCases([
+      { allowlist, report: { vulnerabilities: { argparse: finding } } },
+      { allowlist, report: { vulnerabilities: { 'sprintf-js': finding, argparse: finding } } },
+    ]);
+    for (const result of results) expect(result).toMatch(/Audit package mismatch/);
+  });
+
+  it('rejects missing, invalid, future, inverted, and overlong review periods', () => {
+    const changes = [
+      { reviewedOn: undefined }, { reviewedOn: '2026-02-30' }, { reviewedOn: '2026-10-16' },
+      { expiresOn: '2026-10-15' }, { expiresOn: '2026-10-14' }, { expiresOn: '2026-11-15' },
+      { expiresOn: '2026-10-32' }, { reviewedOn: '2026-9-15' },
+    ];
+    const results = checkCases(changes.map((change) => ({
+      allowlist: { ...allowlist, advisories: [{ ...entry, ...change }] }, report,
+    })));
+    expect(results).toHaveLength(changes.length);
+    for (const result of results) expect(result).toMatch(/Invalid .* date|Future reviewedOn|Exception period/);
+  });
+
+  it('keeps schema, identity, expiry, unknown, and stale checks failing closed', () => {
+    const cases = [
+      [{ ...allowlist, schemaVersion: 1 }, report, /unsupported schema/],
+      [{ ...allowlist, advisories: [null] }, report, /Invalid advisory ID/],
+      [{ ...allowlist, advisories: [{ ...entry, package: '' }] }, report, /Invalid package/],
+      [{ ...allowlist, advisories: [{ ...entry, reason: '' }] }, report, /Missing reason/],
+      [{ ...allowlist, advisories: [entry, entry] }, report, /Duplicate advisory/],
+      [{ ...allowlist, advisories: [{ ...entry, reviewedOn: '2026-10-01', expiresOn: '2026-10-15' }] }, report, /Expired audit exception/],
+      [{ ...allowlist, advisories: [] }, report, /New advisory/],
+      [allowlist, { vulnerabilities: {} }, /Resolved advisory/],
+      [allowlist, { vulnerabilities: { 'sprintf-js': { via: [{ title: 'Missing ID' }] } } }, /Unidentified audit finding/],
+      [allowlist, { error: { summary: 'Registry failure' } }, /npm audit failed/],
+    ];
+    const results = checkCases(cases.map(([allowlist, report]) => ({ allowlist, report })));
+    results.forEach((result, index) => expect(result).toMatch(cases[index][2]));
+  });
+});
+
 describe('patched build dependencies', () => {
   it('reads PNG buffers and asset file paths through the Expo Metro wrapper', () => {
     const result = runNode(`
@@ -148,11 +220,112 @@ describe('patched build dependencies', () => {
 const auditAllowlist = JSON.parse(readFileSync(resolve(projectRoot, 'security/audit-allowlist.json'), 'utf8'));
 const forgeException = auditAllowlist.advisories.find((entry) => entry.id.toUpperCase() === 'GHSA-86W9-CPQP-85RV');
 const bracesException = auditAllowlist.advisories.find((entry) => entry.id.toUpperCase() === 'GHSA-VFJ7-8CJW-P6XM');
+const sprintfException = auditAllowlist.advisories.find((entry) => entry.id.toUpperCase() === 'GHSA-HP3W-G68C-FV3C');
+
+(sprintfException ? describe : describe.skip)('temporary sprintf-js exception boundary', () => {
+  it('pins the reviewed expiry, versions, and coverage-tooling dependency chain', () => {
+    expect(sprintfException.package).toBe('sprintf-js');
+    expect(sprintfException.reviewedOn).toBe('2026-10-15');
+    expect(sprintfException.expiresOn).toBe('2026-10-29');
+    const lock = JSON.parse(readFileSync(resolve(projectRoot, 'package-lock.json'), 'utf8'));
+    const chain = [
+      ['node_modules/sprintf-js', '1.0.3', 'sprintf-js', 'node_modules/@istanbuljs/load-nyc-config/node_modules/argparse'],
+      ['node_modules/@istanbuljs/load-nyc-config/node_modules/argparse', '1.0.10', 'argparse', 'node_modules/@istanbuljs/load-nyc-config/node_modules/js-yaml'],
+      ['node_modules/@istanbuljs/load-nyc-config/node_modules/js-yaml', '3.15.2', 'js-yaml', 'node_modules/@istanbuljs/load-nyc-config'],
+      ['node_modules/@istanbuljs/load-nyc-config', '1.1.0', '@istanbuljs/load-nyc-config', 'node_modules/babel-plugin-istanbul'],
+    ];
+    for (const [path, version, name, parent] of chain) {
+      expect(lock.packages[path].version).toBe(version);
+      expect(lock.packages[parent].dependencies[name]).toBeDefined();
+    }
+    expect(Object.entries(lock.packages).filter(([, entry]) =>
+      [entry.dependencies, entry.optionalDependencies, entry.peerDependencies]
+        .some((group) => Object.hasOwn(group ?? {}, 'sprintf-js'))).map(([path]) => path))
+      .toEqual(['node_modules/@istanbuljs/load-nyc-config/node_modules/argparse']);
+    expect(Object.keys(lock.packages).filter((path) => /(?:^|\/)node_modules\/sprintf-js$/.test(path)))
+      .toEqual(['node_modules/sprintf-js']);
+  });
+
+  it('keeps argparse references out of the js-yaml 3.x library entry and lib tree', () => {
+    const root = resolve(projectRoot, 'node_modules/@istanbuljs/load-nyc-config/node_modules/js-yaml');
+    const paths = [resolve(root, 'index.js'), ...sourcePathsIn(resolve(root, 'lib'))];
+    expect(paths.length).toBeGreaterThan(1);
+    expect(paths.filter((path) => /\bargparse\b/.test(readFileSync(path, 'utf8')))).toEqual([]);
+  });
+
+  it('detects undeclared formatting consumers throughout installed node_modules', () => {
+    const consumers = sourcePathsIn(resolve(projectRoot, 'node_modules'))
+      .filter((path) => importsPackage(readFileSync(path, 'utf8'), ['sprintf-js', 'argparse']))
+      .map((path) => path.slice(projectRoot.length + 1).replace(/\\/g, '/')).sort();
+    expect(consumers).toEqual([
+      'node_modules/@istanbuljs/load-nyc-config/node_modules/argparse/lib/argument_parser.js',
+      'node_modules/@istanbuljs/load-nyc-config/node_modules/argparse/lib/help/formatter.js',
+      'node_modules/@istanbuljs/load-nyc-config/node_modules/js-yaml/bin/js-yaml.js',
+      'node_modules/js-yaml/bin/js-yaml.js',
+    ]);
+  }, 30000);
+
+  it('loads YAML coverage configuration without reaching argparse or sprintf', () => {
+    const result = runNode(`
+      const fs = require('node:fs');
+      const { tmpdir } = require('node:os');
+      const { join } = require('node:path');
+      const Module = require('node:module');
+      const { createRequire } = Module;
+      const coverageRequire = createRequire(require.resolve('@istanbuljs/load-nyc-config'));
+      const yamlRequire = createRequire(coverageRequire.resolve('js-yaml'));
+      const argparsePath = yamlRequire.resolve('argparse');
+      const sprintfPath = createRequire(argparsePath).resolve('sprintf-js');
+      const originalLoad = Module._load;
+      let blockedCalls = 0;
+      Module._load = function (name, parent, isMain) {
+        const path = Module._resolveFilename(name, parent, isMain);
+        if (path === argparsePath || path === sprintfPath) {
+          blockedCalls++;
+          throw new Error('Unreviewed formatting path blocked');
+        }
+        return originalLoad.apply(this, arguments);
+      };
+      const directory = fs.mkdtempSync(join(tmpdir(), 'mealchat-audit-'));
+      const configPath = join(directory, '.nycrc.yaml');
+      const payload = '%.1000000f';
+      fs.writeFileSync(configPath, 'include:\\n  - "' + payload + '"\\n');
+      (async () => {
+        try {
+          const { loadNycConfig } = require('@istanbuljs/load-nyc-config');
+          const config = await loadNycConfig({ cwd: directory, nycrcPath: configPath });
+          const callsDuringLoad = blockedCalls;
+          const loaded = [argparsePath, sprintfPath].some(path => Boolean(require.cache[path]));
+          let controlBlocked = false;
+          try { require(sprintfPath); } catch { controlBlocked = true; }
+          console.log(JSON.stringify({ include: config.include, callsDuringLoad, loaded, controlBlocked, blockedCalls }));
+        } finally {
+          Module._load = originalLoad;
+          fs.unlinkSync(configPath);
+          fs.rmdirSync(directory);
+        }
+      })().catch(error => { console.error(error.message); process.exitCode = 1; });
+    `);
+    expect(result).toEqual({
+      include: ['%.1000000f'], callsDuringLoad: 0, loaded: false,
+      controlBlocked: true, blockedCalls: 1,
+    });
+  });
+
+  it('blocks direct formatting-package imports in app, config, and build scripts', () => {
+    const configs = readdirSync(projectRoot).filter((name) => /\.config\.[cm]?[jt]s$/.test(name)).map((name) => resolve(projectRoot, name));
+    const paths = [resolve(projectRoot, 'App.tsx'), resolve(projectRoot, 'index.js'), ...configs,
+      ...sourcePathsIn(resolve(projectRoot, 'src')), ...sourcePathsIn(resolve(projectRoot, 'scripts'))];
+    expect(paths.filter((path) => importsPackage(readFileSync(path, 'utf8'), ['sprintf-js', 'argparse'])))
+      .toEqual([]);
+  });
+});
 
 (bracesException ? describe : describe.skip)('temporary braces exception boundary', () => {
   it('requires reassessment before the reviewed expiry and any version change', () => {
     expect(bracesException.package).toBe('braces');
-    expect(bracesException.expiresOn).toBe('2026-10-09');
+    expect(bracesException.reviewedOn).toBe('2026-10-15');
+    expect(bracesException.expiresOn).toBe('2026-10-29');
     const lock = JSON.parse(readFileSync(resolve(projectRoot, 'package-lock.json'), 'utf8'));
     for (const target of ['braces', 'micromatch']) {
       const entries = Object.entries(lock.packages).filter(([path]) => path.endsWith(`/node_modules/${target}`) || path === `node_modules/${target}`);
@@ -186,7 +359,7 @@ const bracesException = auditAllowlist.advisories.find((entry) => entry.id.toUpp
     const configs = readdirSync(projectRoot).filter((name) => /\.config\.[cm]?[jt]s$/.test(name)).map((name) => resolve(projectRoot, name));
     const paths = [resolve(projectRoot, 'App.tsx'), resolve(projectRoot, 'index.js'), ...configs,
       ...sourcePathsIn(resolve(projectRoot, 'src')), ...sourcePathsIn(resolve(projectRoot, 'scripts'))];
-    const imports = paths.filter((path) => /['"`](?:braces|micromatch|picomatch)(?:\/[^'"`]*)?['"`]/.test(readFileSync(path, 'utf8')));
+    const imports = paths.filter((path) => importsPackage(readFileSync(path, 'utf8'), ['braces', 'micromatch', 'picomatch']));
     expect(imports).toEqual([]);
   });
 
@@ -275,9 +448,14 @@ const bracesException = auditAllowlist.advisories.find((entry) => entry.id.toUpp
 
 // Remove this conditional boundary guard when an upstream fix removes the exception.
 (forgeException ? describe : describe.skip)('temporary node-forge exception boundary', () => {
-  it('requires explicit reassessment before extending the seven-day exception', () => {
+  it('requires explicit reassessment before extending the reviewed exception', () => {
     expect(forgeException.package).toBe('node-forge');
-    expect(forgeException.expiresOn).toBe('2026-10-09');
+    expect(forgeException.reviewedOn).toBe('2026-10-15');
+    expect(forgeException.expiresOn).toBe('2026-10-29');
+    const lock = JSON.parse(readFileSync(resolve(projectRoot, 'package-lock.json'), 'utf8'));
+    expect(lock.packages['node_modules/node-forge'].version).toBe('1.4.0');
+    expect(lock.packages['node_modules/@expo/cli'].version).toBe('54.0.27');
+    expect(lock.packages['node_modules/@expo/code-signing-certificates'].version).toBe('0.0.6');
   });
 
   it('limits forge consumers to the reviewed CLI packages and excludes expo-updates', () => {
