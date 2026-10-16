@@ -18,6 +18,7 @@ export const useAuth = () => ({
   updatePassword: async () => { record('updatePassword'); return null; },
 });
 export const useMyProfile = () => ({ status: 'ready', bundle, userId: 'fixture-self', reload: () => record('reload') });
+export async function verifyCurrentPassword() { record('verifyCurrentPassword'); return null; }
 export const useNotifications = () => ({ hasUnread: false, open: () => record('notifications.open') });
 let friends: Friend[] = ['모아', '또리', '웰링'].map((name, index) => ({ id: 'follow-' + index, profileId: 'fixture-' + index, name, tag: 'user-0000000' + index, avatarColor: '', role: 'mate' }));
 export async function fetchMyFriends() { record('fetchMyFriends'); return { data: [...friends], error: null }; }

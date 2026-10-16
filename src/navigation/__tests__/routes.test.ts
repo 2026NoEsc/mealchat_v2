@@ -1,6 +1,9 @@
 import { ROUTE_TO_TAB, TAB_ROUTES } from '../routes';
 
 describe('navigation route mappings', () => {
+  it('keeps the password-change form focused without bottom tabs', () => {
+    expect(ROUTE_TO_TAB.PasswordChange).toBeUndefined();
+  });
   it('maps each bottom tab to its root route', () => {
     // 채팅방 탭은 홈에 합쳤다 — 시안 2154:584 부터 탭이 셋이다
     expect(TAB_ROUTES).toEqual({

@@ -7,6 +7,7 @@ const replaced = [
   'src/auth/AuthProvider.tsx', 'src/profile/useMyProfile.ts',
   'src/components/NotificationsProvider.tsx', 'src/lib/friends.ts',
   'src/lib/profile.ts', 'src/lib/avatar.ts', 'src/lib/tmap.ts',
+  'src/lib/passwordReauthentication.ts',
 ].map((file) => path.resolve(directory, '../..', file));
 const previous = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {

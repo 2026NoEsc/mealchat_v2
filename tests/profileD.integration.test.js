@@ -9,6 +9,7 @@ jest.mock('react-native-safe-area-context', () => ({
 }));
 jest.mock('../src/theme/keyboard', () => ({ useKeyboardOverlap: () => ({ overlap: 0, remeasure: jest.fn() }) }));
 jest.mock('../src/auth/AuthProvider', () => ({ useAuth: jest.fn() }));
+jest.mock('../src/lib/passwordReauthentication', () => ({ verifyCurrentPassword: jest.fn() }));
 jest.mock('../src/profile/useMyProfile', () => ({ useMyProfile: jest.fn() }));
 jest.mock('../src/navigation/NavigationContext', () => ({ useNavigation: jest.fn() }));
 jest.mock('../src/components/NotificationsProvider', () => ({ useNotifications: () => ({ hasUnread: false, open: jest.fn() }) }));
@@ -28,6 +29,7 @@ jest.mock('expo-image-picker', () => ({
   launchImageLibraryAsync: jest.fn(), launchCameraAsync: jest.fn(),
 }));
 const { useAuth } = require('../src/auth/AuthProvider');
+const { verifyCurrentPassword } = require('../src/lib/passwordReauthentication');
 const { useMyProfile } = require('../src/profile/useMyProfile');
 const { useNavigation } = require('../src/navigation/NavigationContext');
 const api = require('../src/lib/profile');
@@ -40,6 +42,7 @@ const Toast = require('../src/components/ui/Toast').default;
 const { useToast } = require('../src/components/ui/Toast');
 const { Switch } = require('../src/components/ui/Switch');
 const ProfileEditScreen = require('../src/screens/profile/ProfileEditScreen').default;
+const PasswordChangeScreen = require('../src/screens/profile/PasswordChangeScreen').default;
 const ProfileHomeScreen = require('../src/screens/profile/ProfileHomeScreen').default;
 const FriendsScreen = require('../src/screens/profile/FriendsScreen').default;
 const OriginScreen = require('../src/screens/profile/OriginScreen').default;
@@ -54,6 +57,7 @@ let profileState;
 const mate = { id: 'follow-old', profileId: 'friend-1', name: '모아', tag: 'user-12345678', avatarColor: '', role: 'mate' };
 beforeEach(() => {
   jest.clearAllMocks();
+  verifyCurrentPassword.mockResolvedValue(null);
   Object.values(api).forEach((method) => method.mockResolvedValue(null));
   jest.spyOn(AccessibilityInfo, 'isScreenReaderEnabled').mockResolvedValue(false);
   jest.spyOn(AccessibilityInfo, 'addEventListener').mockReturnValue({ remove: jest.fn() });
@@ -64,7 +68,7 @@ beforeEach(() => {
       startLocationName: '서면역', startLat: 35.15, startLng: 129.05 },
   };
   auth = { user: { id: 'self', email: 'fixture@example.test' }, updatePassword: jest.fn(async () => null), signOut: jest.fn(async () => null) };
-  navigation = { goBack: jest.fn(), resetTo: jest.fn(), navigate: jest.fn(), canGoBack: true };
+  navigation = { current: { name: 'ProfileEdit' }, goBack: jest.fn(), goBackWith: jest.fn(), resetTo: jest.fn(), navigate: jest.fn(), replace: jest.fn(), canGoBack: true };
   profileState = { status: 'ready', userId: 'self', bundle, reload: jest.fn() };
   useAuth.mockImplementation(() => auth);
   useMyProfile.mockImplementation(() => profileState);
@@ -222,17 +226,13 @@ it('does not launch a denied camera, does not upload a cancelled album, and supp
   expect(avatarApi.removeAvatar).not.toHaveBeenCalled();
 });
 
-it('retains password change in a sheet and announces its successful completion', async () => {
+it('opens the separate password route and preserves unsaved profile edits without password params', async () => {
   const root = await render(ProfileEditScreen);
+  await act(async () => input(root, '닉네임').props.onChangeText('수정 중 이름'));
   await press(root, '비밀번호 변경');
-  await press(root, '비밀번호 바꾸기');
-  expect(auth.updatePassword).not.toHaveBeenCalled();
-  await act(async () => input(root, '새 비밀번호').props.onChangeText('fixture-pass'));
-  await act(async () => input(root, '새 비밀번호 재확인').props.onChangeText('fixture-pass'));
-  await press(root, '비밀번호 바꾸기');
-  expect(auth.updatePassword).toHaveBeenCalledWith('fixture-pass');
-  expect(output()).toContain('비밀번호를 바꿨어요');
-  expect(navigation.resetTo).not.toHaveBeenCalled();
+  expect(navigation.navigate).toHaveBeenCalledWith('PasswordChange');
+  expect(navigation.replace).toHaveBeenCalledWith('ProfileEdit', expect.objectContaining({ profileEditDraft: expect.objectContaining({ nickname: '수정 중 이름' }) }));
+  expect(root.findAllByType(TextInput).some((node) => node.props.secureTextEntry)).toBe(false);
 });
 
 it('selects an origin result, saves its coordinates, and clears stale coordinates after editing', async () => {
@@ -411,27 +411,225 @@ it.each(['returned', 'thrown'])('blocks duplicate privacy writes and rolls back 
 it.each([
   ['1234567', '1234567', '8자 이상으로 만들어 주세요.'],
   ['fixture-pass', 'other-pass', '비밀번호가 서로 달라요.'],
+  ['current-pass', 'current-pass', '지금 비밀번호와 다르게 입력해 주세요.'],
 ])('rejects invalid password input before invoking updatePassword (%s)', async (password, confirm, message) => {
-  const root = await render(ProfileEditScreen); await press(root, '비밀번호 변경');
+  const root = await render(PasswordChangeScreen);
+  await act(async () => input(root, '현재 비밀번호').props.onChangeText('current-pass'));
   await act(async () => input(root, '새 비밀번호').props.onChangeText(password));
-  await act(async () => input(root, '새 비밀번호 재확인').props.onChangeText(confirm));
+  await act(async () => input(root, '새 비밀번호 확인').props.onChangeText(confirm));
+  expect(action(root, '비밀번호 바꾸기').props.disabled).toBe(true);
   await press(root, '비밀번호 바꾸기');
   expect(auth.updatePassword).not.toHaveBeenCalled();
   expect(output()).toContain(message);
 });
 
 it.each([
-  ['New password should be different from the old password.', '이전 비밀번호와 다른 비밀번호를 입력해 주세요.'],
-  ['unregistered internal server diagnostic', '잠시 후 다시 시도해 주세요.'],
-])('maps password update errors without exposing the original server message (%s)', async (serverMessage, friendly) => {
-  auth.updatePassword.mockResolvedValue(new Error(serverMessage));
-  const root = await render(ProfileEditScreen); await press(root, '비밀번호 변경');
+  [{ message: 'private diagnostic', code: 'same_password' }, '이전 비밀번호와 다른 비밀번호를 입력해 주세요.'],
+  [{ message: 'private diagnostic', code: 'weak_password' }, '비밀번호가 보안 기준에 맞지 않아요.'],
+  [{ message: 'private diagnostic', code: 'invalid_credentials' }, '현재 비밀번호가 맞지 않아요.'],
+  [{ message: 'private diagnostic', name: 'AuthRetryableFetchError', status: 0 }, '네트워크 연결을 확인한 뒤 다시 시도해 주세요.'],
+  [{ message: 'New password should be different from the old password.' }, '이전 비밀번호와 다른 비밀번호를 입력해 주세요.'],
+  [{ message: 'unregistered internal server diagnostic' }, '잠시 후 다시 시도해 주세요.'],
+])('maps password update errors without exposing the original server message (%j)', async (error, friendly) => {
+  auth.updatePassword.mockResolvedValue(error);
+  const root = await render(PasswordChangeScreen);
+  await act(async () => input(root, '현재 비밀번호').props.onChangeText('current-pass'));
   await act(async () => input(root, '새 비밀번호').props.onChangeText('fixture-pass'));
-  await act(async () => input(root, '새 비밀번호 재확인').props.onChangeText('fixture-pass'));
+  await act(async () => input(root, '새 비밀번호 확인').props.onChangeText('fixture-pass'));
   await press(root, '비밀번호 바꾸기');
   expect(auth.updatePassword).toHaveBeenCalledTimes(1);
   expect(output()).toContain(friendly);
-  expect(output()).not.toContain(serverMessage);
+  expect(output()).not.toContain(error.message);
+  expect(output()).not.toContain('비밀번호를 바꿨어요');
+  expect(navigation.goBackWith).not.toHaveBeenCalled();
+  await act(async () => input(root, '새 비밀번호 확인').props.onChangeText('fixture-pass'));
+  expect(output()).not.toContain(friendly);
+});
+
+it('keeps all password inputs secure and requires the current field before enabling submission', async () => {
+  const root = await render(PasswordChangeScreen);
+  expect(root.findAllByType(TextInput).every((node) => node.props.secureTextEntry)).toBe(true);
+  await act(async () => {
+    input(root, '새 비밀번호').props.onChangeText('fixture-pass');
+    input(root, '새 비밀번호 확인').props.onChangeText('fixture-pass');
+  });
+  expect(action(root, '비밀번호 바꾸기').props.disabled).toBe(true);
+  expect(output()).toContain('비밀번호가 일치해요.');
+});
+
+it('submits once, returns with a completion flag, and renders the destination Toast once', async () => {
+  let finish;
+  auth.updatePassword.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+  const root = await render(PasswordChangeScreen);
+  await act(async () => {
+    input(root, '현재 비밀번호').props.onChangeText('current-pass');
+    input(root, '새 비밀번호').props.onChangeText('new-pass');
+    input(root, '새 비밀번호 확인').props.onChangeText('new-pass');
+  });
+  const submit = action(root, '비밀번호 바꾸기').props.onPress;
+  await act(async () => { submit(); submit(); });
+  expect(auth.updatePassword).toHaveBeenCalledTimes(1);
+  expect(auth.updatePassword).toHaveBeenCalledWith('new-pass');
+  expect(verifyCurrentPassword).toHaveBeenCalledWith('self', 'current-pass');
+  expect(verifyCurrentPassword.mock.invocationCallOrder[0]).toBeLessThan(auth.updatePassword.mock.invocationCallOrder[0]);
+  expect(action(root, '비밀번호 바꾸기').props.disabled).toBe(true);
+  await act(async () => finish(null));
+  expect(navigation.goBackWith).toHaveBeenCalledWith({ passwordChanged: true });
+  await act(async () => renderer.unmount()); renderer = undefined;
+  navigation.current = { name: 'ProfileEdit', params: { passwordChanged: true, profileEditDraft: { userId: 'self', nickname: '보존 이름', bank: null, account: '', birth: { year: '2001', month: '02', day: '03' }, gender: 'none', avatarUrl: null } } };
+  const destination = await render(ProfileEditScreen);
+  expect(input(destination, '닉네임').props.value).toBe('보존 이름');
+  expect(output()).toContain('비밀번호를 바꿨어요');
+  expect(navigation.replace).toHaveBeenCalledWith('ProfileEdit', expect.objectContaining({ passwordChanged: undefined }));
+});
+
+it.each([
+  [{ code: 'invalid_credentials', message: 'private rejection' }, '현재 비밀번호가 맞지 않아요'],
+  [{ status: 429, message: 'private rejection' }, '요청이 많아요. 잠시 후 다시 시도해 주세요.'],
+  [{ code: 'over_request_rate_limit', message: 'private rejection' }, '요청이 많아요. 잠시 후 다시 시도해 주세요.'],
+  [{ status: 0, message: 'private rejection' }, '네트워크 연결을 확인한 뒤 다시 시도해 주세요.'],
+  [{ code: 'reauth_identity_mismatch', message: 'private rejection' }, '잠시 후 다시 시도해 주세요.'],
+  [{ message: 'private rejection' }, '잠시 후 다시 시도해 주세요.'],
+])('does not update a password after failed current-password verification (%j)', async (error, message) => {
+  verifyCurrentPassword.mockResolvedValue(error);
+  const root = await render(PasswordChangeScreen);
+  await act(async () => {
+    input(root, '현재 비밀번호').props.onChangeText('current-pass');
+    input(root, '새 비밀번호').props.onChangeText('new-pass');
+    input(root, '새 비밀번호 확인').props.onChangeText('new-pass');
+  });
+  await press(root, '비밀번호 바꾸기');
+  expect(auth.updatePassword).not.toHaveBeenCalled();
+  expect(navigation.goBackWith).not.toHaveBeenCalled();
+  expect(output()).toContain(message);
+  expect(output()).not.toContain('private rejection');
+});
+
+it.each(['social', 'no-email'])('blocks unsupported password-change accounts (%s)', async kind => {
+  auth.user = kind === 'social' ? { id: 'self', email: 'fixture@example.test', app_metadata: { providers: ['google'] }, identities: [{ provider: 'google' }] } : { id: 'self' };
+  const root = await render(PasswordChangeScreen);
+  expect(output()).toContain('이 로그인 방법에서는 비밀번호를 바꿀 수 없어요.');
+  expect(action(root, '비밀번호 바꾸기').props.disabled).toBe(true);
+  await press(root, '비밀번호 바꾸기');
+  expect(verifyCurrentPassword).not.toHaveBeenCalled();
+  expect(auth.updatePassword).not.toHaveBeenCalled();
+});
+
+it('does not update when leaving during current-password verification', async () => {
+  let finish;
+  verifyCurrentPassword.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const root = await render(PasswordChangeScreen);
+  await act(async () => {
+    input(root, '현재 비밀번호').props.onChangeText('current-pass');
+    input(root, '새 비밀번호').props.onChangeText('new-pass');
+    input(root, '새 비밀번호 확인').props.onChangeText('new-pass');
+  });
+  await press(root, '비밀번호 바꾸기');
+  await act(async () => renderer.unmount()); renderer = undefined;
+  await act(async () => finish(null));
+  expect(auth.updatePassword).not.toHaveBeenCalled();
+});
+
+it.each([false, true])('returns to settlement only after a successful profile save, failure=%s', async fail => {
+  navigation.current.params = { returnAfterSave: 'settlement' };
+  api.saveMyPrivateProfile.mockResolvedValue(fail ? new Error('fixture failure') : null);
+  const root = await render(ProfileEditScreen);
+  await press(root, '저장하기');
+  expect(api.saveMyPrivateProfile).toHaveBeenCalled();
+  expect(navigation.resetTo).not.toHaveBeenCalled();
+  expect(navigation.goBack).toHaveBeenCalledTimes(fail ? 0 : 1);
+});
+
+it('keeps the existing profile-home destination for ordinary profile saves', async () => {
+  const root = await render(ProfileEditScreen);
+  await press(root, '저장하기');
+  expect(navigation.resetTo).toHaveBeenCalledWith('Profile');
+  expect(navigation.goBack).not.toHaveBeenCalled();
+});
+
+it('restores the original settlement route and amount after registering an account', async () => {
+  const real = jest.requireActual('../src/navigation/NavigationContext');
+  useNavigation.mockImplementation(real.useNavigation);
+  let nav;
+  function Flow() {
+    nav = real.useNavigation();
+    if (nav.current.name === 'ProfileEdit') return React.createElement(ProfileEditScreen);
+    if (nav.current.name === 'PasswordChange') return React.createElement(PasswordChangeScreen);
+    return null;
+  }
+  await render(() => React.createElement(real.NavigationProvider, { initialRoute: 'ChatRoom' }, React.createElement(Flow)));
+  await act(async () => {
+    nav.replace('ChatRoom', { roomId: 'original-room', openSheet: 'settlement', settlementAmountText: '70000', awaitingSettlementAccount: true });
+    nav.navigate('ProfileEdit');
+  });
+  expect(nav.current.params.returnAfterSave).toBe('settlement');
+  await press(renderer.root, '비밀번호 변경');
+  await act(async () => {
+    input(renderer.root, '현재 비밀번호').props.onChangeText('current-pass');
+    input(renderer.root, '새 비밀번호').props.onChangeText('new-pass');
+    input(renderer.root, '새 비밀번호 확인').props.onChangeText('new-pass');
+  });
+  await press(renderer.root, '비밀번호 바꾸기');
+  expect(nav.current.params.returnAfterSave).toBe('settlement');
+  await press(renderer.root, '저장하기');
+  expect(nav.current).toEqual({ name: 'ChatRoom', params: { roomId: 'original-room', openSheet: 'settlement', settlementAmountText: '70000', awaitingSettlementAccount: true } });
+});
+
+it.each([
+  { openSheet: 'settlement', awaitingSettlementAccount: false },
+  { openSheet: 'members', awaitingSettlementAccount: true },
+  {},
+])('does not enable settlement return for unrelated chat entries (%j)', async params => {
+  const real = jest.requireActual('../src/navigation/NavigationContext');
+  let nav;
+  function Probe() { nav = real.useNavigation(); return null; }
+  await render(() => React.createElement(real.NavigationProvider, { initialRoute: 'ChatRoom' }, React.createElement(Probe)));
+  await act(async () => { nav.replace('ChatRoom', params); nav.navigate('ProfileEdit'); });
+  expect(nav.current.params?.returnAfterSave).toBeUndefined();
+});
+
+it.each(['returned', 'thrown'])('ignores a password request completing after exit (%s)', async (kind) => {
+  let finish, fail;
+  auth.updatePassword.mockImplementation(() => new Promise((resolve, reject) => { finish = resolve; fail = reject; }));
+  const root = await render(PasswordChangeScreen);
+  await act(async () => {
+    input(root, '현재 비밀번호').props.onChangeText('current-pass');
+    input(root, '새 비밀번호').props.onChangeText('fixture-pass');
+    input(root, '새 비밀번호 확인').props.onChangeText('fixture-pass');
+  });
+  await press(root, '비밀번호 바꾸기');
+  await press(root, '뒤로');
+  expect(navigation.goBack).toHaveBeenCalledTimes(1);
+  await act(async () => renderer.unmount()); renderer = undefined;
+  await act(async () => kind === 'returned' ? finish(null) : fail(new Error('private diagnostics')));
+  expect(navigation.goBackWith).not.toHaveBeenCalled();
+  expect(navigation.resetTo).not.toHaveBeenCalled();
+});
+
+it('round-trips through the real navigation stack, preserving the draft and showing the returned Toast', async () => {
+  const real = jest.requireActual('../src/navigation/NavigationContext');
+  useNavigation.mockImplementation(real.useNavigation);
+  function Flow() {
+    const { current } = real.useNavigation();
+    return React.createElement(current.name === 'PasswordChange' ? PasswordChangeScreen : ProfileEditScreen);
+  }
+  const root = await render(() => React.createElement(real.NavigationProvider, { initialRoute: 'ProfileEdit' }, React.createElement(Flow)));
+  await act(async () => input(root, '닉네임').props.onChangeText('돌아와도 보존'));
+  await press(root, '비밀번호 변경');
+  expect(input(root, '현재 비밀번호')).toBeDefined();
+  await act(async () => {
+    input(root, '현재 비밀번호').props.onChangeText('current-pass');
+    input(root, '새 비밀번호').props.onChangeText('new-pass');
+    input(root, '새 비밀번호 확인').props.onChangeText('new-pass');
+  });
+  await press(root, '비밀번호 바꾸기');
+  expect(input(root, '닉네임').props.value).toBe('돌아와도 보존');
+  expect(output()).toContain('비밀번호를 바꿨어요');
+  await press(root, '비밀번호 변경');
+  expect(input(root, '현재 비밀번호').props.value).toBe('');
+  expect(output()).not.toContain('비밀번호를 바꿨어요');
+  await press(root, '뒤로');
+  expect(input(root, '닉네임').props.value).toBe('돌아와도 보존');
   expect(output()).not.toContain('비밀번호를 바꿨어요');
 });
 

@@ -6,15 +6,12 @@ import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, Vi
 import { useAuth } from '../../auth/AuthProvider';
 import Avatar from '../../components/Avatar';
 import BankSelect from '../../components/ui/BankSelect';
-import BottomSheet from '../../components/ui/BottomSheet';
 import { PrimaryButton } from '../../components/ui/Button';
 import { ListRow } from '../../components/ui/ListRow';
-import PasswordField from '../../components/ui/PasswordField';
 import TextField from '../../components/ui/TextField';
 import Toast, { toastLayout, useToast } from '../../components/ui/Toast';
 import { removeAvatar, uploadAvatar } from '../../lib/avatar';
 import { BIRTH_LENGTH, formatBirthInput, fromBirthDate, type BirthField } from '../../lib/birthDate';
-import { authErrorMessage, confirmProblem, passwordProblem } from '../../lib/password';
 import { saveMyGender, saveMyPrivateProfile, updateMyName, type MyProfileBundle } from '../../lib/profile';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useMyProfile } from '../../profile/useMyProfile';
@@ -26,6 +23,7 @@ import { profileLayout } from '../../theme/profileTokens';
 import ProfilePhotoSheet from './ProfilePhotoSheet';
 
 type Gender = 'male' | 'female' | 'none';
+type EditDraft = { userId: string; nickname: string; bank: string | null; account: string; birth: ReturnType<typeof fromBirthDate>; gender: Gender | null; avatarUrl: string | null };
 const PHOTO_DISMISS_TIMEOUT_MS = 1500;
 const GENDERS: { value: Gender; label: string }[] = [
   { value: 'male', label: '남성' }, { value: 'female', label: '여성' }, { value: 'none', label: '밝히지 않음' },
@@ -41,28 +39,32 @@ export default function ProfileEditScreen() {
   return <ProfileEditForm key={userId} userId={userId} bundle={bundle} />;
 }
 function ProfileEditForm({ userId, bundle }: { userId: string; bundle: MyProfileBundle }) {
-  const { resetTo } = useNavigation();
-  const { user, updatePassword } = useAuth();
-  const [nickname, setNickname] = useState(bundle.profile.name);
-  const [bank, setBank] = useState(bundle.privateProfile.bankName);
-  const [account, setAccount] = useState(bundle.privateProfile.accountNumber ?? '');
-  const [birth, setBirth] = useState(fromBirthDate(bundle.privateProfile.birthDate));
-  const [gender, setGender] = useState(savedGender(bundle.privateProfile.personalData.gender));
-  const [avatarUrl, setAvatarUrl] = useState(bundle.profile.avatarUrl);
+  const { current, resetTo, replace, navigate, canGoBack, goBack } = useNavigation();
+  const { user } = useAuth();
+  // Keep unsaved profile edits in this route only; password values never enter route params.
+  const savedDraft = current.params?.profileEditDraft as EditDraft | undefined;
+  const draft = savedDraft?.userId === userId ? savedDraft : undefined;
+  const [nickname, setNickname] = useState(draft?.nickname ?? bundle.profile.name);
+  const [bank, setBank] = useState(draft ? draft.bank : bundle.privateProfile.bankName);
+  const [account, setAccount] = useState(draft?.account ?? bundle.privateProfile.accountNumber ?? '');
+  const [birth, setBirth] = useState(draft?.birth ?? fromBirthDate(bundle.privateProfile.birthDate));
+  const [gender, setGender] = useState(draft ? draft.gender : savedGender(bundle.privateProfile.personalData.gender));
+  const [avatarUrl, setAvatarUrl] = useState(draft ? draft.avatarUrl : bundle.profile.avatarUrl);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [photoOpen, setPhotoOpen] = useState(false);
   const [permissionSource, setPermissionSource] = useState<'album' | 'camera' | null>(null);
-  const [passwordOpen, setPasswordOpen] = useState(false);
-  const [password, setPassword] = useState('');
-  const [passwordConfirm, setPasswordConfirm] = useState('');
-  const [passwordSaving, setPasswordSaving] = useState(false);
-  const [passwordError, setPasswordError] = useState<string | undefined>();
   const locked = useRef(false);
   const mounted = useRef(true);
   const pickerDismiss = useRef<((proceed: boolean) => void) | null>(null);
   const pickerDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { showToast, toastProps } = useToast();
+
+  useEffect(() => {
+    if (current.params?.passwordChanged !== true) return;
+    showToast({ message: '비밀번호를 바꿨어요' });
+    replace('ProfileEdit', { ...current.params, passwordChanged: undefined });
+  }, [current.params, replace, showToast]);
 
   const finishPhotoDismiss = () => {
     if (pickerDismissTimer.current) clearTimeout(pickerDismissTimer.current);
@@ -153,27 +155,12 @@ function ProfileEditForm({ userId, bundle }: { userId: string; bundle: MyProfile
       const genderError = nameError || privateError || !gender || gender === savedGender(bundle.privateProfile.personalData.gender)
         ? null : await saveMyGender(userId, gender, bundle.privateProfile.personalData.gender);
       const error = nameError ?? privateError ?? genderError;
+      if (!mounted.current) return;
       if (error) { Alert.alert('저장 실패', error.message); return; }
-      resetTo('Profile');
-    } catch { Alert.alert('저장 실패', '잠시 후 다시 시도해 주세요.'); }
-    finally { locked.current = false; setSaving(false); }
-  };
-  const savePassword = async () => {
-    if (locked.current) return;
-    const problem = passwordProblem(password) ?? confirmProblem(password, passwordConfirm);
-    if (problem) { setPasswordError(problem); return; }
-    locked.current = true;
-    setPasswordSaving(true);
-    setPasswordError(undefined);
-    try {
-      const error = await updatePassword(password);
-      if (error) { setPasswordError(authErrorMessage(error.message)); return; }
-      setPassword('');
-      setPasswordConfirm('');
-      setPasswordOpen(false);
-      showToast({ message: '비밀번호를 바꿨어요' });
-    } catch { setPasswordError('잠시 후 다시 시도해 주세요.'); }
-    finally { locked.current = false; setPasswordSaving(false); }
+      if (current.params?.returnAfterSave === 'settlement' && canGoBack) goBack();
+      else resetTo('Profile');
+    } catch { if (mounted.current) Alert.alert('저장 실패', '잠시 후 다시 시도해 주세요.'); }
+    finally { if (mounted.current) { locked.current = false; setSaving(false); } }
   };
   const closePhoto = () => { if (!uploading) { setPhotoOpen(false); setPermissionSource(null); } };
   const photoActions = [
@@ -182,7 +169,7 @@ function ProfileEditForm({ userId, bundle }: { userId: string; bundle: MyProfile
     { label: '기본 캐릭터로 바꾸기', Icon: Smile, action: () => void clearAvatar(), disabled: !avatarUrl },
     ...(avatarUrl ? [{ label: '사진 지우기', Icon: Trash2, action: () => void clearAvatar(), danger: true, disabled: false }] : []),
   ];
-  return <ProfileFrame title="프로필 수정" footer={<PrimaryButton label="저장하기" loading={saving} disabled={uploading || passwordSaving} onPress={() => void save()} />}>
+  return <ProfileFrame title="프로필 수정" footer={<PrimaryButton label="저장하기" loading={saving} disabled={uploading} onPress={() => void save()} />}>
     <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
       <View style={styles.photo}>
         <View testID="profile-edit-avatar" style={styles.avatar}>
@@ -216,7 +203,11 @@ function ProfileEditForm({ userId, bundle }: { userId: string; bundle: MyProfile
         </View>
         <TextInput accessibilityLabel="계좌번호" value={account} onChangeText={setAccount} placeholder="계좌번호 입력" placeholderTextColor={colors.sub} keyboardType="number-pad" style={styles.account} />
       </View></View>
-      <ListRow title="비밀번호 변경" onPress={() => { setPasswordError(undefined); setPasswordOpen(true); }} style={styles.passwordRow} />
+      <ListRow title="비밀번호 변경" disabled={saving || uploading} onPress={() => {
+        if (locked.current) return;
+        replace('ProfileEdit', { ...current.params, profileEditDraft: { userId, nickname, bank, account, birth, gender, avatarUrl } satisfies EditDraft });
+        navigate('PasswordChange');
+      }} style={styles.passwordRow} />
     </ScrollView>
     {/* Keep the native Modal mounted for its iOS dismissal callback. */}
     <ProfilePhotoSheet visible={photoOpen} title={permissionSource ? '사진 접근 안내' : '프로필 사진'} onClose={closePhoto} onDismiss={finishPhotoDismiss}>
@@ -228,11 +219,6 @@ function ProfileEditForm({ userId, bundle }: { userId: string; bundle: MyProfile
         <Icon size={22} strokeWidth={2} color={danger ? v3FeedbackColors.error : colors.ink} aria-hidden={true} /><Text style={[styles.photoActionText, danger && styles.danger]}>{label}</Text>
       </Pressable>)}</View>}
     </ProfilePhotoSheet>
-    {passwordOpen ? <BottomSheet visible title="비밀번호 변경" onClose={() => { if (!passwordSaving) { setPasswordOpen(false); setPassword(''); setPasswordConfirm(''); } }}>
-      <PasswordField label="새 비밀번호" value={password} onChangeText={setPassword} helper="8자 이상" autoComplete="new-password" />
-      <PasswordField label="새 비밀번호 재확인" value={passwordConfirm} onChangeText={setPasswordConfirm} error={passwordError} autoComplete="new-password" />
-      <PrimaryButton label="비밀번호 바꾸기" loading={passwordSaving} onPress={() => void savePassword()} />
-    </BottomSheet> : null}
     <Toast {...toastProps} bottom={v3Layout.buttonHeight + profileLayout.footerPadding * 2 + toastLayout.gap} />
   </ProfileFrame>;
 }

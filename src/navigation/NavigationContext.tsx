@@ -43,7 +43,12 @@ export function NavigationProvider({
   const [stack, setStack] = useState<Route[]>([{ name: initialRoute }]);
 
   const navigate = useCallback((name: RouteName, params?: Record<string, unknown>) => {
-    setStack((prev) => [...prev, { name, params }]);
+    setStack((prev) => {
+      const source = prev[prev.length - 1];
+      const fromSettlement = name === 'ProfileEdit' && source.name === 'ChatRoom'
+        && source.params?.openSheet === 'settlement' && source.params?.awaitingSettlementAccount === true;
+      return [...prev, { name, params: fromSettlement ? { ...params, returnAfterSave: 'settlement' } : params }];
+    });
   }, []);
 
   const replace = useCallback((name: RouteName, params?: Record<string, unknown>) => {

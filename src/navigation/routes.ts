@@ -22,6 +22,7 @@ export type RouteName =
   | 'Privacy'
   | 'Origin'
   | 'ProfileEdit'
+  | 'PasswordChange'
   | 'Settings'
   | 'ServiceTerms'
   | 'PrivacyPolicy'
