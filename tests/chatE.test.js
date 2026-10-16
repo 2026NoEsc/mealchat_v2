@@ -29,6 +29,7 @@ const { useKeyboardOverlap } = require('../src/theme/keyboard');
 const { fetchRoomVoting, confirmRoomVote, toggleVote, addVotingItem, removeVotingItem } = require('../src/lib/voting');
 const { useMyProfile } = require('../src/profile/useMyProfile');
 const { buildPlaceCandidates } = require('../src/lib/placeCandidates');
+const { setRestaurantRecommendationUser, createRestaurantRecommendation, getRestaurantRecommendation } = require('../src/lib/restaurantRecommendationCache');
 const { supabase } = require('../src/lib/supabase');
 const { searchPlaces } = require('../src/lib/tmap');
 const VoteToggle = require('../src/components/ui/VoteToggle').default;
@@ -56,21 +57,24 @@ const text = root => root.findAllByType(Text).map(n => n.props.children).flat().
 const target = (root, label) => root.findAll(n => n.props.accessibilityRole === 'button' && (n.props.accessibilityLabel === label || (label === '약속 확정' && n.props.testID === 'voting-confirm-cta')) && typeof n.props.onPress === 'function')[0];
 const targets = (root, label) => root.findAll(n => n.props.accessibilityRole === 'button' && n.props.accessibilityLabel === label && typeof n.props.onPress === 'function');
 async function render(Component, props = {}) { await act(async () => { renderer = create(React.createElement(Component, props)); }); return renderer.root; }
+// Simulate the AuthProvider event alongside the mocked auth context.
+function setChatUser(user) { setRestaurantRecommendationUser(user?.id ?? null); useAuth.mockReturnValue({ user }); }
 async function press(root, label) { const button = target(root, label); expect(button).toBeDefined(); await act(async () => button.props.onPress()); }
 beforeEach(() => {
+  setRestaurantRecommendationUser(null);
   jest.clearAllMocks(); VotingSheet.mockImplementation(() => null); useKeyboardOverlap.mockReturnValue({ overlap: 0, remeasure: jest.fn() });
   fetchRoomVoting.mockResolvedValue({ data: [{ id: 'restaurant', kind: 'menu', label: '돼지집 서면점', voters: [{name:'a'},{name:'b'},{name:'c'}], mine: true }], memberCount: 4, error: null });
   useMyProfile.mockReturnValue({bundle:null}); searchPlaces.mockReset().mockResolvedValue([]);
   toggleVote.mockResolvedValue(null); addVotingItem.mockResolvedValue(null); removeVotingItem.mockResolvedValue(null);
   buildPlaceCandidates.mockReset(); supabase.functions.invoke.mockReset();
   confirmRoomVote.mockResolvedValue(null); advanceRoomStage.mockResolvedValue({ error: null, stage: 'confirmed' });
-  useAuth.mockReturnValue({ user: { id: 'me' } });
+  setChatUser({ id: 'me' });
   navigation = { current: { name: 'ChatRoom', params: { roomId: 'room' } }, navigate: jest.fn(), resetTo: jest.fn(), goBack: jest.fn() };
   useNavigation.mockReturnValue(navigation); reload = jest.fn();
   useRoom.mockReturnValue({ room, reload: jest.fn() }); useRoomMessages.mockReturnValue({ messages: [], status: 'ready', reload });
   sendRoomMessage.mockResolvedValue(null); sendRoomSticker.mockResolvedValue(null); leaveRoom.mockResolvedValue(null);
 });
-afterEach(async () => { if (renderer) await act(async () => renderer.unmount()); renderer = undefined; jest.restoreAllMocks(); jest.useRealTimers(); });
+afterEach(async () => { if (renderer) await act(async () => renderer.unmount()); renderer = undefined; setRestaurantRecommendationUser(null); jest.restoreAllMocks(); jest.useRealTimers(); });
 
 it.each(['scheduling', 'place', 'confirmed'])('opens five truthful tray actions with existing stage permissions: %s', async stage => {
   useRoom.mockReturnValue({ room: { ...room, stage }, reload: jest.fn() });
@@ -152,7 +156,7 @@ it('prevents duplicate deletion calls while the real request is pending', async 
   await act(async () => resolve(null)); expect(navigation.resetTo).toHaveBeenCalledTimes(1);
 });
 it.each(['mate','settling'])('preserves deletion restrictions for %s and never invents mate-leave', async kind => {
-  if (kind === 'mate') useAuth.mockReturnValue({ user: { id: 'mate' } }); else useRoom.mockReturnValue({ room: { ...room, stage: 'settling' }, reload: jest.fn() });
+  if (kind === 'mate') setChatUser({ id: 'mate' }); else useRoom.mockReturnValue({ room: { ...room, stage: 'settling' }, reload: jest.fn() });
   const root = await render(RoomDetailScreen);
   if (kind === 'mate') expect(target(root, '방 없애기')).toBeUndefined(); else expect(target(root, '방 없애기').props.disabled).toBe(true);
   expect(target(root, '방 나가기')).toBeUndefined();
@@ -219,7 +223,7 @@ it('moves the actual chat flow from place to confirmed and enables N빵 after ow
   await press(root,'메뉴 펼치기');expect(target(root.findByType(ActionTray),'N빵 정산').props.disabled).toBe(false);
 });
 it.each(['me','mate'])('shows detail restaurant choice for %s only in loaded place rooms',async id=>{
-  useAuth.mockReturnValue({user:{id}});const root=await render(RoomDetailScreen);expect(target(root,'장소 정하기')).toBeDefined();
+  setChatUser({id});const root=await render(RoomDetailScreen);expect(target(root,'장소 정하기')).toBeDefined();
   for(const stage of ['scheduling','confirmed','settling','done']){useRoom.mockReturnValue({room:{...room,stage},reload:jest.fn()});await act(async()=>renderer.update(React.createElement(RoomDetailScreen)));expect(target(root,'장소 정하기')).toBeUndefined();}
   useRoom.mockReturnValue({room:null,reload:jest.fn()});await act(async()=>renderer.update(React.createElement(RoomDetailScreen)));expect(target(root,'장소 정하기')).toBeUndefined();expect(text(root)).toContain('••••••');expect(text(root)).not.toContain('코드를 불러오지 못했어요');
 });
@@ -246,7 +250,7 @@ it.each([['place','위치 보기',VotingSheet],['settlement','정산하기',Sett
 it('keeps deletion hints factual and never exposes arbitrary backend errors',async()=>{
   expect(roomDeletionErrorMessage({code:'42501',message:'internal secret'})).toContain('방장만');expect(roomDeletionErrorMessage(Error('internal secret'))).not.toContain('internal');
   useRoom.mockReturnValue({room:{...room,stage:'settling'},reload:jest.fn()});const root=await render(RoomDetailScreen);expect(text(root)).toContain('정산이 끝나면 없앨 수 있어요.');
-  useAuth.mockReturnValue({user:{id:'mate'}});await act(async()=>renderer.update(React.createElement(RoomDetailScreen)));expect(text(root)).toContain('방은 방장만 없앨 수 있어요.');
+  setChatUser({id:'mate'});await act(async()=>renderer.update(React.createElement(RoomDetailScreen)));expect(text(root)).toContain('방은 방장만 없앨 수 있어요.');
 });
 it('stores sticker labels with their data and dims disabled sticker targets',async()=>{
   expect(STICKERS.every(sticker=>typeof sticker.label==='string'&&sticker.label.length>0)).toBe(true);const root=await render(EmoticonPanel,{disabled:true,onClose:jest.fn(),onPick:jest.fn()});
@@ -340,7 +344,7 @@ it.each([false,true])('locks saved restaurant edits for owner=%s but keeps only 
   if(isOwner){await press(root,'약속 확정 다시 시도');await press(root,'다시 확정하기');expect(advanceRoomStage).toHaveBeenCalledWith('room','confirmed');expect(confirmRoomVote).not.toHaveBeenCalled();}else expect(target(root,'약속 확정 다시 시도')).toBeUndefined();
 });
 it('skips recommendation calls for a mate when confirmedMenu is already saved',async()=>{
-  useAuth.mockReturnValue({user:{id:'mate'}});useMyProfile.mockReturnValue(profileOrigin);useRoom.mockReturnValue({room:{...room,confirmedMenu:'저장한 식당'},reload:jest.fn()});const root=await render(ChatRoomScreen);await act(async()=>root.findByType(VotingSheet).props.onRequestSuggestions());expect(buildPlaceCandidates).not.toHaveBeenCalled();expect(supabase.functions.invoke).not.toHaveBeenCalled();
+  setChatUser({id:'mate'});useMyProfile.mockReturnValue(profileOrigin);useRoom.mockReturnValue({room:{...room,confirmedMenu:'저장한 식당'},reload:jest.fn()});const root=await render(ChatRoomScreen);await act(async()=>root.findByType(VotingSheet).props.onRequestSuggestions());expect(buildPlaceCandidates).not.toHaveBeenCalled();expect(supabase.functions.invoke).not.toHaveBeenCalled();
 });
 it('does not invoke the recommendation function when the restaurant becomes saved during candidate lookup',async()=>{
   let resolve;useMyProfile.mockReturnValue(profileOrigin);buildPlaceCandidates.mockReturnValue(new Promise(done=>{resolve=done;}));const root=await render(ChatRoomScreen);useRoom.mockReturnValue({room:{...room,confirmedMenu:'저장됨'},reload:jest.fn()});await act(async()=>renderer.update(React.createElement(ChatRoomScreen)));await act(async()=>resolve(aiCandidates));expect(supabase.functions.invoke).not.toHaveBeenCalled();expect(root.findByType(VotingSheet).props.confirmedRestaurant).toBe('저장됨');
@@ -365,3 +369,210 @@ it.each(['candidates','recommendations'])('distinguishes zero %s from invocation
   useMyProfile.mockReturnValue(profileOrigin);buildPlaceCandidates.mockResolvedValue(kind==='candidates'?{candidates:[]}:aiCandidates);supabase.functions.invoke.mockResolvedValue({data:{placeRecommendations:[]},error:null});VotingSheet.mockImplementation(props=>React.createElement(RealVotingSheet,props));const root=await render(ChatRoomScreen);await press(root,'식당 정하기');expect(text(root)).toContain('근처에서 찾은 곳이 없어요');expect(text(root)).toContain('아는 식당을 직접 추가해 주세요');expect(target(root.findByType(RealVotingSheet),'다시 시도')).toBeUndefined();await press(root,'직접 추가');expect(target(root,'식당 직접 추가 닫기')).toBeDefined();if(kind==='candidates')expect(supabase.functions.invoke).not.toHaveBeenCalled();
 });
 it('announces that voting on an AI suggestion first adds it as a candidate',async()=>{const root=await render(RealVotingSheet,votingProps({suggestions:[{label:'AI 식당'}]}));expect(voteButton(root,'AI 식당').props.accessibilityHint).toBe('후보에 추가하고 투표해요');expect(voteButton(root,'돼지집 서면점').props.accessibilityHint).toBe('다시 누르면 투표를 취소해요');expect(StyleSheet.flatten(voteButton(root,'AI 식당').findAllByType(Text).at(-1).props.style).fontSize).toBeGreaterThanOrEqual(12);});
+
+const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
+const suggestions = root => root.findByType(VotingSheet).props;
+async function refreshChat() { await act(async () => renderer.update(React.createElement(ChatRoomScreen))); }
+async function leaveChat() { await act(async () => renderer.unmount()); renderer = undefined; }
+
+it.each(['candidates', 'invocation'])('shares an in-flight %s request after leaving and returning', async phase => {
+  const pending = deferred();
+  useMyProfile.mockReturnValue(profileOrigin);
+  buildPlaceCandidates.mockResolvedValue(aiCandidates);
+  supabase.functions.invoke.mockResolvedValue(aiResponse('새 식당'));
+  if (phase === 'candidates') buildPlaceCandidates.mockReturnValueOnce(pending.promise);
+  else supabase.functions.invoke.mockReturnValueOnce(pending.promise);
+  await render(ChatRoomScreen);
+  await leaveChat();
+  const root = await render(ChatRoomScreen);
+  expect(suggestions(root).suggestionStatus).toBe('loading');
+  await act(async () => pending.resolve(phase === 'candidates' ? aiCandidates : aiResponse('새 식당')));
+  expect(suggestions(root).suggestionStatus).toBe('ready');
+  expect(suggestions(root).suggestions).toEqual([{ label: '새 식당', fresh: false }]);
+  expect(suggestions(root).receivedMore).toBe(false);
+  expect(buildPlaceCandidates).toHaveBeenCalledTimes(1);
+  expect(supabase.functions.invoke).toHaveBeenCalledTimes(1);
+});
+it.each(['ready', 'error'])('caches %s completion while no screen is subscribed', async result => {
+  const pending = deferred();
+  useMyProfile.mockReturnValue(profileOrigin); buildPlaceCandidates.mockResolvedValue(aiCandidates);
+  supabase.functions.invoke.mockReturnValueOnce(pending.promise);
+  await render(ChatRoomScreen); await leaveChat();
+  await act(async () => result === 'ready' ? pending.resolve(aiResponse('새 식당')) : pending.reject(Error('offline')));
+  const root = await render(ChatRoomScreen);
+  expect(suggestions(root).suggestionStatus).toBe(result);
+  expect(suggestions(root).receivedMore).toBe(false);
+  expect(buildPlaceCandidates).toHaveBeenCalledTimes(1);
+  expect(supabase.functions.invoke).toHaveBeenCalledTimes(1);
+});
+it.each([false, true])('keeps automatic requests through foreground profile reset; completed during reset=%s', async duringReset => {
+  const pending = deferred();
+  useMyProfile.mockReturnValue(profileOrigin); buildPlaceCandidates.mockReturnValueOnce(pending.promise);
+  supabase.functions.invoke.mockResolvedValue(aiResponse('새 식당'));
+  const root = await render(ChatRoomScreen);
+  useMyProfile.mockReturnValue({ bundle: null }); await refreshChat();
+  expect(suggestions(root).suggestionStatus).toBe('loading');
+  if (duringReset) await act(async () => pending.resolve(aiCandidates));
+  useMyProfile.mockReturnValue(profileOrigin); await refreshChat();
+  if (!duringReset) await act(async () => pending.resolve(aiCandidates));
+  expect(suggestions(root).suggestionStatus).toBe('ready');
+  expect(suggestions(root).suggestions).toEqual([{ label: '새 식당', fresh: false }]);
+  expect(suggestions(root).receivedMore).toBe(false);
+  expect(buildPlaceCandidates).toHaveBeenCalledTimes(1);
+  expect(supabase.functions.invoke).toHaveBeenCalledTimes(1);
+});
+it('reuses the cache after the user object changes but its id stays the same', async () => {
+  useMyProfile.mockReturnValue(profileOrigin); buildPlaceCandidates.mockResolvedValue(aiCandidates);
+  supabase.functions.invoke.mockResolvedValue(aiResponse('새 식당'));
+  await render(ChatRoomScreen); await leaveChat();
+  setChatUser({ id: 'me', email: 'refreshed' });
+  const root = await render(ChatRoomScreen);
+  expect(suggestions(root).suggestionStatus).toBe('ready');
+  expect(buildPlaceCandidates).toHaveBeenCalledTimes(1);
+});
+it('isolates user ids and clears the previous user cache on account switches', async () => {
+  useMyProfile.mockReturnValue(profileOrigin); buildPlaceCandidates.mockResolvedValue(aiCandidates);
+  supabase.functions.invoke.mockResolvedValueOnce(aiResponse('새 식당')).mockResolvedValueOnce(aiResponse('돼지집 서면점'));
+  const root = await render(ChatRoomScreen);
+  expect(suggestions(root).suggestions[0].label).toBe('새 식당');
+  useMyProfile.mockReturnValue({ bundle: null }); setChatUser({ id: 'other' }); await refreshChat();
+  expect(suggestions(root).suggestions).toEqual([]);
+  useMyProfile.mockReturnValue(profileOrigin); await refreshChat();
+  expect(suggestions(root).suggestions).toEqual([{ label: '돼지집 서면점', fresh: false }]);
+  useMyProfile.mockReturnValue({ bundle: null }); setChatUser({ id: 'me' }); await refreshChat();
+  expect(suggestions(root).suggestions).toEqual([]);
+  expect(buildPlaceCandidates).toHaveBeenCalledTimes(2);
+});
+it.each(['logout', 'switch'])('discards late responses after %s, including returning to the same id', async transition => {
+  const pending = deferred();
+  useMyProfile.mockReturnValue(profileOrigin); buildPlaceCandidates.mockResolvedValue(aiCandidates);
+  supabase.functions.invoke.mockReturnValueOnce(pending.promise).mockResolvedValueOnce(aiResponse('돼지집 서면점'));
+  const root = await render(ChatRoomScreen);
+  setChatUser(transition === 'logout' ? null : { id: 'other' });
+  useMyProfile.mockReturnValue({ bundle: null }); await refreshChat();
+  expect(suggestions(root).suggestions).toEqual([]);
+  setChatUser({ id: 'me' }); useMyProfile.mockReturnValue(profileOrigin); await refreshChat();
+  await act(async () => pending.resolve(aiResponse('새 식당')));
+  expect(suggestions(root).suggestions).toEqual([{ label: '돼지집 서면점', fresh: false }]);
+  expect(suggestions(root).receivedMore).toBe(false);
+  expect(buildPlaceCandidates).toHaveBeenCalledTimes(2);
+});
+it('does not replay manual fresh-result feedback after leaving during that request', async () => {
+  const pending = deferred();
+  useMyProfile.mockReturnValue(profileOrigin); buildPlaceCandidates.mockResolvedValue(aiCandidates);
+  supabase.functions.invoke.mockResolvedValueOnce(aiResponse('돼지집 서면점')).mockReturnValueOnce(pending.promise);
+  const first = await render(ChatRoomScreen);
+  await act(async () => suggestions(first).onRequestSuggestions()); await leaveChat();
+  const root = await render(ChatRoomScreen);
+  await act(async () => pending.resolve(aiResponse('새 식당')));
+  expect(suggestions(root).suggestions.every(item => !item.fresh)).toBe(true);
+  expect(suggestions(root).receivedMore).toBe(false);
+});
+it('allows one-character direct addition while reserving place search for two characters', async () => {
+  const root = await render(RealVotingSheet, votingProps()); await press(root, '직접 추가');
+  expect(text(root)).toContain('식당 이름을 입력해 주세요. 검색은 두 글자부터 가능해요.');
+  await act(async () => root.findByType(TextInput).props.onChangeText('밥'));
+  expect(target(root, '이 이름으로 후보 추가')).toBeDefined();
+  expect(searchPlaces).not.toHaveBeenCalled();
+  await press(root, '이 이름으로 후보 추가');
+  expect(addVotingItem).toHaveBeenCalledWith('room', 'menu', '밥');
+});
+
+it('does not reuse an explicit fresh intent after logout and login with the same id', async () => {
+  useMyProfile.mockReturnValue(profileOrigin); buildPlaceCandidates.mockResolvedValue(aiCandidates);
+  supabase.functions.invoke.mockResolvedValueOnce(aiResponse('돼지집 서면점')).mockResolvedValueOnce(aiResponse('새 식당')).mockResolvedValueOnce(aiResponse('새 식당'));
+  const root = await render(ChatRoomScreen);
+  await act(async () => suggestions(root).onRequestSuggestions());
+  expect(suggestions(root).receivedMore).toBe(true);
+  // The auth event may clear the module while the chat screen has not unmounted yet.
+  setRestaurantRecommendationUser(null);
+  setRestaurantRecommendationUser('me'); // AuthProvider handles re-login before publishing its context.
+  useMyProfile.mockReturnValue({ bundle: null }); await refreshChat();
+  useMyProfile.mockReturnValue(profileOrigin); await refreshChat();
+  expect(suggestions(root).suggestions).toEqual([{ label: '새 식당', fresh: false }]);
+  expect(suggestions(root).receivedMore).toBe(false);
+  expect(buildPlaceCandidates).toHaveBeenCalledTimes(3);
+});
+
+it.each(['candidates', 'invocation'])('times out stalled %s within a combined 25-second budget, ignores late results and permits retry', async phase => {
+  jest.useFakeTimers();
+  const candidates = deferred(), invocation = deferred();
+  useMyProfile.mockReturnValue(profileOrigin);
+  buildPlaceCandidates.mockReturnValueOnce(candidates.promise);
+  supabase.functions.invoke.mockReturnValueOnce(invocation.promise);
+  const root = await render(ChatRoomScreen);
+  await act(async () => jest.advanceTimersByTime(10000));
+  if (phase === 'invocation') await act(async () => candidates.resolve(aiCandidates));
+  await act(async () => jest.advanceTimersByTime(14999));
+  expect(suggestions(root).suggestionStatus).toBe('loading');
+  await act(async () => jest.advanceTimersByTime(1));
+  expect(suggestions(root).suggestionStatus).toBe('error');
+  expect(suggestions(root).suggestionReason).toContain('다시 시도');
+  if (phase === 'candidates') {
+    await act(async () => candidates.resolve(aiCandidates));
+    expect(supabase.functions.invoke).not.toHaveBeenCalled();
+  } else await act(async () => invocation.resolve(aiResponse('새 식당')));
+  expect(suggestions(root).suggestionStatus).toBe('error');
+  expect(suggestions(root).suggestions).toEqual([]);
+  buildPlaceCandidates.mockResolvedValue(aiCandidates);
+  supabase.functions.invoke.mockReset().mockResolvedValue(aiResponse('돼지집 서면점'));
+  await act(async () => suggestions(root).onRequestSuggestions());
+  expect(suggestions(root).suggestionStatus).toBe('ready');
+  expect(suggestions(root).suggestions).toEqual([{ label: '돼지집 서면점', fresh: true }]);
+});
+it('keeps the same timeout deadline across screen departure and exposes retry on return', async () => {
+  jest.useFakeTimers();
+  useMyProfile.mockReturnValue(profileOrigin);
+  buildPlaceCandidates.mockReturnValueOnce(new Promise(() => {}));
+  await render(ChatRoomScreen); await act(async () => jest.advanceTimersByTime(20000));
+  await leaveChat();
+  const root = await render(ChatRoomScreen);
+  await act(async () => jest.advanceTimersByTime(5000));
+  expect(suggestions(root).suggestionStatus).toBe('error');
+  buildPlaceCandidates.mockResolvedValue(aiCandidates); supabase.functions.invoke.mockResolvedValue(aiResponse('새 식당'));
+  VotingSheet.mockImplementation(props => React.createElement(RealVotingSheet, props));
+  await refreshChat(); await press(root, '식당 정하기');
+  await press(root.findByType(RealVotingSheet), '다시 시도');
+  expect(text(root)).toContain('새 식당'); expect(text(root)).not.toContain('추천을 불러오지 못했어요');
+  expect(buildPlaceCandidates).toHaveBeenCalledTimes(2);
+});
+it('leaves cache ownership to AuthProvider when mounting a chat screen', async () => {
+  setRestaurantRecommendationUser('other');
+  const entry = createRestaurantRecommendation('other', 'saved', 0, { key: 'saved', roomId: 'saved', status: 'ready', items: [], receivedMore: false });
+  // The mocked context intentionally lags behind the provider event.
+  await render(ChatRoomScreen);
+  expect(getRestaurantRecommendation('other', 'saved')).toBe(entry);
+});
+it('applies the 120-character input limit and disables case-insensitive duplicates in direct input and search results', async () => {
+  fetchRoomVoting.mockResolvedValue({ data: [{ id: 'cafe', kind: 'menu', label: 'Cafe', voters: [], mine: false }], memberCount: 2, error: null });
+  searchPlaces.mockResolvedValue([{ id: 'found', name: 'CAFE', address: '주소' }]);
+  const root = await render(RealVotingSheet, votingProps({ suggestions: [{ label: 'cafe' }] }));
+  expect(root.findAllByType(VoteToggle)).toHaveLength(1);
+  await press(root, '직접 추가'); expect(root.findByType(TextInput).props.maxLength).toBe(120);
+  await act(async () => root.findByType(TextInput).props.onChangeText(' cafe '));
+  await act(async () => new Promise(done => setTimeout(done, 380)));
+  expect(target(root, '이 이름으로 후보 추가').props.disabled).toBe(true);
+  expect(target(root, 'CAFE 추가됨').props.disabled).toBe(true);
+  expect(addVotingItem).not.toHaveBeenCalled();
+});
+it.each([
+  ['23505', '이미 같은 이름의 후보가 있어요'],
+  ['22023', '후보는 30개까지 추가할 수 있어요'],
+  ['42501', '후보를 추가하지 못했어요'],
+])('explains add error %s using a safe localized message', async (code, expected) => {
+  addVotingItem.mockResolvedValueOnce({ code, message: 'private SQL detail', details: 'private table' });
+  const root = await render(RealVotingSheet, votingProps()); await press(root, '직접 추가');
+  await act(async () => root.findByType(TextInput).props.onChangeText('밥'));
+  await press(root, '이 이름으로 후보 추가');
+  expect(text(root)).toContain(expected); expect(text(root)).not.toContain('private');
+});
+it('validates overlong restaurant names from search results before treating a 22023 response as the option limit', async () => {
+  const longName = '가'.repeat(121);
+  searchPlaces.mockResolvedValue([{ id: 'long', name: longName, address: '주소' }]);
+  const root = await render(RealVotingSheet, votingProps()); await press(root, '직접 추가');
+  await act(async () => root.findByType(TextInput).props.onChangeText('검색'));
+  await act(async () => new Promise(done => setTimeout(done, 380)));
+  await press(root, longName + ' 추가');
+  expect(text(root)).toContain('후보 이름은 1~120자로 입력해 주세요');
+  expect(addVotingItem).not.toHaveBeenCalled();
+});

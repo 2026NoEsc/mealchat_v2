@@ -32,6 +32,14 @@ type Props = {
   suggestionStatus?: RecommendationStatus; suggestionReason?: string; receivedMore?: boolean; onRequestSuggestions?: () => void;
 };
 type Plan = { id: string | null; label: string; voteSaved: boolean };
+const votingLabelKey = (label: string) => label.trim().toLowerCase();
+function votingAddErrorMessage(error: unknown) {
+  const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+  if (code === '23505') return '이미 같은 이름의 후보가 있어요. 목록을 확인해 주세요.';
+  // add() validates nonempty labels up to 120 characters first; the remaining 22023 case is the server's per-kind limit.
+  if (code === '22023') return '후보는 30개까지 추가할 수 있어요. 기존 후보를 지운 뒤 다시 추가해 주세요.';
+  return '후보를 추가하지 못했어요. 목록을 확인하고 다시 시도해 주세요.';
+}
 
 /** Phone 540:1524 / 563:1755 / 628:3074 / 683:12975 / 540:1682. */
 export default function VotingSheet({ visible, isOwner = false, stage = 'place', confirmedSlot = null, participantCount, confirmedRestaurant,
@@ -80,28 +88,32 @@ export default function VotingSheet({ visible, isOwner = false, stage = 'place',
     return () => { active = false; clearTimeout(timer); };
   }, [adding, query, searchRequest, kind, restaurantLocked]);
 
-  const mutate = async (task: () => Promise<unknown>, message: string | (() => string)) => {
+  const mutate = async (task: () => Promise<unknown>, message: string | ((error: unknown) => string)) => {
     if (operation.current || !roomId || restaurantLocked) return;
     operation.current = true; setBusy(true); setActionError(null);
     try { await task(); }
-    catch { setActionError(typeof message === 'function' ? message() : message); }
+    catch (error) { setActionError(typeof message === 'function' ? message(error) : message); }
     finally { operation.current = false; setBusy(false); }
   };
   const vote = (option: VotingOption) => void mutate(async () => {
     const error = await toggleVote(roomId!, option.id); if (error) throw error;
     await load(); onVoted?.();
   }, '투표를 바꾸지 못했어요. 다시 시도해 주세요.');
-  const add = (label: string, thenVote = false) => { let added = false; return void mutate(async () => {
+  const add = (label: string, thenVote = false) => {
+    label = label.trim();
+    if (!label || Array.from(label).length > 120) { setActionError('후보 이름은 1~120자로 입력해 주세요.'); return; }
+    if (options.some(option => votingLabelKey(option.label) === votingLabelKey(label))) { setActionError('이미 같은 이름의 후보가 있어요. 목록을 확인해 주세요.'); return; }
+    let added = false; return void mutate(async () => {
     const error = await addVotingItem(roomId!, kind, label); if (error) throw error; added = true;
     const rows = await load();
     if (thenVote) {
-      const added = rows?.find(option => option.label.trim() === label.trim());
+      const added = rows?.find(option => votingLabelKey(option.label) === votingLabelKey(label));
       if (!added) throw Error('Candidate unavailable');
       const voteError = await toggleVote(roomId!, added.id); if (voteError) throw voteError;
       await load(); onVoted?.();
     }
     showToast({ message: '후보에 추가했어요' });
-  }, () => added && thenVote ? '후보는 추가됐지만 투표하지 못했어요. 추가된 후보에서 다시 투표해 주세요.' : '후보를 추가하지 못했어요. 목록을 확인하고 다시 시도해 주세요.'); };
+  }, error => added && thenVote ? '후보는 추가됐지만 투표하지 못했어요. 추가된 후보에서 다시 투표해 주세요.' : votingAddErrorMessage(error)); };
   const discard = (option: VotingOption) => void mutate(async () => {
     const error = await removeVotingItem(roomId!, option.id); if (error) throw error; await load();
   }, '후보를 지우지 못했어요. 다시 시도해 주세요.');
@@ -146,7 +158,7 @@ export default function VotingSheet({ visible, isOwner = false, stage = 'place',
     if (savedRestaurant && confirmationOpen) { setPlan({ id: null, label: savedRestaurant, voteSaved: true }); setConfirmationError(null); }
   }, [savedRestaurant, confirmationOpen]);
 
-  const openSuggestions = restaurantLocked ? [] : suggestions.filter(item => !options.some(option => option.label.trim() === item.label.trim()));
+  const openSuggestions = restaurantLocked ? [] : suggestions.filter(item => !options.some(option => votingLabelKey(option.label) === votingLabelKey(item.label)));
   const noCandidates = options.length === 0 && openSuggestions.length === 0;
   const openAdding = () => { if (restaurantLocked) return; Keyboard.dismiss(); setActionError(null); setAdding(true); };
   const close = () => { if (busy) return; if (confirmationOpen) setConfirmationOpen(false); else if (adding) { setAdding(false); setActionError(null); } else onClose(); };
@@ -168,22 +180,22 @@ export default function VotingSheet({ visible, isOwner = false, stage = 'place',
         {restaurantLocked ? <Text style={styles.savedNotice} accessibilityLiveRegion="polite">식당이 정해졌어요. 방장이 약속을 확정하면 끝나요</Text> : null}
         {actionError ? <Text accessibilityRole="alert" style={styles.error}>{actionError}</Text> : null}
         {adding ? <>
-          <View style={styles.searchField}><TextField style={styles.searchInput} label={kind === 'menu' ? '식당 검색' : '추가할 시간'} value={query} onChangeText={value => { setQuery(value); if (kind === 'menu' && value.trim().length >= 2) { setResults([]); setSearchState('loading'); } }} placeholder={placeholder} editable={!busy && !restaurantLocked}
+          <View style={styles.searchField}><TextField style={styles.searchInput} maxLength={120} label={kind === 'menu' ? '식당 검색' : '추가할 시간'} value={query} onChangeText={value => { setQuery(value); if (kind === 'menu' && value.trim().length >= 2) { setResults([]); setSearchState('loading'); } }} placeholder={placeholder} editable={!busy && !restaurantLocked}
             inputAccessory={<Pressable style={styles.iconButton} accessibilityRole="button" accessibilityLabel="검색어 지우기" disabled={busy} onPress={() => setQuery('')}><X size={18} color={colors.sub} /></Pressable>} /><Search size={18} color={colors.sub} style={styles.searchIcon} /></View>
           {searchState === 'loading' ? <Text style={styles.note}>검색하는 중이에요</Text> : null}
           {searchState === 'error' ? <FailureCard title="식당을 검색하지 못했어요" reason="잠시 후 다시 시도하거나 식당 이름을 직접 추가해 주세요." icon={<MapPin size={28} color={colors.selectedText} />} onRetry={() => setSearchRequest(n => n + 1)} /> : null}
           {searchState === 'ready' && results.length === 0 ? <Text style={styles.note}>검색 결과가 없어요. 식당 이름을 확인해 주세요.</Text> : null}
-          <View>{results.map(place => { const exists = options.some(option => option.label.trim() === place.name.trim()); return <View key={place.id} style={styles.result}>
+          <View>{results.map(place => { const exists = options.some(option => votingLabelKey(option.label) === votingLabelKey(place.name)); return <View key={place.id} style={styles.result}>
             <MapPin size={20} color={colors.sub} /><View style={styles.resultText}><Text style={styles.resultName}>{place.name}</Text><Text style={styles.note}>{[place.address, exists ? '후보에 있음' : ''].filter(Boolean).join(' · ')}</Text></View>
             <Pressable accessibilityRole="button" accessibilityLabel={place.name + (exists ? ' 추가됨' : ' 추가')} accessibilityState={{ disabled: exists || busy || restaurantLocked }} disabled={exists || busy || restaurantLocked}
               onPress={() => add(place.name)} style={[styles.resultAdd, exists && styles.inactive]}><Text style={styles.resultAddText}>{exists ? '✓ 추가됨' : '추가'}</Text></Pressable>
           </View>; })}</View>
-          {query.trim() && searchState !== 'loading' ? <Button label="이 이름으로 후보 추가" variant="secondary" disabled={busy || options.some(option => option.label.trim() === query.trim())} onPress={() => add(query.trim())} /> : !query.trim() ? <Text style={styles.note}>{kind === 'menu' ? '식당 이름을 두 글자 이상 입력해 주세요.' : '추가할 시간을 입력해 주세요.'}</Text> : null}
+          {query.trim() && searchState !== 'loading' ? <Button label="이 이름으로 후보 추가" variant="secondary" disabled={busy || options.some(option => votingLabelKey(option.label) === votingLabelKey(query))} onPress={() => add(query.trim())} /> : !query.trim() ? <Text style={styles.note}>{kind === 'menu' ? '식당 이름을 입력해 주세요. 검색은 두 글자부터 가능해요.' : '추가할 시간을 입력해 주세요.'}</Text> : null}
           {/* TODO(서버 단계): 후보에는 이름만 저장된다. 검색 주소/사진/가격/거리와 AI 출처 저장 계약은 없다. */}
         </> : <>
           {loading ? <Text style={styles.note}>후보를 불러오는 중이에요</Text> : loadError ? <FailureCard title="후보를 불러오지 못했어요" reason="잠시 후 다시 시도해 주세요." icon={<MapPin size={28} color={colors.sub} />} onRetry={() => void load()} /> : null}
           {!loading && !loadError ? options.map(option => <CandidateRow key={option.id} option={option} highlighted={leader?.id === option.id && option.voters.length > 0} participants={participants}
-            suggestion={suggestions.find(item => item.label.trim() === option.label.trim())} busy={busy || restaurantLocked} onVote={() => vote(option)}
+            suggestion={suggestions.find(item => votingLabelKey(item.label) === votingLabelKey(option.label))} busy={busy || restaurantLocked} onVote={() => vote(option)}
             onRemove={isOwner || (Boolean(myId) && option.createdBy === myId) ? () => discard(option) : undefined} />) : null}
           {!loadError ? openSuggestions.map(item => <CandidateRow key={'ai-' + item.label} option={{ id: item.label, kind, label: item.label, createdBy: null, voters: [], mine: false }}
             suggestion={item} pendingAddition participants={participants} busy={busy || loading} onVote={() => add(item.label, true)} />) : null}

@@ -5,6 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { Alert } from 'react-native';
 
 import { clearSettingsDraft } from '../lib/scheduleDraft';
+import { setRestaurantRecommendationUser } from '../lib/restaurantRecommendationCache';
 import { saveMyPrivateProfile } from '../lib/profile';
 import { supabase } from '../lib/supabase';
 import {
@@ -141,6 +142,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (active) {
         currentUserId = restoredSession?.user?.id ?? null;
+        setRestaurantRecommendationUser(currentUserId);
         setSession(restoredSession);
         setPasswordResetPending(restoredResetPending);
         setIsReady(true);
@@ -157,6 +159,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!active) return;
       const previousUserId = currentUserId;
       currentUserId = nextSession?.user?.id ?? null;
+      setRestaurantRecommendationUser(currentUserId);
       setSession(nextSession);
       // 웹은 URL 조각이 아니라 이벤트로 복구 흐름을 알려준다
       if (event === 'PASSWORD_RECOVERY') {
@@ -309,6 +312,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
     if (error) return error;
+    setRestaurantRecommendationUser(null);
     if (session?.user?.id) await clearSettingsDraft(session.user.id).catch(() => {});
 
     try {
