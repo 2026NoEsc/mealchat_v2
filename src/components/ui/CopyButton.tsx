@@ -28,8 +28,8 @@ export async function copyToClipboard(text: string): Promise<void> {
 }
 
 /** Figma 597:2254; compact is the 44px account-copy instance at 521:1600. */
-export default function CopyButton({ text, compact = false, accessibilityLabel = '복사', failureHint = '내용을 길게 눌러 직접 복사해 주세요' }: {
-  text: string; compact?: boolean; accessibilityLabel?: string; failureHint?: string;
+export default function CopyButton({ text, compact = false, accessibilityLabel = '복사', failureHint = '내용을 길게 눌러 직접 복사해 주세요', onCopied }: {
+  text: string; compact?: boolean; accessibilityLabel?: string; failureHint?: string; onCopied?: () => void;
 }) {
   const [state, setState] = useState<'idle' | 'copied' | 'error'>('idle');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -40,6 +40,8 @@ export default function CopyButton({ text, compact = false, accessibilityLabel =
       await copyToClipboard(text);
       if (!mounted.current) return;
       setState('copied');
+      // An observer cannot turn a successful clipboard write into a copy failure.
+      try { onCopied?.(); } catch { /* Clipboard contents were already written. */ }
       if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility('복사됨');
     } catch {
       if (!mounted.current) return;

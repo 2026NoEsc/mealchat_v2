@@ -1,6 +1,6 @@
 import { X } from 'lucide-react-native';
 import { useRef, type ReactNode } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle, type TextStyle } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useKeyboardOverlap } from '../../theme/keyboard';
@@ -11,6 +11,7 @@ import { authStyles } from './AuthLayout';
 /** 558:1631: keyboard-safe sheet with a separate, non-nested scrim target. */
 type Props = {
   visible: boolean; title: string; subtitle?: string; onClose: () => void; children: ReactNode;
+  contentStyle?: StyleProp<ViewStyle>; titleStyle?: StyleProp<TextStyle>; headingStyle?: StyleProp<ViewStyle>;
 };
 
 export default function BottomSheet({ visible, ...props }: Props) {
@@ -20,7 +21,7 @@ export default function BottomSheet({ visible, ...props }: Props) {
   </Modal>;
 }
 
-function SheetFrame({ title, subtitle, onClose, children }: Omit<Props, 'visible'>) {
+function SheetFrame({ title, subtitle, onClose, children, contentStyle, titleStyle, headingStyle }: Omit<Props, 'visible'>) {
   const insets = useSafeAreaInsets();
   const rootRef = useRef<View>(null);
   const { overlap: keyboard, remeasure } = useKeyboardOverlap(rootRef);
@@ -29,18 +30,18 @@ function SheetFrame({ title, subtitle, onClose, children }: Omit<Props, 'visible
     style={[styles.root, { paddingTop: insets.top, paddingBottom: keyboard }]}>
       <Pressable accessible={false} importantForAccessibility="no" aria-hidden={true}
         testID="auth-sheet-scrim" onPress={onClose} style={styles.scrim} />
-      <View testID="auth-sheet-surface" accessibilityViewIsModal aria-modal style={[styles.sheet, { paddingBottom: 24 + systemBar }]}>
+      <View testID="auth-sheet-surface" accessibilityViewIsModal aria-modal style={[styles.sheet, { paddingBottom: 24 + systemBar }, contentStyle]}>
         <View style={styles.handle} accessible={false} />
-        <View style={styles.heading}>
+        {title ? <View style={[styles.heading, headingStyle]}>
           <View style={styles.headingText}>
-            <Text accessibilityRole="header" style={styles.title}>{title}</Text>
+            <Text accessibilityRole="header" style={[styles.title, titleStyle]}>{title}</Text>
             {subtitle ? <Text style={authStyles.subtitle}>{subtitle}</Text> : null}
           </View>
           <Pressable accessibilityRole="button" accessibilityLabel="닫기" onPress={onClose}
             style={({ pressed }) => [authStyles.iconButton, pressed && authStyles.pressed]}>
             <X size={24} color={colors.ink} aria-hidden={true} />
           </Pressable>
-        </View>
+        </View> : null}
         {children}
       </View>
     </View>;

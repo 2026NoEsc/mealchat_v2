@@ -1,5 +1,5 @@
-import { AlertCircle, ChevronLeft } from 'lucide-react-native';
-import { useCallback, useEffect, useState } from 'react';
+import { AlertCircle, ChevronLeft, MoreVertical } from 'lucide-react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useTopInset } from '../../theme/insets';
@@ -9,6 +9,8 @@ import { Button } from '../../components/ui/Button';
 import CopyButton from '../../components/ui/CopyButton';
 import FailureCard from '../../components/ui/FailureCard';
 import SettleMember from '../../components/ui/SettleMember';
+import TransferConfirmationSheet, { settlementUiError } from '../../components/ui/TransferConfirmationSheet';
+import SettlementMoreSheet from '../../components/ui/SettlementMoreSheet';
 import { notify } from '../../lib/confirm';
 import { formatAmount } from '../../lib/format';
 import {
@@ -88,13 +90,18 @@ export default function SettlementsScreen() {
 토스가 없다면 계좌번호로 직접 보내 주세요.`);
     }
   };
-  const { goBack } = useNavigation();
+  const { goBack, navigate } = useNavigation();
   const { user } = useAuth();
   const userId = user?.id ?? null;
 
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [status, setStatus] = useState<Status>('loading');
   const [busy, setBusy] = useState(false);
+  const completing = useRef(false);
+  const [pending, setPending] = useState<{ settlementId: string; memberId: string } | null>(null);
+  const [confirmationError, setConfirmationError] = useState<string | null>(null);
+  const [moreId, setMoreId] = useState<string | null>(null);
+  useEffect(() => { setPending(null); setMoreId(null); setConfirmationError(null); }, [userId]);
 
   const load = useCallback(async () => {
     setStatus('loading');
@@ -113,17 +120,32 @@ export default function SettlementsScreen() {
 
   /* 내 몫만 누를 수 있다. 남의 몫을 대신 표시하는 것은 정산 시트에 있다 */
   const toggleMine = async (member: SettlementMember) => {
-    if (status !== 'ready' || busy) return;
-    setBusy(true);
-    const error = await setSettlementCompleted(member.id, !member.isCompleted);
-    setBusy(false);
-
-    if (error) {
-      Alert.alert('변경 실패', error.message);
-      return;
-    }
-    await load();
+    if (status !== 'ready' || completing.current || member.profileId !== userId) return;
+    completing.current = true; setBusy(true); setConfirmationError(null);
+    try {
+      const error = await setSettlementCompleted(member.id, !member.isCompleted);
+      if (error) {
+        const message = settlementUiError(error);
+        if (pending) setConfirmationError(message); else Alert.alert('변경 실패', message);
+        return;
+      }
+      setPending(null); await load();
+    } catch {
+      if (pending) setConfirmationError('완료로 표시하지 못했어요. 다시 시도해 주세요.');
+      else Alert.alert('변경 실패', '변경하지 못했어요. 잠시 후 다시 시도해 주세요.');
+    } finally { completing.current = false; setBusy(false); }
   };
+  const chooseMember = (settlement: Settlement, member: SettlementMember) => {
+    if (status !== 'ready' || busy || member.profileId !== userId || isSettled(settlement)) return;
+    if (!member.isCompleted && settlement.creatorId !== userId) {
+      setConfirmationError(null); setPending({ settlementId: settlement.id, memberId: member.id });
+    } else void toggleMine(member);
+  };
+  const pendingSettlement = status === 'ready' ? settlements.find(item => item.id === pending?.settlementId) : undefined;
+  const pendingMember = pendingSettlement?.members.find(member => member.id === pending?.memberId && member.profileId === userId && !member.isCompleted);
+  const pendingRecipient = pendingSettlement?.members.find(member => member.profileId !== null && member.profileId === pendingSettlement.creatorId)?.name ?? null;
+  const pendingAmount = pendingSettlement ? pendingSettlement.splitCount > 0 ? Math.ceil(pendingSettlement.totalAmount / pendingSettlement.splitCount) : pendingSettlement.totalAmount : 0;
+  const moreSettlement = status === 'ready' ? settlements.find(item => item.id === moreId) ?? null : null;
 
   const open = settlements.filter((settlement) => !isSettled(settlement));
   const done = settlements.filter((settlement) => isSettled(settlement));
@@ -149,21 +171,25 @@ export default function SettlementsScreen() {
             </View>
             <View style={styles.amountBox}><Text style={styles.small}>1인당</Text><Text style={styles.each}>{formatAmount(each)}</Text><Text style={styles.small}>총 {formatAmount(settlement.totalAmount)}</Text></View>
           </View>
+          <Pressable accessibilityRole="button" accessibilityLabel={settlement.title + ' 정산 더보기'} disabled={status !== 'ready' || busy} onPress={() => setMoreId(settlement.id)} style={styles.more}><MoreVertical size={22} color={colors.ink} /></Pressable>
           {!settled && settlement.bankName && settlement.accountNumber ? <>
             <View style={styles.accountBox}><View style={styles.left}><Text style={styles.small}>{destination}</Text><Text selectable style={styles.account}>{settlement.bankName} {settlement.accountNumber}</Text></View><CopyButton compact text={settlement.bankName + ' ' + settlement.accountNumber} accessibilityLabel="계좌 복사" failureHint="계좌번호를 길게 눌러 직접 복사해 주세요" /></View>
             {mineToPay(settlement, userId) ? <Button label="토스로 보내기" disabled={status !== 'ready'} onPress={() => void sendWithToss(settlement)} /> : null}
           </> : null}
           {settlement.members.length === 0 ? <Text style={styles.meta}>참가자를 불러오지 못했어요</Text> : <View>{settlement.members.map((member) => {
             const mine = member.profileId !== null && member.profileId === userId;
-            return <SettleMember key={member.id} layout="row" name={member.name} seed={member.profileId ?? member.id} completed={member.isCompleted} mine={mine} disabled={!mine || busy || settled || status !== 'ready'} onPress={mine ? () => void toggleMine(member) : undefined} />;
+            return <SettleMember key={member.id} layout="row" name={member.name} seed={member.profileId ?? member.id} completed={member.isCompleted} mine={mine} disabled={!mine || busy || settled || status !== 'ready'} onPress={mine ? () => chooseMember(settlement, member) : undefined} />;
           })}</View>}
         </View>;
       })}
       </View>
     </ScrollView>
+    <TransferConfirmationSheet visible={Boolean(pendingMember)} recipient={pendingRecipient} amount={pendingAmount} busy={busy} error={confirmationError} onClose={() => setPending(null)} onConfirm={() => { if (pendingMember) void toggleMine(pendingMember); }} />
+    <SettlementMoreSheet settlement={moreSettlement} requester={Boolean(userId && moreSettlement?.creatorId === userId)} onClose={() => setMoreId(null)} onOpenChat={() => { if (moreSettlement?.roomId) { setMoreId(null); navigate('ChatRoom', { roomId: moreSettlement.roomId, title: moreSettlement.roomTitle ?? undefined }); } }} />
   </View>;
 }
 const styles = StyleSheet.create({
+  more: { minWidth: 44, minHeight: 44, alignSelf: 'flex-end', marginVertical: -10, alignItems: 'center', justifyContent: 'center' },
   cards: { gap: 16 }, stale: { opacity: 0.45 },
   screen: { flex: 1, backgroundColor: colors.bg },
   header: { minHeight: v3Layout.headerHeight, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, gap: 4 },

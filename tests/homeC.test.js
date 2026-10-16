@@ -11,7 +11,7 @@ jest.mock('../src/navigation/NavigationContext', () => ({ useNavigation: jest.fn
 jest.mock('../src/rooms/useMyRooms', () => ({ useMyRooms: jest.fn(), useMySettlements: jest.fn() }));
 jest.mock('../src/lib/rooms', () => ({ joinRoomByCode: jest.fn(), fetchMyRooms: jest.fn(), fetchMySettlements: jest.fn() }));
 jest.mock('../src/lifecycle/AppLifecycleContext', () => ({ useForegroundRefreshToken: jest.fn(() => 0) }));
-jest.mock('../src/lib/settlements', () => ({ fetchMySettlementsDetailed: jest.fn(), setSettlementCompleted: jest.fn(), fetchMyNotifications: jest.fn(), fetchNotificationsReadAt: jest.fn(), markNotificationsRead: jest.fn() }));
+jest.mock('../src/lib/settlements', () => ({ ...jest.requireActual('../src/lib/settlementAccess'), fetchMySettlementsDetailed: jest.fn(), setSettlementCompleted: jest.fn(), fetchMyNotifications: jest.fn(), fetchNotificationsReadAt: jest.fn(), markNotificationsRead: jest.fn() }));
 const HomeScreen = require('../src/screens/HomeScreen').default;
 const NotificationPanel = require('../src/components/NotificationPanel').default;
 const CopyButton = require('../src/components/ui/CopyButton').default;
@@ -44,7 +44,7 @@ const notices = [
   { id: 'bill', roomId: 'room', title: '정산 요청', message: '회사', amount: 13000, createdAt: '2026-09-27T01:00:00Z' },
   { id: 'old', roomId: '', title: '이전 일정', message: '안내', amount: 0, createdAt: '2026-09-26T01:00:00Z' },
 ];
-const bill = { id: 'bill', creatorId: 'mate', roomTitle: '조선칼국수', title: '회사 팀 점심', totalAmount: 52000, splitCount: 4, bankName: '카카오뱅크', accountNumber: '3333-01-2345678', accountHolder: '박모아', createdAt: '2026-09-27T00:00:00Z', members: [{ id: 'mine', profileId: 'me', name: '나야나', isCompleted: false }, { id: 'other', profileId: 'mate', name: '모아', isCompleted: true }] };
+const bill = { id: 'bill', roomId: 'room', creatorId: 'mate', roomTitle: '조선칼국수', title: '회사 팀 점심', totalAmount: 52000, splitCount: 4, bankName: '카카오뱅크', accountNumber: '3333-01-2345678', accountHolder: '박모아', createdAt: '2026-09-27T00:00:00Z', members: [{ id: 'mine', profileId: 'me', name: '나야나', isCompleted: false }, { id: 'other', profileId: 'mate', name: '모아', isCompleted: true }] };
 beforeEach(() => {
   jest.clearAllMocks();
   useAuth.mockReturnValue({ user: { id: 'me' } });
@@ -140,7 +140,7 @@ it('keeps payment and member actions tied to existing data and only the current 
   const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true); const root = await render(SettlementsScreen);
   expect(text(root)).toContain('13,000원'); expect(text(root)).toContain('보낼 곳 · 모아 · 예금주 박모아');
   expect(target(root, '모아, 완료')).toBeUndefined(); await press(root, '토스로 보내기'); expect(openURL).toHaveBeenCalledWith('supertoss://send?bankCode=090&accountNo=3333012345678&amount=13000');
-  await press(root, '나야나 (나), 대기'); expect(setSettlementCompleted).toHaveBeenCalledWith('mine', true);
+  await press(root, '나야나 (나), 대기'); expect(setSettlementCompleted).not.toHaveBeenCalled(); await press(root, '보냈어요'); expect(setSettlementCompleted).toHaveBeenCalledWith('mine', true);
 });
 it('retries a settlement fetch rejection through the actual load path', async () => {
   fetchMySettlementsDetailed.mockRejectedValueOnce(new Error('offline')); const root = await render(SettlementsScreen); expect(text(root)).toContain('정산을 불러오지 못했어요'); await press(root, '다시 시도'); expect(fetchMySettlementsDetailed).toHaveBeenCalledTimes(2); expect(text(root)).toContain('회사 팀 점심');
@@ -152,6 +152,7 @@ it('keeps settlement cards and the same accessible member control during a succe
   let finishRefetch;
   fetchMySettlementsDetailed.mockReturnValueOnce(new Promise(resolve => { finishRefetch = resolve; }));
   await press(root, '나야나 (나), 대기');
+  await press(root, '보냈어요');
   expect(setSettlementCompleted).toHaveBeenCalledWith('mine', true);
   expect(fetchMySettlementsDetailed).toHaveBeenCalledTimes(2);
   expect(text(root)).toContain('불러오는 중');
@@ -221,6 +222,7 @@ it.each(['error', 'reject'])('blocks stale settlement cards after a refetch %s a
   if (mode === 'error') fetchMySettlementsDetailed.mockResolvedValueOnce({ data: null, error: Error('failed') });
   else fetchMySettlementsDetailed.mockRejectedValueOnce(Error('failed'));
   await press(root, '나야나 (나), 대기');
+  await press(root, '보냈어요');
   expect(text(root)).toContain('이전에 불러온 정산이에요'); expect(text(root)).not.toContain('인터넷 연결');
   expect(target(root, '토스로 보내기').props.disabled).toBe(true);
   const stale = root.findAll(n => n.props.pointerEvents === 'none' && n.props.importantForAccessibility === 'no-hide-descendants')[0];
@@ -314,4 +316,47 @@ it('clears the home settlement nudge before account-switch effects and ignores t
 it.each(['confirmed', 'settling', 'done'])('never displays the generated meetingDate in a %s home row', async stage => {
   const root = await render(RoomRow, { room: { ...room, stage, meetingDate: '2099-12-31', confirmedSlot: null }, onPress: jest.fn() });
   expect(text(root)).not.toContain('12월 31일'); expect(text(root)).not.toContain('2099');
+});
+
+it('requires confirmation to complete my share and cancels without a mutation', async () => {
+  const root = await render(SettlementsScreen); await press(root, '나야나 (나), 대기');
+  expect(text(root)).toContain('모아에게 13,000원 보냈나요?'); expect(setSettlementCompleted).not.toHaveBeenCalled();
+  await press(root, '아직이요'); expect(setSettlementCompleted).not.toHaveBeenCalled();
+  await press(root, '나야나 (나), 대기'); await press(root, '보냈어요'); expect(setSettlementCompleted).toHaveBeenCalledWith('mine', true);
+});
+it('prevents duplicate completion requests and keeps confirmation open on failure without exposing raw errors', async () => {
+  let finish; setSettlementCompleted.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  const root = await render(SettlementsScreen); await press(root, '나야나 (나), 대기');
+  await act(async () => { const button = target(root, '보냈어요'); button.props.onPress(); button.props.onPress(); });
+  expect(setSettlementCompleted).toHaveBeenCalledTimes(1);
+  await act(async () => finish(Error('private backend detail')));
+  expect(text(root)).toContain('정산을 변경하지 못했어요'); expect(text(root)).not.toContain('private backend detail');
+  await press(root, '보냈어요'); expect(setSettlementCompleted).toHaveBeenCalledTimes(2);
+});
+it.each([true, false])('shows only working settlement-more actions; requester=%s', async requester => {
+  const copy = jest.spyOn(Clipboard, 'setString').mockImplementation(() => {});
+  fetchMySettlementsDetailed.mockResolvedValue({ data: [{ ...bill, creatorId: requester ? 'me' : 'mate' }], error: null });
+  const root = await render(SettlementsScreen); await press(root, '회사 팀 점심 정산 더보기');
+  expect(target(root, '채팅방으로 가기')).toBeDefined();
+  expect(Boolean(target(root, '금액이 이상해요 · 채팅방에 묻기'))).toBe(!requester);
+  for (const label of ['정산 취소', '금액 · 참여 멤버 고치기', '재알림']) expect(target(root, label)).toBeUndefined();
+  await press(root, '정산 내용 복사'); expect(copy).toHaveBeenCalledWith('회사 팀 점심\n총 52,000원 · 1인당 13,000원'); expect(copy.mock.calls[0][0]).not.toContain('3333');
+  await press(root, '채팅방으로 가기'); expect(navigation.navigate).toHaveBeenCalledWith('ChatRoom', { roomId: 'room', title: '조선칼국수' });
+});
+it('preserves undo for an already-completed own share instead of asking the sent-money question', async () => {
+  fetchMySettlementsDetailed.mockResolvedValue({ data: [{ ...bill, members: [{ ...bill.members[0], isCompleted: true }, { ...bill.members[1], isCompleted: false }] }], error: null });
+  const root = await render(SettlementsScreen); await press(root, '나야나 (나), 완료'); expect(setSettlementCompleted).toHaveBeenCalledWith('mine', false);
+  expect(target(root, '보냈어요')).toBeUndefined();
+});
+
+it('preserves clipboard success and iOS announcement when a copy observer throws', async () => {
+  const previous = Platform.OS; Platform.OS = 'ios';
+  const copy = jest.spyOn(Clipboard, 'setString').mockImplementation(() => {});
+  const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility').mockImplementation(() => {});
+  const onCopied = jest.fn(() => { throw Error('observer failure'); });
+  try {
+    const root = await render(CopyButton, { text: 'REAL42', onCopied }); await press(root, '복사');
+    expect(copy).toHaveBeenCalledWith('REAL42'); expect(onCopied).toHaveBeenCalledTimes(1);
+    expect(text(root)).toContain('복사됨'); expect(text(root)).not.toContain('복사 실패'); expect(announce).toHaveBeenCalledWith('복사됨');
+  } finally { Platform.OS = previous; }
 });

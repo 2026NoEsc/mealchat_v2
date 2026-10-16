@@ -23,6 +23,8 @@ import ActionTray, { type ChatAction } from '../../components/ui/ActionTray';
 import FailureCard from '../../components/ui/FailureCard';
 import RoomTimer from '../../components/ui/RoomTimer';
 import MeetingCard from '../../components/ui/MeetingCard';
+import MessageActionsSheet, { type CopyableMessage } from '../../components/ui/MessageActionsSheet';
+import Toast, { useToast } from '../../components/ui/Toast';
 import { buildPlaceCandidates } from '../../lib/placeCandidates';
 import {
   createRestaurantRecommendation,
@@ -56,7 +58,11 @@ import EmoticonPanel, { findSticker } from './EmoticonPanel';
 import ScheduleSheet from './ScheduleSheet';
 import VotingSheet from './VotingSheet';
 
-type Message = { key: string } & (
+const messageRowPadding = 3;
+const messageGap = 14;
+const groupedGapReduction = 6;
+
+type Message = { key: string; separatorHeight?: number } & (
   | { kind: 'date'; text: string }
   | { kind: 'sys'; text: string }
   | ({ kind: 'msg'; mine: boolean; text: string } & Bubble)
@@ -343,14 +349,26 @@ export default function ChatRoomScreen() {
   /* 서버가 준 목록에 날짜 구분선을 끼워 화면용 배열로 만든다 */
   const messages = useMemo(
     // inverted 목록은 최신 줄부터 받는다. 긴 대화도 첫 렌더부터 끝부분을 보여 준다.
-    () => toDisplayMessages(remoteMessages, user?.id ?? null, avatarBySender).reverse(),
+    () => {
+      const items = toDisplayMessages(remoteMessages, user?.id ?? null, avatarBySender).reverse();
+      // Allocate the new touch padding from the surrounding gap, inside each native cell.
+      return items.map((item, index) => ({ ...item, separatorHeight: messageGap
+        - (item.kind === 'msg' ? messageRowPadding + (item.grouped ? groupedGapReduction : 0) : 0)
+        - (items[index + 1]?.kind === 'msg' ? messageRowPadding : 0) }));
+    },
     [remoteMessages, user?.id, avatarBySender],
   );
   const noticeActionRef = useRef(onNoticeAction); noticeActionRef.current = onNoticeAction;
   const handleNoticeAction = useCallback((kind: RoomNotice['kind']) => noticeActionRef.current(kind), []);
+  const [messageActions, setMessageActions] = useState<CopyableMessage | null>(null);
+  const { showToast, toastProps } = useToast();
+  const openMessageActions = useCallback((message: CopyableMessage) => {
+    Keyboard.dismiss(); setActionsOpen(false); setEmoticonOpen(false); setMessageActions(message);
+  }, []);
+  useEffect(() => { setMessageActions(null); }, [roomId, user?.id]);
   const renderMessage = useCallback(
-    ({ item }: { item: Message }) => <Row message={item} onAction={handleNoticeAction} />,
-    [handleNoticeAction],
+    ({ item }: { item: Message }) => <Row message={item} onAction={handleNoticeAction} onMessage={openMessageActions} />,
+    [handleNoticeAction, openMessageActions],
   );
 
   const send = async () => {
@@ -398,20 +416,6 @@ export default function ChatRoomScreen() {
     }
   };
 
-  /** 초대 코드는 시스템 문장이 아니라 사용자가 보낸 일반 메시지로 남긴다. */
-  const shareInviteCode = async (code: string) => {
-    if (!roomId) return;
-    try {
-      const error = await sendRoomMessage(roomId, `초대 코드 ${code}를 메이트에게 알려 주세요.`);
-      if (error) {
-        notify('초대 코드를 보내지 못했어요', error.message);
-        return;
-      }
-      reload();
-    } catch {
-      notify('초대 코드를 보내지 못했어요', '잠시 후 다시 시도해 주세요.');
-    }
-  };
 
   return (
     /*
@@ -440,7 +444,7 @@ export default function ChatRoomScreen() {
         windowSize={7}
         ItemSeparatorComponent={MessageSeparator}
         maintainVisibleContentPosition={visibleContentPosition}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, messages[0]?.kind === 'msg' && styles.paddedMessageList]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         scrollEventThrottle={16}
@@ -533,6 +537,7 @@ export default function ChatRoomScreen() {
         onVoted={() => void reloadRoom()}
       />
       <SettlementSheet
+        participants={room?.participants ?? []}
         roomId={roomId}
         visible={sheet === 'settlement'}
         onClose={() => setSheet(null)}
@@ -548,11 +553,9 @@ export default function ChatRoomScreen() {
         myId={user?.id ?? null}
         ownerId={room?.ownerId ?? null}
         onClose={() => setSheet(null)}
-        onInvite={(code) => {
-          setSheet(null);
-          void shareInviteCode(code);
-        }}
       />
+      <MessageActionsSheet message={messageActions} onClose={() => setMessageActions(null)} onCopied={() => showToast({ message: '메시지를 복사했어요' })} />
+      <Toast {...toastProps} bottom={88} />
     </View>
   );
 }
@@ -560,15 +563,26 @@ export default function ChatRoomScreen() {
 const messageKey = (message: Message) => message.key;
 const visibleContentPosition = { minIndexForVisible: 0 };
 
-function MessageSeparator() {
-  return <View style={styles.messageSeparator} />;
+function MessageSeparator({ leadingItem }: { leadingItem?: Message }) {
+  return <View style={[styles.messageSeparator, { height: leadingItem?.separatorHeight ?? messageGap }]} />;
 }
 
 const Row = memo(function Row({
-  message, onAction,
+  message, onAction, onMessage,
 }: {
-  message: Message; onAction: (kind: RoomNotice['kind']) => void;
+  message: Message; onAction: (kind: RoomNotice['kind']) => void; onMessage: (message: CopyableMessage) => void;
 }) {
+  const messageMenu = message.kind === 'msg' ? {
+    accessible: true,
+    accessibilityRole: 'text' as const,
+    accessibilityLabel: (message.name ?? (message.mine ? '나' : '메이트')) + ', ' + message.text,
+    accessibilityHint: '길게 누르면 복사 메뉴를 열어요.',
+    accessibilityActions: [{ name: 'showMenu', label: '복사 메뉴 열기' }],
+    onLongPress: () => onMessage({ text: message.text, name: message.name ?? (message.mine ? '나' : '메이트'), senderId: message.senderId, avatarUrl: message.avatarUrl }),
+    onAccessibilityAction: (event: { nativeEvent: { actionName: string } }) => {
+      if (event.nativeEvent.actionName === 'showMenu') onMessage({ text: message.text, name: message.name ?? (message.mine ? '나' : '메이트'), senderId: message.senderId, avatarUrl: message.avatarUrl });
+    },
+  } : {};
   switch (message.kind) {
     case 'date':
       return (
@@ -591,16 +605,16 @@ const Row = memo(function Row({
     case 'msg':
       if (message.mine) {
         return (
-          <View style={[styles.mineRow, message.grouped && styles.grouped]}>
+          <Pressable {...messageMenu} style={[styles.mineRow, styles.messageRow]}>
             {message.showTime ? <Text style={styles.time}>{message.time}</Text> : null}
             <View style={[styles.bubble, styles.bubbleMine]}>
               <Text style={styles.bubbleTextMine}>{message.text}</Text>
             </View>
-          </View>
+          </Pressable>
         );
       }
       return (
-        <View style={[styles.otherRow, message.grouped && styles.grouped]}>
+        <Pressable {...messageMenu} style={[styles.otherRow, styles.messageRow]}>
           <SenderAvatar
             name={message.name}
             senderId={message.senderId}
@@ -616,7 +630,7 @@ const Row = memo(function Row({
               {message.showTime ? <Text style={styles.time}>{message.time}</Text> : null}
             </View>
           </View>
-        </View>
+        </Pressable>
       );
 
     case 'sticker':
@@ -668,9 +682,10 @@ const styles = StyleSheet.create({
   countText: { fontFamily: fontFamily.bold, fontSize: 12, lineHeight: 18, color: colors.sub },
   pinned: { paddingHorizontal: 16, paddingBottom: 8 },
   messageList: { flex: 1 },
-  messageSeparator: { height: 14 },
+  messageSeparator: { height: messageGap },
   list: { flexGrow: 1, justifyContent: 'flex-end', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12 },
-  grouped: { marginTop: -6 },
+  paddedMessageList: { paddingTop: 12 - messageRowPadding },
+  grouped: { marginTop: -groupedGapReduction },
   dateRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4 },
   dateLine: { flex: 1, height: 1, backgroundColor: colors.border },
   dateText: { fontFamily: fontFamily.body, fontSize: 12, lineHeight: 18, color: colors.sub },
@@ -686,7 +701,9 @@ const styles = StyleSheet.create({
   name: { fontFamily: fontFamily.medium, fontSize: 12, lineHeight: 18, color: colors.sub },
   otherLine: { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
   mineRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'flex-end', gap: 6 },
-  bubble: { flexShrink: 1, paddingHorizontal: 12, paddingVertical: 9 },
+  // Android clips hitSlop at ancestors: the padded row itself owns the full touch target.
+  messageRow: { paddingVertical: messageRowPadding, minHeight: v3Layout.minTouchTarget },
+  bubble: { minWidth: v3Layout.minTouchTarget, flexShrink: 1, paddingHorizontal: 12, paddingVertical: 9 },
   bubbleOther: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderTopLeftRadius: 4, borderTopRightRadius: 14, borderBottomLeftRadius: 14, borderBottomRightRadius: 14 },
   bubbleMine: { backgroundColor: colors.primary, borderTopLeftRadius: 14, borderTopRightRadius: 4, borderBottomLeftRadius: 14, borderBottomRightRadius: 14 },
   bubbleText: { fontFamily: fontFamily.body, fontSize: 14, lineHeight: 20, color: colors.ink },

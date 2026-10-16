@@ -5,6 +5,7 @@ import { useAuth } from '../../auth/AuthProvider';
 import DestructiveDialog from '../../components/ui/DestructiveDialog';
 import FailureCard from '../../components/ui/FailureCard';
 import InviteCodeBox from '../../components/ui/InviteCodeBox';
+import MateInviteSheet from '../../components/ui/MateInviteSheet';
 import { meetingTimeLabel } from '../../components/ui/MeetingCard';
 import RoomMemberRow from '../../components/ui/RoomMemberRow';
 import { leaveRoom } from '../../lib/rooms';
@@ -35,6 +36,7 @@ export default function RoomDetailScreen() {
   const members = room?.participants ?? [];
   const isOwner = Boolean(user?.id && room?.ownerId && user.id === room.ownerId);
   const settling = room?.stage === 'settling';
+  const [inviting, setInviting] = useState(false);
   const [deletionOpen, setDeletionOpen] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [deletionError, setDeletionError] = useState<string | null>(null);
@@ -68,7 +70,7 @@ export default function RoomDetailScreen() {
         </View>
       </View>
       <View style={[styles.card, styles.memberCard]}>
-        <View style={styles.memberHead}><Text style={styles.cardTitle}>{room ? '메이트 ' + members.length + '명' : '메이트'}</Text>{roomId && room ? <Pressable accessibilityRole="button" accessibilityLabel="메이트 초대" style={styles.invite} onPress={() => openChatSheet('members')}><Plus size={16} color={colors.selectedText} /><Text style={styles.chooseText}>초대</Text></Pressable> : null}</View>
+        <View style={styles.memberHead}><Text style={styles.cardTitle}>{room ? '메이트 ' + members.length + '명' : '메이트'}</Text>{roomId && room?.code ? <Pressable accessibilityRole="button" accessibilityLabel="메이트 초대" style={styles.invite} onPress={() => setInviting(true)}><Plus size={16} color={colors.selectedText} /><Text style={styles.chooseText}>초대</Text></Pressable> : null}</View>
         {members.length ? members.map(member => <RoomMemberRow key={member.id} participant={member} myId={user?.id ?? null} ownerId={room?.ownerId ?? null} />) : <Text style={styles.hint}>{room || status === 'error' ? '참여 멤버를 불러오지 못했어요' : '메이트를 불러오는 중이에요'}</Text>}
       </View>
       {/* [결정] leave_room은 settling에서만 막으므로, 다른 단계에 정산 완료 조건을 안내하지 않는다. */}
@@ -81,6 +83,7 @@ export default function RoomDetailScreen() {
       </> : room ? <Text style={styles.hint}>방은 방장만 없앨 수 있어요.</Text> : null}
       {/* TODO(서버 단계): 메이트의 방 나가기 계약이 없으므로 버튼을 표시하지 않는다. */}
     </ScrollView>
+    {room?.code ? <MateInviteSheet visible={inviting} code={room.code} onClose={() => setInviting(false)} /> : null}
     <DestructiveDialog visible={deletionOpen} busy={leaving} error={deletionError} onClose={() => setDeletionOpen(false)} onConfirm={() => void confirmDeletion()} />
   </View>;
 }
