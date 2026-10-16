@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { useAuth } from '../auth/AuthProvider';
+import { useForegroundRefreshToken } from '../lifecycle/AppLifecycleContext';
 import { fetchMyProfile, type MyProfileBundle } from '../lib/profile';
 
 type State =
@@ -17,6 +18,7 @@ type State =
 export function useMyProfile() {
   const { user } = useAuth();
   const userId = user?.id ?? null;
+  const foregroundRefreshToken = useForegroundRefreshToken();
 
   const [state, setState] = useState<State>({ status: 'loading', bundle: null, error: null });
   const [reloadToken, setReloadToken] = useState(0);
@@ -57,7 +59,7 @@ export function useMyProfile() {
     return () => {
       active = false;
     };
-  }, [userId, reloadToken]);
+  }, [userId, reloadToken, foregroundRefreshToken]);
 
   return { ...state, userId, reload };
 }

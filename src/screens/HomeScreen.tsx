@@ -1,319 +1,138 @@
-import { Paperclip, Plus } from 'lucide-react-native';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { CalendarPlus, ChevronRight, Plus, Receipt, Ticket } from 'lucide-react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-import AdCarousel from '../components/AdCarousel';
-import AppHeader from '../components/AppHeader';
-import { CompleteButton } from '../components/ui/Button';
-import { meetingLine, roomStatus, upcomingBadge } from '../lib/roomFormat';
-import type { RoomSummary } from '../lib/rooms';
+import AppHeaderConnected from '../components/ui/AppHeaderConnected';
+import { Button } from '../components/ui/Button';
+import FailureCard from '../components/ui/FailureCard';
+import Toast, { useToast } from '../components/ui/Toast';
+import JoinCodeSheet from '../components/JoinCodeSheet';
+import RoomRow from '../components/RoomRow';
+import { hasFinalConsonant } from '../lib/particle';
 import { useNavigation } from '../navigation/NavigationContext';
 import { useMyProfile } from '../profile/useMyProfile';
 import { useMyRooms, useMySettlements } from '../rooms/useMyRooms';
-import { fs, s } from '../theme/scale';
-import { colors, radii } from '../theme/tokens';
-import { fontFamily, weight } from '../theme/typography';
+import { useTopInset } from '../theme/insets';
+import { v3Layout } from '../theme/scale';
+import { v3Colors as colors } from '../theme/tokens';
+import { fontFamily } from '../theme/typography';
 
 const banner = require('../../assets/ad/banner-1.png');
+const mascot = require('../../assets/brand/moa.png');
 
-/**
- * Figma 홈/메인 (309:1064) — 220 x 483
- * 좌표: 헤더 y30 / 인사 y82 / 서브 y98 / 광고카드 y113 h109 /
- * 다가올일정 y230 h108 / 정산넛지 y346 h34 / CTA y397 h28 / 하단탭 y445
- */
+/** Figma 521:1248 / 559:1805 / 563:2123; tab space is owned by AppNavigator. */
 export default function HomeScreen() {
-  const { navigate } = useNavigation();
+  const { navigate, current, replace } = useNavigation();
+  const { showToast, toastProps } = useToast();
+  const deletedRoomId = current?.params?.deletedRoomId;
+  const shownDeletion = useRef<string | null>(null);
+  useEffect(() => {
+    if (typeof deletedRoomId !== 'string' || !deletedRoomId || shownDeletion.current === deletedRoomId) return;
+    shownDeletion.current = deletedRoomId;
+    const roomTitle = typeof current.params?.deletedRoomTitle === 'string' && current.params.deletedRoomTitle.trim() ? current.params.deletedRoomTitle.trim() : '방';
+    showToast({ message: roomTitle + (hasFinalConsonant(roomTitle) === false ? '를' : '을') + ' 없앴어요' });
+    const next = { ...current.params };
+    delete next.deletedRoomId;
+    delete next.deletedRoomTitle;
+    replace('Home', next);
+  }, [deletedRoomId, current?.params, replace, showToast]);
+  const topInset = useTopInset();
   const insets = useSafeAreaInsets();
   const { bundle } = useMyProfile();
-  const { rooms } = useMyRooms();
+  const { rooms, status, reload } = useMyRooms();
   const settlements = useMySettlements();
-
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuShown, setMenuShown] = useState(false);
+  const [joinOpen, setJoinOpen] = useState(false);
+  const pendingMenuAction = useRef<(() => void) | null>(null);
+  const finishMenuDismiss = () => { const action = pendingMenuAction.current; pendingMenuAction.current = null; action?.(); };
+  useEffect(() => { if (!menuShown && Platform.OS !== 'ios') finishMenuDismiss(); }, [menuShown]);
+  const menu = useRef(new Animated.Value(0)).current;
+  const toggleMenu = (next: boolean) => { setMenuOpen(next); if (next) setMenuShown(true); };
+  useEffect(() => {
+    if (!menuShown) return;
+    // Start after the Modal mounts: detaching the old FAB otherwise stops its shared value.
+    const animation = Animated.timing(menu, { toValue: menuOpen ? 1 : 0, duration: 160, useNativeDriver: false });
+    animation.start(({ finished }) => { if (finished && !menuOpen) setMenuShown(false); });
+    return () => animation.stop();
+  }, [menu, menuOpen, menuShown]);
+  const pick = (action: () => void) => { pendingMenuAction.current = action; toggleMenu(false); };
   const name = bundle?.profile.name;
-  /* 아직 끝나지 않은 밥약만 센다 */
-  const activeRooms = rooms.filter((room) => roomStatus(room) !== 'expired');
-  const upcoming = selectUpcoming(rooms);
-  const settlementRoomId = settlements[0]?.roomId ?? null;
-
-  return (
-    <View style={styles.screen}>
-      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
-      <AppHeader />
-
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Text style={styles.greeting}>
-          {name ? `안녕하세요, ${name}님!` : '안녕하세요!'}
-        </Text>
-        <Text style={styles.greetingSub}>
-          {activeRooms.length === 0 && settlements.length === 0
-            ? '아직 잡힌 밥약이 없어요. 하나 만들어 볼까요?'
-            : `현재 밥약 ${activeRooms.length}건, 정산 ${settlements.length}건이 기다리고 있어요~`}
-        </Text>
-
-        <View style={styles.banner}>
-          <AdCarousel images={[banner]} />
+  const openSettlements = settlements.filter((settlement) => !settlement.settled);
+  const empty = status === 'ready' && rooms.length === 0;
+  // TODO(서버 단계): 메이트 나가기 지원 후 실제 성공 이벤트에 '방에서 나왔어요' 토스트를 연결한다.
+  // TODO(서버 단계): 영구 오프라인 캐시와 연결 상태가 필요하다. 현재 훅이 보존한 직전 목록만 표시한다.
+  const fab = <Pressable style={[styles.fab, menuShown && { bottom: 20 + v3Layout.bottomNavHeight + insets.bottom }]} accessibilityRole="button" accessibilityLabel={menuOpen ? '메뉴 닫기' : '새 밥약 또는 초대 코드'} accessibilityState={{ expanded: menuOpen }} onPress={() => toggleMenu(!menuOpen)}>
+      <Animated.View style={{ transform: [{ rotate: menu.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '45deg'] }) }] }}><Plus size={26} color={colors.onPrimary} /></Animated.View>
+    </Pressable>;
+  return <View style={styles.screen}>
+    <View style={{ height: topInset }} /><AppHeaderConnected />
+    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <View style={styles.greetingBox}>
+        <Text style={styles.greeting} numberOfLines={1}>{name ? '안녕하세요, ' + name + '님!' : '안녕하세요!'}</Text>
+        <Text style={styles.sub}>오늘은 누구랑 먹을까요?</Text>
+      </View>
+      <Image source={banner} style={styles.banner} resizeMode="cover" accessibilityLabel="밥약 안내 배너" />
+      {openSettlements.length > 0 ? <Pressable accessibilityRole="button" accessibilityLabel={'미완료 정산 ' + openSettlements.length + '건 보기'} onPress={() => navigate('Settlements')} style={styles.nudge}>
+        <Receipt size={20} color={colors.selectedText} /><Text style={styles.nudgeTitle}>미완료 정산 {openSettlements.length}건</Text>
+        <Text style={styles.nudgeAction}>보기</Text><ChevronRight size={18} color={colors.selectedText} />
+      </Pressable> : null}
+      {status === 'loading' && rooms.length === 0 ? <Text style={styles.loading} accessibilityLiveRegion="polite">밥약을 불러오는 중...</Text> : null}
+      {status === 'error' ? <FailureCard title="밥약을 불러오지 못했어요" onRetry={reload} /> : null}
+      {empty ? <View style={styles.empty}>
+        <Image source={mascot} style={styles.mascot} resizeMode="contain" />
+        <Text style={styles.emptyTitle}>아직 잡힌 밥약이 없어요.</Text>
+        <Text style={styles.emptySub}>새 밥약을 만들거나, 메이트에게 받은 초대 코드를 넣어 보세요.</Text>
+        <Button label="새 밥약 만들기" onPress={() => navigate('ScheduleDetail')} style={styles.full} />
+        <Button label="초대 코드 입력" variant="secondary" onPress={() => setJoinOpen(true)} style={styles.full} />
+      </View> : null}
+      {rooms.length > 0 ? <View style={styles.roomSection}>
+        <View style={styles.listHead}><Text style={styles.listTitle}>내 밥약</Text><Text style={styles.count}>{rooms.length}개</Text></View>
+        {status === 'error' ? <Text style={styles.sub}>이전에 불러온 밥약이에요.</Text> : null}
+        <View style={[styles.list, status === 'error' && styles.stale]} pointerEvents={status === 'error' ? 'none' : 'auto'} accessibilityElementsHidden={status === 'error'} importantForAccessibility={status === 'error' ? 'no-hide-descendants' : 'auto'}>
+          {rooms.map((room) => <RoomRow key={room.id} room={room} onPress={() => navigate('ChatRoom', { roomId: room.id, title: room.title, color: room.color })} />)}
         </View>
-
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <View style={styles.clip}>
-              <Paperclip size={s(13)} color={colors.textPrimary} strokeWidth={2} />
-            </View>
-            <Text style={styles.cardTitle}>다가올 일정</Text>
-            <Pressable
-              style={styles.addButton}
-              hitSlop={s(6)}
-              onPress={() => navigate('ScheduleDetail')}>
-              <Plus size={s(9)} color={colors.textOnAccent} strokeWidth={3} />
-            </Pressable>
-          </View>
-
-          {upcoming.length === 0 ? (
-            <Text style={styles.emptyItem}>다가올 밥약이 없어요</Text>
-          ) : (
-            upcoming.map((room, i) => {
-              const badge = upcomingBadge(room.meetingDate);
-              return (
-                <Pressable
-                  key={room.id}
-                  style={i > 0 ? styles.itemDivided : styles.item}
-                  onPress={() => navigate('ChatRoom', { roomId: room.id, title: room.title, color: room.color })}>
-                  <View style={styles.itemHeader}>
-                    <Text style={styles.bullet}>•</Text>
-                    <Text style={styles.itemTitle}>{room.title}</Text>
-                    {badge ? (
-                      <View
-                        style={[
-                          styles.badge,
-                          badge.tone === 'today' ? styles.badgeToday : styles.badgeCountdown,
-                        ]}>
-                        <Text
-                          style={[
-                            styles.badgeText,
-                            badge.tone === 'today'
-                              ? styles.badgeTextToday
-                              : styles.badgeTextCountdown,
-                          ]}>
-                          {badge.label}
-                        </Text>
-                      </View>
-                    ) : null}
-                  </View>
-                  <Text style={styles.itemDate}>
-                    {meetingLine(room.meetingDate, room.locationName)}
-                  </Text>
-                </Pressable>
-              );
-            })
-          )}
-        </View>
-
-        {/* 정산 UI 는 채팅방의 N빵 정산 시트뿐이라 해당 방을 열면서 시트를 펼친다 */}
-        {settlements.length > 0 ? (
-          <Pressable
-            style={styles.payNudge}
-            disabled={!settlementRoomId}
-            onPress={() =>
-              settlementRoomId &&
-              navigate('ChatRoom', { roomId: settlementRoomId, openSheet: 'settlement' })
-            }>
-            <View style={styles.flex}>
-              {/* 완료 여부는 dutch_pay_members 가 잠겨 있어 아직 알 수 없다 */}
-              <Text style={styles.payTitle}>정산 {settlements.length}건</Text>
-              <Text style={styles.paySub}>방이 사라져도 정산 내역은 남아 있어요</Text>
-            </View>
-            <Text style={styles.payLink}>보기 →</Text>
-          </Pressable>
-        ) : null}
-
-        <CompleteButton
-          label="일정잡기"
-          style={styles.cta}
-          onPress={() => navigate('ScheduleDetail')}
-        />
-      </ScrollView>
-    </View>
-  );
+      </View> : null}
+    </ScrollView>
+    <Modal transparent visible={menuShown} onDismiss={finishMenuDismiss} animationType="none" onRequestClose={() => toggleMenu(false)}><View style={styles.menuRoot}>
+      <Animated.View style={[styles.backdrop, { opacity: menu.interpolate({ inputRange: [0, 1], outputRange: [0, 0.5] }) }]}><Pressable style={StyleSheet.absoluteFill} onPress={() => toggleMenu(false)} accessibilityRole="button" accessibilityLabel="밥약 메뉴 닫기" /></Animated.View>
+      <Animated.View style={[styles.menu, { opacity: menu, bottom: 92 + v3Layout.bottomNavHeight + insets.bottom }]} pointerEvents={menuOpen ? 'auto' : 'none'}>
+        <Pressable accessibilityRole="button" accessibilityLabel="초대 코드 입력" onPress={() => pick(() => setJoinOpen(true))} style={styles.bubble}><Text style={styles.bubbleText}>초대 코드 입력</Text><View style={styles.bubbleIcon}><Ticket size={18} color={colors.selectedText} /></View></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="밥약 만들기" onPress={() => pick(() => navigate('ScheduleDetail'))} style={styles.bubble}><Text style={styles.bubbleText}>밥약 만들기</Text><View style={styles.bubbleIcon}><CalendarPlus size={18} color={colors.selectedText} /></View></Pressable>
+      </Animated.View>
+      {fab}
+    </View></Modal>
+    {rooms.length > 0 && !menuShown ? fab : null}
+    <Toast {...toastProps} bottom={96} />
+    <JoinCodeSheet visible={joinOpen} onClose={() => setJoinOpen(false)} onJoined={(roomId) => navigate('ChatRoom', { roomId })} />
+  </View>;
 }
-
-/** 오늘 이후 일정만, 가까운 순으로 두 건 */
-function selectUpcoming(rooms: RoomSummary[]): RoomSummary[] {
-  return rooms
-    .filter((room) => upcomingBadge(room.meetingDate) !== null)
-    .sort((a, b) => a.meetingDate.localeCompare(b.meetingDate))
-    .slice(0, 2);
-}
-
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.card,
-  },
-  flex: {
-    flex: 1,
-  },
-  content: {
-    // 카드들이 x11, 폭 197 (= 220 - 11*2)
-    paddingHorizontal: s(11),
-    paddingTop: s(10),
-    paddingBottom: s(20),
-  },
-  greeting: {
-    marginLeft: s(2),
-    fontFamily: fontFamily.body,
-    fontSize: fs(9),
-    lineHeight: fs(15),
-    fontWeight: weight.bold,
-    color: colors.textPrimary,
-  },
-  greetingSub: {
-    marginLeft: s(2),
-    marginTop: s(1),
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(9),
-    color: colors.textMuted,
-  },
-  banner: {
-    marginTop: s(6),
-  },
-  card: {
-    // y230, 광고카드 하단(y222) 에서 8
-    marginTop: s(8),
-    backgroundColor: colors.surface,
-    borderRadius: s(10),
-    paddingHorizontal: s(11),
-    paddingTop: s(8),
-    paddingBottom: s(8),
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  clip: {
-    // 클립 아이콘은 카드 좌측 경계 밖으로 살짝 나온다 (x6 vs 카드 x11)
-    marginLeft: s(-8),
-    marginRight: s(1),
-  },
-  cardTitle: {
-    flex: 1,
-    fontFamily: fontFamily.body,
-    fontSize: fs(9.5),
-    lineHeight: fs(14),
-    fontWeight: weight.bold,
-    color: colors.textPrimary,
-  },
-  addButton: {
-    width: s(16),
-    height: s(15),
-    borderRadius: s(5),
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  item: {
-    // 헤더 하단(y257) → 첫 항목(y262)
-    marginTop: s(5),
-  },
-  itemDivided: {
-    // 구분선 y292 (첫 항목 날짜 하단 y289 에서 3)
-    marginTop: s(3),
-    borderTopWidth: s(1),
-    borderTopColor: colors.border,
-    paddingTop: s(6),
-  },
-  itemHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  bullet: {
-    width: s(6),
-    fontFamily: fontFamily.body,
-    fontSize: fs(8),
-    color: colors.textPrimary,
-  },
-  itemTitle: {
-    flex: 1,
-    fontFamily: fontFamily.body,
-    fontSize: fs(9),
-    lineHeight: fs(14),
-    fontWeight: weight.bold,
-    color: colors.textPrimary,
-  },
-  itemDate: {
-    // x36 → 카드 좌측(x11) 기준 25, 본문 패딩 11 을 뺀 14
-    marginLeft: s(14),
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(12),
-    color: colors.textMuted,
-  },
-  badge: {
-    width: s(23),
-    height: s(13),
-    borderRadius: s(radii.badge),
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  badgeToday: {
-    backgroundColor: colors.primary,
-  },
-  badgeCountdown: {
-    backgroundColor: colors.surfaceStrong,
-  },
-  badgeText: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(8),
-    fontWeight: weight.bold,
-  },
-  badgeTextToday: {
-    color: colors.textOnAccent,
-  },
-  badgeTextCountdown: {
-    color: colors.textMuted,
-  },
-  payNudge: {
-    // y346, 카드 하단(y338) 에서 8 / 높이 34
-    marginTop: s(8),
-    height: s(34),
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.card,
-    borderWidth: s(0.6),
-    borderColor: colors.primary,
-    borderRadius: s(8),
-    paddingHorizontal: s(11),
-  },
-  payTitle: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(11),
-    fontWeight: weight.bold,
-    color: colors.textPrimary,
-  },
-  paySub: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(8),
-    color: colors.textMuted,
-  },
-  payLink: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(9),
-    fontWeight: weight.semibold,
-    color: colors.primary,
-  },
-  emptyItem: {
-    marginTop: s(12),
-    textAlign: 'center',
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    color: colors.textMuted,
-  },
-  cta: {
-    // y397, 정산 넛지 하단(y380) 에서 17
-    marginTop: s(17),
-    marginHorizontal: s(2),
-  },
+  screen: { flex: 1, backgroundColor: colors.bg },
+  content: { paddingTop: 4, paddingHorizontal: 20, paddingBottom: 148, gap: 16 },
+  greetingBox: { gap: 2 },
+  greeting: { fontFamily: fontFamily.bold, fontSize: 22, lineHeight: 32, color: colors.ink },
+  sub: { fontFamily: fontFamily.body, fontSize: 14, lineHeight: 20, color: colors.sub },
+  banner: { width: '100%', height: 150, borderRadius: 16 },
+  nudge: { minHeight: v3Layout.buttonHeight, borderRadius: 14, backgroundColor: colors.selectedBg, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 16, paddingRight: 8 },
+  nudgeTitle: { flex: 1, fontFamily: fontFamily.bold, fontSize: 15, lineHeight: 22, color: colors.selectedText },
+  nudgeAction: { fontFamily: fontFamily.medium, fontSize: 14, lineHeight: 20, color: colors.selectedText },
+  loading: { fontFamily: fontFamily.body, fontSize: 14, lineHeight: 20, color: colors.sub, textAlign: 'center', paddingVertical: 28 },
+  roomSection: { gap: 16 },
+  listHead: { paddingTop: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  listTitle: { fontFamily: fontFamily.bold, fontSize: 17, lineHeight: 25, color: colors.ink },
+  count: { fontFamily: fontFamily.medium, fontSize: 13, lineHeight: 19, color: colors.sub },
+  list: { gap: 16 }, stale: { opacity: 0.45 },
+  empty: { borderWidth: 1, borderColor: colors.border, borderRadius: 16, backgroundColor: colors.surface, alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 28 },
+  mascot: { width: 96, height: 80 },
+  emptyTitle: { fontFamily: fontFamily.bold, fontSize: 17, lineHeight: 25, color: colors.ink, textAlign: 'center' },
+  emptySub: { fontFamily: fontFamily.body, fontSize: 14, lineHeight: 20, color: colors.sub, textAlign: 'center' },
+  full: { alignSelf: 'stretch' },
+  menuRoot: { flex: 1 },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.ink },
+  menu: { position: 'absolute', right: 20, bottom: 92, alignItems: 'flex-end', gap: 12 },
+  bubble: { minHeight: 48, paddingLeft: 18, paddingRight: 8, borderRadius: 24, backgroundColor: colors.surface, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  bubbleText: { fontFamily: fontFamily.bold, fontSize: 15, lineHeight: 22, color: colors.ink },
+  bubbleIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.selectedBg, alignItems: 'center', justifyContent: 'center' },
+  fab: { position: 'absolute', right: 20, bottom: 20, width: 56, height: 56, borderRadius: 28, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', shadowColor: colors.ink, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.18, shadowRadius: 6, elevation: 5 },
 });

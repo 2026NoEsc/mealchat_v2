@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { fs, s } from '../theme/scale';
 import { colors, radii, shadows } from '../theme/tokens';
-import { fontFamily, weight } from '../theme/typography';
+import { fontFamily } from '../theme/typography';
 import { RoomCalendarIcon, RoomChatIcon, RoomMenuIcon } from './icons';
 
 export type RoomCardProps = {
@@ -110,10 +110,9 @@ const styles = StyleSheet.create({
   },
   title: {
     flex: 1,
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.semibold,
     fontSize: fs(9.315),
     lineHeight: fs(12.42),
-    fontWeight: weight.semibold,
     color: colors.textPrimary,
   },
   unreadBadge: {

@@ -1,0 +1,20 @@
+{
+  "worktree": {
+    "setup": "npm install --legacy-peer-deps"
+  },
+  "scripts": {
+    "Expo 개발 서버": {
+      "type": "service",
+      "command": "npm start"
+    },
+    "Android 실행": {
+      "command": "npm run android"
+    },
+    "타입 검사": {
+      "command": "npx tsc --noEmit"
+    },
+    "린트": {
+      "command": "npm run lint"
+    }
+  }
+}

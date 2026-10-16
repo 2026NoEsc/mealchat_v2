@@ -1,240 +1,101 @@
-import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
+import { CalendarDays, Receipt, X } from 'lucide-react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, BackHandler, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { formatAmount, relativeTime } from '../lib/format';
+import { hasUnreadNotices } from '../lib/notificationsRead';
 import type { RoomNotification } from '../lib/settlements';
-import { fs, s } from '../theme/scale';
-import { colors } from '../theme/tokens';
-import { fontFamily, weight } from '../theme/typography';
+import { useTopInset } from '../theme/insets';
+import { v3Layout } from '../theme/scale';
+import { v3Colors as colors, v3FeedbackColors } from '../theme/tokens';
+import { fontFamily } from '../theme/typography';
 
 const FILTERS = ['전체', '일정', '정산', '메이트'] as const;
 type Filter = (typeof FILTERS)[number];
+export function noticeKind(notice: RoomNotification): Exclude<Filter, '전체'> { return notice.amount > 0 ? '정산' : '일정'; }
+// TODO(서버 단계): 알림 종류 컬럼과 메이트 이벤트가 생기면 금액 분류를 교체한다.
 
-/**
- * notifications 에는 종류 컬럼이 없다. 금액이 실려 있으면 정산 요청, 아니면 일정
- * 안내로 나눈다. 메이트·메뉴 알림을 만드는 곳이 아직 없어 그 필터는 늘 비어 있다.
- */
-function noticeKind(notice: RoomNotification): Exclude<Filter, '전체'> {
-  return notice.amount > 0 ? '정산' : '일정';
-}
-
-/**
- * Figma 알림 패널 (549:3408) — 196 x 350 오버레이
- * 타이틀 y12 / 필터 y37 h22 / 행 y68·112·156·200·244 (h39, 간격 5) / 안내문 y333
- */
-export default function NotificationPanel({
-  notices,
-  allRead,
-  onClose,
-  onMarkAllRead,
-}: {
-  notices: RoomNotification[];
-  allRead: boolean;
-  onClose: () => void;
-  onMarkAllRead?: () => void;
+/** Figma 521:1513 / 599:2425 / 599:2587: top panel, single filter and per-date unread state. */
+export default function NotificationPanel({ notices, allRead, readAt, onClose, onMarkAllRead, onPressNotice }: {
+  notices: RoomNotification[]; allRead: boolean; readAt?: string | null;
+  onClose: () => void; onMarkAllRead?: () => void; onPressNotice?: (notice: RoomNotification) => void;
 }) {
-  const insets = useSafeAreaInsets();
+  const topInset = useTopInset();
   const [filter, setFilter] = useState<Filter>('전체');
-
-  const visible =
-    filter === '전체' ? notices : notices.filter((notice) => noticeKind(notice) === filter);
-
-  return (
-    <View style={styles.overlay}>
-      <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-
-      {/* 헤더(높이 42) 바로 아래에 패널이 걸리도록 배치 */}
-      <View style={[styles.panel, { marginTop: insets.top + s(48) }]}>
-        <View style={styles.header}>
-          <Text style={styles.title}>알림</Text>
-          <Pressable onPress={onMarkAllRead} hitSlop={s(8)}>
-            <Text style={styles.readAll}>모두 읽음</Text>
-          </Pressable>
-        </View>
-
-        <View style={styles.filterRow}>
-          {FILTERS.map((f) => {
-            const active = f === filter;
-            return (
-              <Pressable
-                key={f}
-                onPress={() => setFilter(f)}
-                style={[styles.chip, active && styles.chipActive]}>
-                <Text style={[styles.chipText, active && styles.chipTextActive]}>{f}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-          {visible.length === 0 ? (
-            <Text style={styles.empty}>
-              {notices.length === 0 ? '아직 알림이 없어요' : '이 분류에는 알림이 없어요'}
-            </Text>
-          ) : (
-            visible.map((notice) => (
-              <View key={notice.id} style={[styles.row, !allRead && styles.rowUnread]}>
-                <View style={styles.rowBody}>
-                  <Text style={styles.rowTitle} numberOfLines={1}>
-                    {notice.title}
-                  </Text>
-                  <Text style={styles.rowSub} numberOfLines={1}>
-                    {notice.amount > 0
-                      ? `${notice.message} · ${formatAmount(notice.amount)}`
-                      : notice.message}
-                  </Text>
-                </View>
-                <Text style={styles.rowTime}>{relativeTime(notice.createdAt)}</Text>
-                {allRead ? <View style={styles.dotSpacer} /> : <View style={styles.dot} />}
-              </View>
-            ))
-          )}
-
-          <Text style={styles.footer}>최근 30일의 알림을 보여드려요</Text>
-        </ScrollView>
+  const slide = useRef(new Animated.Value(0)).current;
+  useEffect(() => { const animation = Animated.timing(slide, { toValue: 1, duration: 180, useNativeDriver: false }); animation.start(); return () => animation.stop(); }, [slide]);
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => { onClose(); return true; });
+    return () => subscription.remove();
+  }, [onClose]);
+  const visible = filter === '전체' ? notices : notices.filter((notice) => noticeKind(notice) === filter);
+  return <View style={styles.overlay} accessibilityViewIsModal onAccessibilityEscape={onClose}>
+    <Pressable style={styles.scrim} onPress={onClose} accessibilityRole="button" accessibilityLabel="알림 패널 닫기" />
+    <Animated.View testID="notification-panel" style={[styles.panel, { paddingTop: topInset + 8, transform: [{ translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [-24, 0] }) }] }]}>
+      <View style={styles.header}>
+        <Text accessibilityRole="header" style={styles.title}>알림</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="모두 읽음" accessibilityState={{ disabled: allRead || !onMarkAllRead }} disabled={allRead || !onMarkAllRead} onPress={onMarkAllRead} style={styles.readButton}>
+          <Text style={[styles.readAll, allRead && styles.readDisabled]}>모두 읽음</Text>
+        </Pressable>
+        <Pressable style={styles.close} accessibilityRole="button" accessibilityLabel="알림 닫기" onPress={onClose}><X size={24} color={colors.ink} /></Pressable>
       </View>
-    </View>
-  );
+      <View style={styles.filters} accessibilityRole="radiogroup" accessibilityLabel="알림 분류">
+        {/* Chip's checkbox semantics and check icon differ from this single-choice filter. */}
+        {FILTERS.map((item) => <Pressable key={item} accessibilityRole="radio" accessibilityLabel={item + ' 알림'} accessibilityState={{ checked: filter === item }} onPress={() => setFilter(item)} style={styles.filterTarget}>
+          <View style={[styles.chip, filter === item && styles.chipSelected]}><Text style={[styles.chipLabel, filter === item && styles.chipLabelSelected]}>{item}</Text></View>
+        </Pressable>)}
+      </View>
+      <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+        {visible.length === 0 ? <Text style={styles.empty}>{filter === '메이트' ? '아직 메이트 알림이 없어요' : notices.length === 0 ? '아직 알림이 없어요' : '이 분류에는 알림이 없어요'}</Text> : visible.map((notice) => {
+          const unread = !allRead && (readAt === undefined || hasUnreadNotices([notice], readAt));
+          const Icon = noticeKind(notice) === '정산' ? Receipt : CalendarDays;
+          const actionable = Boolean(onPressNotice && notice.roomId?.trim());
+          const label = [unread ? '안 읽음' : '읽음', notice.title, notice.message, ...(notice.amount > 0 ? [formatAmount(notice.amount)] : []), relativeTime(notice.createdAt)].join(', ');
+          const body = <>
+            {unread ? <View pointerEvents="none" style={styles.unreadBackground} /> : null}
+            <View style={[styles.icon, !unread && styles.readIcon]}><Icon size={20} color={unread ? colors.selectedText : colors.sub} /></View>
+            <View style={styles.body}><Text style={[styles.rowTitle, unread && styles.bold]}>{notice.title}</Text><Text style={styles.rowSub}>{notice.amount > 0 ? notice.message + ' ' + formatAmount(notice.amount) : notice.message}</Text></View>
+            <View style={styles.meta}><Text style={styles.time}>{relativeTime(notice.createdAt)}</Text>{unread ? <View style={styles.dot} accessible={false} /> : null}</View>
+          </>;
+          const rowStyle = styles.row;
+          return actionable ? <Pressable key={notice.id} accessibilityRole="button" accessibilityLabel={label} onPress={() => onPressNotice?.(notice)} style={rowStyle}>{body}</Pressable>
+            : <View key={notice.id} accessible accessibilityLabel={label} style={rowStyle}>{body}</View>;
+        })}
+        {/* TODO(서버 단계): 최근 30일 조회를 보장하면 기간 문구를 표시한다. 현재 API는 최신 30건이다. */}
+        <Text style={styles.footer}>최근 알림을 보여드려요</Text>
+      </ScrollView>
+    </Animated.View>
+  </View>;
 }
-
 const styles = StyleSheet.create({
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.25)',
-    alignItems: 'center',
-    // AppHeader 가 zIndex 2 이므로 그 위로 올린다
-    zIndex: 10,
-  },
-  panel: {
-    // 220 프레임 안에서 폭 196 (좌우 12)
-    width: s(196),
-    height: s(350),
-    borderRadius: s(10),
-    backgroundColor: colors.surface,
-    overflow: 'hidden',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingLeft: s(14),
-    paddingRight: s(14),
-    paddingTop: s(12),
-  },
-  title: {
-    flex: 1,
-    fontFamily: fontFamily.body,
-    fontSize: fs(11),
-    lineHeight: fs(16),
-    fontWeight: weight.bold,
-    color: colors.textPrimary,
-  },
-  readAll: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(9),
-    fontWeight: weight.semibold,
-    color: colors.primary,
-  },
-  filterRow: {
-    flexDirection: 'row',
-    gap: s(5),
-    paddingHorizontal: s(8),
-    // 타이틀 하단(y28) → 필터(y37)
-    marginTop: s(9),
-  },
-  chip: {
-    width: s(41),
-    height: s(22),
-    borderRadius: s(11),
-    borderWidth: s(0.6),
-    borderColor: colors.border,
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  chipActive: {
-    borderColor: colors.primary,
-    backgroundColor: '#FFF6EC',
-  },
-  chipText: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(8),
-    fontWeight: weight.medium,
-    color: colors.textMuted,
-  },
-  chipTextActive: {
-    color: colors.primary,
-    fontWeight: weight.bold,
-  },
-  list: {
-    paddingHorizontal: s(7),
-    // 필터 하단(y59) → 첫 행(y68)
-    paddingTop: s(9),
-    paddingBottom: s(12),
-    gap: s(5),
-  },
-  row: {
-    height: s(39),
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.card,
-    borderRadius: s(8),
-    borderWidth: s(0.6),
-    borderColor: colors.border,
-    paddingHorizontal: s(15),
-  },
-  rowUnread: {
-    borderColor: colors.primary,
-    borderWidth: s(1),
-  },
-  rowBody: {
-    flex: 1,
-  },
-  rowTitle: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(7.5),
-    lineHeight: fs(12),
-    fontWeight: weight.bold,
-    color: colors.textPrimary,
-  },
-  rowSub: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(5.5),
-    lineHeight: fs(8),
-    color: colors.textMuted,
-  },
-  rowTime: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(5.5),
-    lineHeight: fs(8),
-    color: colors.textMuted,
-  },
-  dot: {
-    marginLeft: s(4),
-    width: s(6),
-    height: s(6),
-    borderRadius: s(6),
-    backgroundColor: colors.primary,
-  },
-  dotSpacer: {
-    marginLeft: s(4),
-    width: s(6),
-  },
-  empty: {
-    marginTop: s(30),
-    textAlign: 'center',
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    color: colors.textMuted,
-  },
-  footer: {
-    marginTop: s(10),
-    textAlign: 'center',
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(9),
-    color: colors.textMuted,
-  },
+  overlay: { ...StyleSheet.absoluteFillObject, zIndex: 10 },
+  scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.ink, opacity: 0.5 },
+  panel: { width: '100%', maxHeight: '90%', paddingBottom: 8, backgroundColor: colors.surface, borderBottomLeftRadius: 24, borderBottomRightRadius: 24, overflow: 'hidden' },
+  header: { flexDirection: 'row', alignItems: 'center', paddingLeft: 20, paddingRight: 8 },
+  title: { flex: 1, fontFamily: fontFamily.bold, fontSize: 20, lineHeight: 29, color: colors.ink },
+  readButton: { minHeight: v3Layout.minTouchTarget, paddingHorizontal: 8, justifyContent: 'center' },
+  readAll: { fontFamily: fontFamily.medium, fontSize: 14, lineHeight: 20, color: colors.selectedText },
+  readDisabled: { opacity: 0.4 },
+  close: { width: v3Layout.minTouchTarget, height: v3Layout.minTouchTarget, alignItems: 'center', justifyContent: 'center' },
+  filters: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, paddingTop: 4, paddingBottom: 12 },
+  filterTarget: { minHeight: v3Layout.minTouchTarget, justifyContent: 'center', flexShrink: 1 },
+  chip: { height: 36, borderWidth: 1, borderColor: colors.border, borderRadius: 18, paddingHorizontal: 16, justifyContent: 'center', alignItems: 'center' },
+  chipSelected: { borderWidth: 1.5, borderColor: colors.primary, backgroundColor: colors.selectedBg },
+  chipLabel: { fontFamily: fontFamily.medium, fontSize: 14, lineHeight: 20, color: colors.ink },
+  chipLabelSelected: { fontFamily: fontFamily.bold, color: colors.selectedText },
+  scroll: { flexGrow: 0, flexShrink: 1 },
+  row: { paddingHorizontal: 20, paddingVertical: 14, flexDirection: 'row', alignItems: 'flex-start', gap: 12, minHeight: v3Layout.minTouchTarget },
+  // 55% selectedBg on the white panel reproduces Figma's untokenized #FFF8EE.
+  unreadBackground: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.selectedBg, opacity: 0.55 },
+  icon: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.selectedBg, alignItems: 'center', justifyContent: 'center' },
+  readIcon: { backgroundColor: colors.mutedBg },
+  body: { flex: 1, minWidth: 0, gap: 2 },
+  rowTitle: { fontFamily: fontFamily.medium, fontSize: 15, lineHeight: 22, color: colors.ink },
+  bold: { fontFamily: fontFamily.bold },
+  rowSub: { fontFamily: fontFamily.body, fontSize: 13, lineHeight: 19, color: colors.sub },
+  meta: { gap: 8, alignItems: 'flex-end' },
+  time: { fontFamily: fontFamily.body, fontSize: 12, lineHeight: 18, color: colors.sub },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: v3FeedbackColors.error },
+  empty: { paddingHorizontal: 20, paddingVertical: 28, textAlign: 'center', fontFamily: fontFamily.body, fontSize: 14, lineHeight: 20, color: colors.sub },
+  footer: { paddingHorizontal: 20, paddingVertical: 12, textAlign: 'center', fontFamily: fontFamily.body, fontSize: 13, lineHeight: 19, color: colors.sub },
 });

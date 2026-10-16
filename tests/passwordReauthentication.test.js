@@ -1,0 +1,140 @@
+const React = require('react');
+const { act, create } = require('react-test-renderer');
+jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
+jest.mock('expo-linking', () => ({ getInitialURL: jest.fn(async () => null), addEventListener: () => ({ remove: jest.fn() }), createURL: path => path }));
+jest.mock('../src/lib/supabase', () => ({ supabase: { auth: {} }, createPasswordVerificationAuth: jest.fn() }));
+jest.mock('../src/lib/supabaseConfig', () => ({ getSupabaseConfig: () => ({ url: 'https://example.supabase.co', publishableKey: 'sb_publishable_fixture' }) }));
+jest.mock('@supabase/supabase-js', () => ({ createClient: jest.fn(() => ({ auth: {} })), processLock: jest.fn() }));
+jest.mock('../src/lib/profile', () => ({ saveMyPrivateProfile: jest.fn(async () => null) }));
+jest.mock('../src/lib/scheduleDraft', () => ({ clearSettingsDraft: jest.fn(async () => undefined) }));
+
+const { supabase, createPasswordVerificationAuth } = require('../src/lib/supabase');
+const { verifyCurrentPassword } = require('../src/lib/passwordReauthentication');
+const { AuthProvider, useAuth } = require('../src/auth/AuthProvider');
+const { clearSettingsDraft } = require('../src/lib/scheduleDraft');
+const cache = require('../src/lib/restaurantRecommendationCache');
+let verifier, user, renderer, authContext;
+beforeEach(() => {
+  jest.clearAllMocks();
+  user = { id: 'self', email: 'fixture@example.test', app_metadata: { providers: ['email'] } };
+  supabase.auth = {
+    getSession: jest.fn(async () => ({ data: { session: { user } }, error: null })),
+    onAuthStateChange: jest.fn(() => ({ data: { subscription: { unsubscribe: jest.fn() } } })),
+    signInWithPassword: jest.fn(), updateUser: jest.fn(), signOut: jest.fn(),
+  };
+  verifier = {
+    signInWithPassword: jest.fn(async () => ({ data: { user }, error: null })),
+    signOut: jest.fn(async () => ({ error: null })), dispose: jest.fn(async () => undefined),
+  };
+  createPasswordVerificationAuth.mockReturnValue(verifier);
+});
+afterEach(async () => {
+  if (renderer) await act(async () => renderer.unmount());
+  renderer = undefined;
+  cache.setRestaurantRecommendationUser(null);
+});
+
+it('verifies the active session email and matching returned user without adopting its session', async () => {
+  await expect(verifyCurrentPassword('self', 'fixture-current')).resolves.toBeNull();
+  expect(verifier.signInWithPassword).toHaveBeenCalledWith({ email: 'fixture@example.test', password: 'fixture-current' });
+  expect(supabase.auth.getSession).toHaveBeenCalledTimes(2);
+  expect(supabase.auth.signInWithPassword).not.toHaveBeenCalled();
+  expect(supabase.auth.updateUser).not.toHaveBeenCalled();
+  expect(verifier.signOut).toHaveBeenCalledWith({ scope: 'local' });
+  expect(verifier.dispose).toHaveBeenCalledTimes(1);
+  expect(supabase.auth.signOut).not.toHaveBeenCalled();
+});
+it.each([true, false])('handles returned cleanup errors without sensitive logs, development=%s', async development => {
+  const originalDev = global.__DEV__;
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  global.__DEV__ = development;
+  verifier.signOut.mockResolvedValue({ error: new Error('fixture private cleanup diagnostic') });
+  try {
+    await expect(verifyCurrentPassword('self', 'fixture-current')).resolves.toBeNull();
+    expect(verifier.dispose).toHaveBeenCalledTimes(1);
+    expect(supabase.auth.signOut).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(development ? 1 : 0);
+    if (development) expect(warn).toHaveBeenCalledWith('Password verification client cleanup could not be completed.');
+    expect(JSON.stringify(warn.mock.calls)).not.toMatch(/fixture|private|example\.test/);
+  } finally { global.__DEV__ = originalDev; warn.mockRestore(); }
+});
+it('retains the verification error and disposes the client even when signOut returns an error', async () => {
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  const rejection = { code: 'invalid_credentials', message: 'fixture credential rejection' };
+  verifier.signInWithPassword.mockResolvedValue({ data: { user: null }, error: rejection });
+  verifier.signOut.mockResolvedValue({ error: new Error('fixture cleanup rejection') });
+  try {
+    await expect(verifyCurrentPassword('self', 'fixture-current')).resolves.toBe(rejection);
+    expect(verifier.dispose).toHaveBeenCalledTimes(1);
+  } finally { warn.mockRestore(); }
+});
+it('disposes the client after a thrown cleanup error', async () => {
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  verifier.signOut.mockRejectedValue(new Error('fixture cleanup rejection'));
+  try {
+    await expect(verifyCurrentPassword('self', 'fixture-current')).resolves.toBeNull();
+    expect(verifier.dispose).toHaveBeenCalledTimes(1);
+  } finally { warn.mockRestore(); }
+});
+it('does not replace the verification result with a dispose error', async () => {
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  verifier.dispose.mockRejectedValue(new Error('fixture dispose rejection'));
+  try {
+    await expect(verifyCurrentPassword('self', 'fixture-current')).resolves.toBeNull();
+    expect(verifier.dispose).toHaveBeenCalledTimes(1);
+  } finally { warn.mockRestore(); }
+});
+it.each([
+  { code: 'invalid_credentials', status: 400 },
+  { code: 'over_request_rate_limit', status: 429 },
+  { status: 0, name: 'AuthRetryableFetchError' },
+])('returns verification failures before any password update (%j)', async error => {
+  verifier.signInWithPassword.mockResolvedValue({ data: { user: null }, error });
+  await expect(verifyCurrentPassword('self', 'fixture-current')).resolves.toBe(error);
+  expect(supabase.auth.updateUser).not.toHaveBeenCalled();
+  expect(verifier.signOut).toHaveBeenCalledWith({ scope: 'local' });
+});
+it.each([null, { id: 'different-user' }])('rejects an absent or different verification identity (%j)', async returnedUser => {
+  verifier.signInWithPassword.mockResolvedValue({ data: { user: returnedUser }, error: null });
+  await expect(verifyCurrentPassword('self', 'fixture-current')).resolves.toMatchObject({ code: 'reauth_identity_mismatch' });
+  expect(supabase.auth.updateUser).not.toHaveBeenCalled();
+});
+it.each([null, { id: 'different-user', email: 'other@example.test' }])('rejects an active account change during verification (%j)', async nextUser => {
+  supabase.auth.getSession.mockResolvedValueOnce({ data: { session: { user } }, error: null })
+    .mockResolvedValueOnce({ data: { session: nextUser ? { user: nextUser } : null }, error: null });
+  await expect(verifyCurrentPassword('self', 'fixture-current')).resolves.toMatchObject({ code: 'reauth_identity_mismatch' });
+});
+it('does not send a password when the initial session identity differs', async () => {
+  await expect(verifyCurrentPassword('other', 'fixture-current')).resolves.toMatchObject({ code: 'reauth_identity_mismatch' });
+  expect(createPasswordVerificationAuth).not.toHaveBeenCalled();
+});
+it('preserves the real AuthProvider identity, cache entry and draft through verification', async () => {
+  let authChanged;
+  supabase.auth.onAuthStateChange.mockImplementation(callback => { authChanged = callback; return { data: { subscription: { unsubscribe: jest.fn() } } }; });
+  supabase.auth.updateUser.mockImplementation(async () => {
+    authChanged('USER_UPDATED', { user: { ...user } });
+    return { data: { user }, error: null };
+  });
+  function Probe() { authContext = useAuth(); return null; }
+  await act(async () => { renderer = create(React.createElement(AuthProvider, null, React.createElement(Probe))); });
+  const sessionVersion = cache.getRestaurantRecommendationSession();
+  const entry = cache.createRestaurantRecommendation('self', 'fixture-room', 1, { status: 'ready', key: 'fixture-room', roomId: 'fixture-room', items: [], receivedMore: false });
+  await act(async () => { expect(await verifyCurrentPassword('self', 'fixture-current')).toBeNull(); });
+  await act(async () => { expect(await authContext.updatePassword('fixture-new')).toBeNull(); });
+  expect(authContext.user.id).toBe('self');
+  expect(cache.getRestaurantRecommendation('self', 'fixture-room')).toBe(entry);
+  expect(cache.getRestaurantRecommendationSession()).toBe(sessionVersion);
+  expect(clearSettingsDraft).not.toHaveBeenCalled();
+  expect(supabase.auth.signInWithPassword).not.toHaveBeenCalled();
+  expect(supabase.auth.signOut).not.toHaveBeenCalled();
+});
+it('creates isolated clients without persistent sessions, URL login, auto refresh or shared storage keys', () => {
+  const { createClient } = require('@supabase/supabase-js');
+  const actual = jest.requireActual('../src/lib/supabase');
+  createClient.mockClear();
+  actual.createPasswordVerificationAuth(); actual.createPasswordVerificationAuth();
+  const options = createClient.mock.calls.map(call => call[2].auth);
+  expect(options).toHaveLength(2);
+  for (const option of options) expect(option).toMatchObject({ persistSession: false, autoRefreshToken: false, detectSessionInUrl: false });
+  expect(options[0].storageKey).not.toBe(options[1].storageKey);
+});

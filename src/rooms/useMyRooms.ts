@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { useAuth } from '../auth/AuthProvider';
+import { useForegroundRefreshToken } from '../lifecycle/AppLifecycleContext';
 import {
   fetchMyRooms,
   fetchMySettlements,
@@ -16,8 +17,9 @@ type Status = 'loading' | 'ready' | 'error';
 export function useMyRooms() {
   const { user } = useAuth();
   const userId = user?.id ?? null;
+  const foregroundRefreshToken = useForegroundRefreshToken();
 
-  const [rooms, setRooms] = useState<RoomSummary[]>([]);
+  const [roomState, setRoomState] = useState<{ ownerId: string | null; rooms: RoomSummary[] }>({ ownerId: userId, rooms: [] });
   const [status, setStatus] = useState<Status>('loading');
   const [error, setError] = useState<Error | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
@@ -25,8 +27,9 @@ export function useMyRooms() {
   const reload = useCallback(() => setReloadToken((token) => token + 1), []);
 
   useEffect(() => {
+    setRoomState(previous => previous.ownerId === userId ? previous : { ownerId: userId, rooms: [] });
     if (!userId) {
-      setRooms([]);
+      setRoomState({ ownerId: userId, rooms: [] });
       setStatus('loading');
       return;
     }
@@ -43,7 +46,7 @@ export function useMyRooms() {
           setStatus('error');
           return;
         }
-        setRooms(result.data ?? []);
+        setRoomState({ ownerId: userId, rooms: result.data ?? [] });
         setStatus('ready');
       })
       .catch((cause: unknown) => {
@@ -55,12 +58,15 @@ export function useMyRooms() {
     return () => {
       active = false;
     };
-  }, [userId, reloadToken]);
+  }, [userId, reloadToken, foregroundRefreshToken]);
 
-  return { rooms, status, error, reload };
+  // Hide the previous account even in the render before effects run.
+  const sameAccount = roomState.ownerId === userId;
+  return { rooms: sameAccount ? roomState.rooms : [], status: sameAccount ? status : 'loading' as Status, error: sameAccount ? error : null, reload };
 }
 
 export function useRoomMessages(roomId: string | null) {
+  const foregroundRefreshToken = useForegroundRefreshToken();
   const [messages, setMessages] = useState<RoomMessage[]>([]);
   const [status, setStatus] = useState<Status>('loading');
   const [error, setError] = useState<Error | null>(null);
@@ -99,63 +105,79 @@ export function useRoomMessages(roomId: string | null) {
     return () => {
       active = false;
     };
-  }, [roomId, reloadToken]);
+  }, [roomId, reloadToken, foregroundRefreshToken]);
 
   return { messages, status, error, reload };
 }
 
 /** 채팅방 헤더가 쓰는 방 한 건 */
+/*
+ * 방 하나를 읽는다. reload 를 함께 준다 — 단계(stage)는 방에 있는데 예전에는
+ * 처음 한 번만 읽어서, 방장이 "식당 정하기로 넘어가기" 를 눌러 서버 단계가
+ * 바뀌어도 액션 행이 계속 예전 단계로 그려졌다. 앱을 다시 켜야 반영됐다.
+ */
 export function useRoom(roomId: string | null) {
+  const foregroundRefreshToken = useForegroundRefreshToken();
   const [room, setRoom] = useState<RoomSummary | null>(null);
+  const [status, setStatus] = useState<Status>('loading');
+  const [reloadToken, setReloadToken] = useState(0);
+
+  const reload = useCallback(() => setReloadToken((token) => token + 1), []);
 
   useEffect(() => {
     if (!roomId) {
       setRoom(null);
+      setStatus('error');
       return;
     }
 
     let active = true;
+    setStatus('loading');
     void fetchRoom(roomId)
-      .then(({ data }) => {
-        if (active) setRoom(data);
+      .then(({ data, error }) => {
+        if (!active) return;
+        setRoom(error ? null : data);
+        setStatus(error || !data ? 'error' : 'ready');
       })
       .catch(() => {
-        if (active) setRoom(null);
+        if (active) { setRoom(null); setStatus('error'); }
       });
 
     return () => {
       active = false;
     };
-  }, [roomId]);
+  }, [roomId, reloadToken, foregroundRefreshToken]);
 
-  return room;
+  return { room, reload, status };
 }
 
-/** 내가 만든 정산 목록. 홈의 정산 넛지가 쓴다. */
+/** 내가 볼 수 있는 정산 목록. 홈의 정산 넛지가 쓴다. */
 export function useMySettlements() {
   const { user } = useAuth();
   const userId = user?.id ?? null;
-  const [settlements, setSettlements] = useState<SettlementSummary[]>([]);
+  const foregroundRefreshToken = useForegroundRefreshToken();
+  const [settlementState, setSettlementState] = useState<{ ownerId: string | null; settlements: SettlementSummary[] }>({ ownerId: userId, settlements: [] });
 
   useEffect(() => {
+    setSettlementState(previous => previous.ownerId === userId ? previous : { ownerId: userId, settlements: [] });
     if (!userId) {
-      setSettlements([]);
       return;
     }
 
     let active = true;
-    void fetchMySettlements()
+    void fetchMySettlements(userId)
       .then(({ data }) => {
-        if (active) setSettlements(data ?? []);
+        if (active) setSettlementState({ ownerId: userId, settlements: data ?? [] });
       })
       .catch(() => {
-        if (active) setSettlements([]);
+        if (active) setSettlementState({ ownerId: userId, settlements: [] });
       });
 
     return () => {
       active = false;
     };
-  }, [userId]);
+  }, [userId, foregroundRefreshToken]);
 
-  return settlements;
+  // Account changes must hide old counts in the render before the effect clears its state.
+  return settlementState.ownerId === userId ? settlementState.settlements : [];
 }

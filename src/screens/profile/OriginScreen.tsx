@@ -1,389 +1,133 @@
-import { ChevronDown, Search } from 'lucide-react-native';
+import { Check, MapPin, Search, X } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import AppHeader from '../../components/AppHeader';
-import TmapMap from '../../components/TmapMap';
-import { CompleteButton } from '../../components/ui/Button';
+import { PrimaryButton } from '../../components/ui/Button';
 import { saveStartLocation } from '../../lib/profile';
 import { searchPlaces, type Place } from '../../lib/tmap';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useMyProfile } from '../../profile/useMyProfile';
-import { fs, s } from '../../theme/scale';
-import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { v3Layout } from '../../theme/scale';
+import { v3Colors as colors, v3FeedbackColors } from '../../theme/tokens';
+import { fontFamily } from '../../theme/typography';
+import ProfileFrame, { profileStyles as shared } from './ProfileFrame';
+import ProfileOriginMap from './ProfileOriginMap';
 
-/**
- * Figma 프로필/지도 위치 지정 (256:2333) — 220 x 486
- * body x11.5 y82 w197 / 검색창 y118 h26 / 지도 y154 h186 / 선택 카드 y347 h51 /
- * 저장 버튼 y405 h28
- *
- * Figma 원본의 지도 자리는 회색 격자 플레이스홀더였지만, Tmap 지도를 실제로 띄운다.
- * 검색으로 고른 장소의 좌표를 `start_latitude/longitude` 까지 저장한다.
- */
+/** Phone 530:1736, 601:3541. Existing Tmap search and coordinate-saving API. */
 export default function OriginScreen() {
-  const insets = useSafeAreaInsets();
   const { resetTo } = useNavigation();
   const { userId, bundle, reload } = useMyProfile();
-
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Place[]>([]);
   const [picked, setPicked] = useState<Place | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [resultsOpen, setResultsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
-
-  /** 응답이 순서를 뒤바꿔 도착해도 마지막 입력의 결과만 반영한다 */
+  const [focused, setFocused] = useState(false);
+  const [mapUnavailable, setMapUnavailable] = useState(false);
+  const [mapRevision, setMapRevision] = useState(0);
   const requestId = useRef(0);
-
-  const dropdownOpen = resultsOpen && results.length > 0;
-
+  const savingRef = useRef(false);
   useEffect(() => {
     if (loaded || !bundle) return;
     const saved = bundle.privateProfile;
     setQuery(saved.startLocationName ?? '');
-    if (saved.startLocationName && saved.startLat !== null && saved.startLng !== null) {
-      setPicked({
-        id: 'saved',
-        name: saved.startLocationName,
-        address: saved.startLocationName,
-        lat: saved.startLat,
-        lng: saved.startLng,
-      });
-    }
+    if (saved.startLocationName && saved.startLat !== null && saved.startLng !== null) setPicked({
+      id: 'saved', name: saved.startLocationName, address: saved.startLocationName,
+      lat: saved.startLat, lng: saved.startLng, category: '',
+    });
     setLoaded(true);
   }, [bundle, loaded]);
-
+  useEffect(() => () => { ++requestId.current; }, []);
+  const editQuery = (value: string) => {
+    ++requestId.current;
+    setSearching(false);
+    setQuery(value);
+    setPicked(null);
+    setMapUnavailable(false);
+    setResults([]);
+    setSearchError(null);
+  };
   const runSearch = async () => {
-    const keyword = query.trim();
-    if (!keyword) return;
-
+    if (!query.trim() || searching) return;
     const id = ++requestId.current;
     setSearching(true);
     setSearchError(null);
-
     try {
-      const found = await searchPlaces(keyword);
+      const found = await searchPlaces(query.trim());
       if (id !== requestId.current) return;
       setResults(found);
-      setResultsOpen(found.length > 0);
-      if (found.length === 0) setSearchError('검색 결과가 없어요.');
+      if (!found.length) setSearchError('검색 결과가 없어요.');
     } catch (error) {
       if (id !== requestId.current) return;
       setResults([]);
-      setResultsOpen(false);
       setSearchError(error instanceof Error ? error.message : '검색에 실패했어요.');
-    } finally {
-      if (id === requestId.current) setSearching(false);
-    }
+    } finally { if (id === requestId.current) setSearching(false); }
   };
-
   const save = async () => {
-    if (!userId) return;
+    if (!userId || !loaded || savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
-    // 검색으로 고른 장소여야 좌표가 있다. 직접 입력한 글자는 이름만 저장된다.
-    const error = await saveStartLocation(userId, picked?.name ?? query, picked);
-    setSaving(false);
-
-    if (error) {
-      Alert.alert('저장 실패', error.message);
-      return;
-    }
-    reload();
-    resetTo('Profile');
+    try {
+      // Preserve name-only saving for direct input; only a picked result supplies coordinates.
+      const error = await saveStartLocation(userId, picked?.name ?? query, picked);
+      if (error) { Alert.alert('저장 실패', error.message); return; }
+      reload();
+      resetTo('Profile');
+    } catch { Alert.alert('저장 실패', '잠시 후 다시 시도해 주세요.'); }
+    finally { savingRef.current = false; setSaving(false); }
   };
-
-  return (
-    <View style={styles.screen}>
-      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
-      <AppHeader />
-
-      <ScrollView
-        contentContainerStyle={styles.body}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}>
-        <Text style={styles.title}>출발지 설정</Text>
-        <Text style={styles.sub}>중간 지점 계산에 사용됩니다</Text>
-
-        {/* 검색창과 그 아래로 펼쳐지는 결과를 한 덩어리로 묶는다 */}
-        <View style={styles.searchWrap}>
-          <View style={[styles.searchBox, dropdownOpen && styles.searchBoxOpen]}>
-            <Search size={s(8)} color={colors.textMuted} strokeWidth={2.5} />
-            <TextInput
-              style={styles.searchInput}
-              value={query}
-              onChangeText={setQuery}
-              placeholder="주소 또는 장소 검색"
-              placeholderTextColor={colors.textMuted}
-              returnKeyType="search"
-              onSubmitEditing={() => void runSearch()}
-            />
-            {results.length > 0 ? (
-              <Pressable
-                style={styles.toggleButton}
-                hitSlop={s(6)}
-                onPress={() => setResultsOpen((open) => !open)}>
-                <View style={resultsOpen ? styles.chevronOpen : undefined}>
-                  <ChevronDown size={s(9)} color={colors.textMuted} strokeWidth={2.5} />
-                </View>
-              </Pressable>
-            ) : null}
-            <Pressable
-              style={styles.searchButton}
-              disabled={searching || !query.trim()}
-              onPress={() => void runSearch()}>
-              {searching ? (
-                <ActivityIndicator size="small" color={colors.textOnAccent} />
-              ) : (
-                <Text style={styles.searchButtonText}>검색</Text>
-              )}
-            </Pressable>
-          </View>
-
-          {dropdownOpen ? (
-            <ScrollView
-              style={styles.dropdown}
-              nestedScrollEnabled
-              keyboardShouldPersistTaps="handled">
-              {results.map((place) => {
-                const selected = picked?.lat === place.lat && picked?.lng === place.lng;
-                return (
-                  <Pressable
-                    key={place.id}
-                    style={[styles.result, selected && styles.resultSelected]}
-                    onPress={() => {
-                      setPicked(place);
-                      setQuery(place.name);
-                      setResultsOpen(false);
-                    }}>
-                    <Text style={styles.resultName} numberOfLines={1}>
-                      {place.name}
-                    </Text>
-                    <Text style={styles.resultAddress} numberOfLines={1}>
-                      {place.address}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          ) : null}
+  return <ProfileFrame title="출발지 설정" footer={<PrimaryButton label="이 위치로 저장" disabled={!userId || !loaded} loading={saving} onPress={() => void save()} />}>
+    <ScrollView contentContainerStyle={shared.body} keyboardShouldPersistTaps="handled">
+      <Text style={shared.intro}>밥약 장소를 고를 때 중간 지점 계산에 써요. 검색해서 고르면 좌표까지 저장돼요.</Text>
+      <View style={styles.searchGroup}>
+        <Text style={shared.label}>출발지 검색</Text>
+        <View style={[styles.searchBox, focused && styles.focused]}>
+          <Pressable accessibilityRole="button" accessibilityLabel="검색" disabled={!query.trim() || searching} onPress={() => void runSearch()}
+            style={({ pressed }) => [shared.iconButton, pressed && shared.pressed]}>
+            {searching ? <ActivityIndicator size="small" color={colors.selectedText} /> : <Search size={18} color={colors.sub} aria-hidden={true} />}
+          </Pressable>
+          <TextInput accessibilityLabel="출발지 검색" style={styles.input} value={query} onChangeText={editQuery}
+            placeholder="역 이름이나 주소 검색" placeholderTextColor={colors.sub} returnKeyType="search" onSubmitEditing={() => void runSearch()} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} />
+          <Pressable accessibilityRole="button" accessibilityLabel="검색어 지우기" onPress={() => editQuery('')}
+            style={({ pressed }) => [shared.iconButton, pressed && shared.pressed]}><X size={18} color={colors.sub} aria-hidden={true} /></Pressable>
         </View>
-
-        {searchError ? <Text style={styles.searchError}>{searchError}</Text> : null}
-
-        <View style={styles.map}>
-          <TmapMap
-            marker={picked ? { lat: picked.lat, lng: picked.lng, label: picked.name } : null}
-          />
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>선택한 위치</Text>
-          <Text style={styles.cardAddress}>
-            {picked?.name ?? query.trim() ?? '아직 설정하지 않았어요'}
-          </Text>
-          <Text style={styles.cardDetail}>
-            {picked
-              ? picked.address
-              : '검색해서 고르면 좌표까지 저장돼요 — 중간 지점 계산에 필요해요'}
-          </Text>
-        </View>
-
-        <CompleteButton
-          label={saving ? '저장 중' : '이 위치로 저장'}
-          style={styles.cta}
-          disabled={saving || (!picked && !query.trim())}
-          onPress={() => void save()}
-        />
-      </ScrollView>
-    </View>
-  );
+      </View>
+      <View testID="profile-origin-map" style={styles.map}><ProfileOriginMap key={(picked?.id ?? 'empty') + ':' + mapRevision} onUnavailable={() => setMapUnavailable(true)} marker={picked ? { lat: picked.lat, lng: picked.lng, label: picked.name } : null} />
+        {picked && !mapUnavailable ? <View testID="profile-origin-pin" pointerEvents="none" style={styles.centerPin}><MapPin size={28} color={colors.selectedText} fill={colors.selectedBg} aria-hidden={true} /></View> : null}
+      </View>
+      {searchError ? <Text accessibilityLiveRegion="polite" style={styles.error}>{searchError}</Text> : null}
+      {results.length > 0 ? <View testID="profile-origin-results" accessibilityRole="radiogroup" accessibilityLabel="출발지 검색 결과" style={styles.results}>{results.map((place, index) => {
+        const selected = picked?.id === place.id;
+        return <Pressable key={place.id} accessibilityRole="radio" accessibilityLabel={place.name + ', ' + place.address} accessibilityState={{ checked: selected }} aria-checked={selected}
+          onPress={() => { setPicked(place); setQuery(place.name); setMapUnavailable(false); setMapRevision((revision) => revision + 1); }} style={({ pressed }) => [styles.result, index > 0 && styles.divider, pressed && shared.pressed]}>
+          <MapPin size={20} color={selected ? colors.selectedText : colors.sub} aria-hidden={true} />
+          <View style={shared.grow}><Text style={[styles.resultName, selected && styles.selectedName]} numberOfLines={1}>{place.name}</Text><Text style={shared.sub} numberOfLines={1}>{place.address}</Text></View>
+          {selected ? <View style={styles.check}><Check size={14} color={colors.ink} aria-hidden={true} /></View> : null}
+        </Pressable>;
+      })}</View> : null}
+      {picked ? <View style={styles.selectedCard}><MapPin size={18} color={colors.selectedText} aria-hidden={true} />
+        <View style={shared.grow}><Text style={styles.selectedLabel}>선택한 위치</Text><Text style={styles.selectedName}>{picked.name}{picked.address !== picked.name ? ' · ' + picked.address : ''}</Text></View>
+      </View> : null}
+      {/* 기존 출발지 화면에는 현재 위치 기능이 없어 위치 권한 안내/요청을 새로 만들지 않는다. */}
+    </ScrollView>
+  </ProfileFrame>;
 }
-
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.surfaceSunken,
-  },
-  body: {
-    paddingHorizontal: s(11.5),
-    paddingTop: s(10),
-    paddingBottom: s(20),
-  },
-  title: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(12),
-    lineHeight: fs(16),
-    fontWeight: weight.bold,
-    color: colors.textPrimary,
-  },
-  sub: {
-    marginTop: s(7),
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(9),
-    color: colors.textMuted,
-  },
-  searchWrap: {
-    // 드롭다운이 지도 위로 겹쳐야 해서 이 덩어리를 위로 띄운다
-    marginTop: s(7),
-    zIndex: 10,
-  },
-  searchBox: {
-    // y118 h26
-    height: s(26),
-    borderRadius: s(13),
-    backgroundColor: colors.card,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: s(6),
-    paddingLeft: s(11),
-    paddingRight: s(3),
-  },
-  searchBoxOpen: {
-    // 펼쳐지면 아래쪽 모서리를 펴서 드롭다운과 한 덩어리로 보이게 한다
-    borderBottomLeftRadius: s(4),
-    borderBottomRightRadius: s(4),
-  },
-  toggleButton: {
-    width: s(12),
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dropdown: {
-    // 검색창 바로 아래에 붙어 지도 위를 덮는다
-    position: 'absolute',
-    top: s(26),
-    left: 0,
-    right: 0,
-    maxHeight: s(150),
-    marginTop: s(2),
-    borderRadius: s(10),
-    borderTopLeftRadius: s(4),
-    borderTopRightRadius: s(4),
-    backgroundColor: colors.card,
-    paddingHorizontal: s(9),
-    borderWidth: s(0.8),
-    borderColor: colors.primary,
-    shadowColor: '#A9A9A9',
-    shadowOffset: { width: 0, height: s(2) },
-    shadowOpacity: 0.3,
-    shadowRadius: s(4),
-    elevation: 8,
-  },
-  searchInput: {
-    flex: 1,
-    minWidth: 0,
-    paddingVertical: 0,
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    color: colors.textPrimary,
-  },
-  searchButton: {
-    width: s(34),
-    height: s(20),
-    borderRadius: s(10),
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  searchButtonText: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    lineHeight: fs(9),
-    fontWeight: weight.bold,
-    color: colors.textOnAccent,
-  },
-  searchError: {
-    marginTop: s(6),
-    marginLeft: s(4),
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(9),
-    color: colors.danger,
-  },
-  chevronOpen: {
-    transform: [{ rotate: '180deg' }],
-  },
-  result: {
-    paddingVertical: s(7),
-    borderTopWidth: s(0.6),
-    borderTopColor: colors.border,
-  },
-  resultSelected: {
-    backgroundColor: '#FFF5EB',
-    borderRadius: s(6),
-    paddingHorizontal: s(6),
-    marginHorizontal: s(-6),
-    borderTopColor: 'transparent',
-  },
-  resultName: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(7.5),
-    lineHeight: fs(10),
-    fontWeight: weight.semibold,
-    color: colors.textPrimary,
-  },
-  resultAddress: {
-    marginTop: s(2),
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(8),
-    color: colors.textMuted,
-  },
-  map: {
-    // y154 h186
-    marginTop: s(10),
-    height: s(186),
-    borderRadius: s(8),
-    // 지도 타일이 카드 배경과 붙어 보여 경계를 얇게 그어 준다
-    borderWidth: s(0.8),
-    borderColor: colors.primary,
-    backgroundColor: '#E8EBE6',
-    overflow: 'hidden',
-  },
-  card: {
-    // y347 h51
-    marginTop: s(7),
-    backgroundColor: colors.card,
-    borderRadius: s(10),
-    paddingHorizontal: s(9),
-    paddingVertical: s(8),
-  },
-  cardLabel: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(9),
-    color: colors.textMuted,
-  },
-  cardAddress: {
-    marginTop: s(3),
-    fontFamily: fontFamily.body,
-    fontSize: fs(8),
-    lineHeight: fs(11),
-    fontWeight: weight.bold,
-    color: colors.textPrimary,
-  },
-  cardDetail: {
-    marginTop: s(3),
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(9),
-    color: colors.textMuted,
-  },
-  cta: {
-    marginTop: s(7),
-  },
+  searchGroup: { gap: 6 },
+  searchBox: { minHeight: v3Layout.fieldHeight, flexDirection: 'row', alignItems: 'center', paddingLeft: 4, paddingRight: 4, gap: 6, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  focused: { borderWidth: 2, borderColor: colors.primary },
+  input: { flex: 1, minWidth: 0, height: v3Layout.fieldHeight, padding: 0, fontFamily: fontFamily.body, fontSize: 16, color: colors.ink },
+  map: { height: 160, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.mutedBg },
+  centerPin: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  results: { paddingVertical: 4, paddingRight: 8, paddingLeft: 12, borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  result: { minHeight: 61, paddingVertical: 10, paddingRight: 4, gap: 10, flexDirection: 'row', alignItems: 'center' },
+  divider: { borderTopWidth: 1, borderTopColor: colors.border },
+  resultName: { fontFamily: fontFamily.medium, fontSize: 15, lineHeight: 22, color: colors.ink },
+  selectedName: { fontFamily: fontFamily.bold, fontSize: 15, lineHeight: 22, color: colors.selectedText },
+  check: { width: 24, height: 24, borderRadius: 12, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  selectedCard: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 14, gap: 10, borderRadius: 12, backgroundColor: colors.selectedBg },
+  selectedLabel: { fontFamily: fontFamily.medium, fontSize: 12, lineHeight: 18, color: colors.selectedText },
+  error: { fontFamily: fontFamily.body, fontSize: 13, lineHeight: 20, color: v3FeedbackColors.error },
 });

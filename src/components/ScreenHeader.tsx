@@ -1,24 +1,9 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { fs, s } from '../theme/scale';
 import { colors } from '../theme/tokens';
-import { fontFamily, weight } from '../theme/typography';
-
-/** Figma BackButton (525:3226) — 14 x 13 흰 칩 안의 왼쪽 화살표 */
-function BackArrow() {
-  return (
-    <Svg width={s(7)} height={s(7)} viewBox="0 0 8 8" fill="none">
-      <Path
-        d="M7 4H1M1 4L3.6 1.4M1 4L3.6 6.6"
-        stroke={colors.textPrimary}
-        strokeWidth={1}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </Svg>
-  );
-}
+import { fontFamily } from '../theme/typography';
+import BackButton from './BackButton';
 
 type Props = {
   title: string;
@@ -27,16 +12,19 @@ type Props = {
   action?: React.ReactNode;
   /** 타이틀 아래 영역 (진행바 + STEP 라벨 등) */
   below?: React.ReactNode;
+  /**
+   * AppHeader 아래에 겹쳐 놓일 때. 기본 위 여백(22)은 상태바 바로 아래에
+   * 놓이는 것을 전제한 값이라, 헤더가 이미 하나 있으면 여백이 두 번 쌓인다.
+   */
+  compact?: boolean;
 };
 
 /** Figma 공통 헤더 — 뒤로가기 칩 x18 y49~52 (14×13), 타이틀 x41 y45~48 */
-export default function ScreenHeader({ title, onBack, action, below }: Props) {
+export default function ScreenHeader({ title, onBack, action, below, compact }: Props) {
   return (
-    <View style={styles.wrapper}>
+    <View style={[styles.wrapper, compact && styles.wrapperCompact]}>
       <View style={styles.row}>
-        <Pressable style={styles.backChip} onPress={onBack} hitSlop={s(8)}>
-          <BackArrow />
-        </Pressable>
+        <BackButton onPress={onBack} />
         <Text style={styles.title}>{title}</Text>
         {action ? <View style={styles.action}>{action}</View> : null}
       </View>
@@ -52,24 +40,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: s(18),
     paddingTop: s(22),
   },
+  wrapperCompact: {
+    paddingTop: s(10),
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  backChip: {
-    width: s(14),
-    height: s(13),
-    borderRadius: s(4),
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   title: {
     marginLeft: s(9),
-    fontFamily: fontFamily.body,
+    fontFamily: fontFamily.bold,
     fontSize: fs(11),
     lineHeight: fs(16),
-    fontWeight: weight.bold,
     color: colors.textPrimary,
   },
   action: {

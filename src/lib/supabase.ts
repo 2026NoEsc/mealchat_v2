@@ -15,6 +15,7 @@ const { url, publishableKey } = getSupabaseConfig({
   EXPO_PUBLIC_SUPABASE_URL: process.env.EXPO_PUBLIC_SUPABASE_URL,
   EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
   EXPO_PUBLIC_SUPABASE_ANON_KEY: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+  EXPO_PUBLIC_SUPABASE_ALLOW_LOCAL_HTTP: process.env.EXPO_PUBLIC_SUPABASE_ALLOW_LOCAL_HTTP,
 });
 
 export const supabase = createClient(url, publishableKey, {
@@ -32,6 +33,19 @@ export const supabase = createClient(url, publishableKey, {
     lock: processLock,
   },
 });
+
+let passwordVerificationSequence = 0;
+/** Reauthentication must not replace or broadcast the application's session. */
+export function createPasswordVerificationAuth() {
+  return createClient(url, publishableKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      storageKey: `mealchat-password-verification-${++passwordVerificationSequence}`,
+    },
+  }).auth;
+}
 
 if (Platform.OS !== 'web') {
   AppState.addEventListener('change', (state) => {

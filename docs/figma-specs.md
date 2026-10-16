@@ -35,11 +35,15 @@ Figma 파일 `xBf3b09D6Bj1dTiCixt25e` / 페이지 `Application UI` (`0:1`).
 | DangerButton | `309:2422` | 197 × 28 |
 | BackButton | `525:3226` | 14 × 13 |
 | Profile1~4 | `52:126` ~ `52:129` | 27~31 × 27~28 |
+| SettlementCard | `780:418` (`2_홈` 섹션 안) | 197 × 78 · variant `상태=진행중/완료` |
 
 ## 구현 완료
 
 - **로그인** `150:124` → [LoginScreen](../src/screens/LoginScreen.tsx)
 - **홈/메인** `309:1064` → [HomeScreen](../src/screens/HomeScreen.tsx)
+- **정산** `779:352` → [SettlementsScreen](../src/screens/settlement/SettlementsScreen.tsx)
+  - Figma 에 원본 시안이 없던 화면이다. 코드를 먼저 만들고 파일에 옮겨 그렸다 (`2_홈` 섹션).
+  - 카드는 `SettlementCard` 컴포넌트 세트로 두고 인스턴스를 놓았다.
 - **알림 패널** `549:3408` (196 × 350) → [NotificationPanel](../src/components/NotificationPanel.tsx)
 - **회원가입 5화면** → [screens/signup](../src/screens/signup)
   - 시작 `150:125` / 개인정보 `150:121` / 구글캘린더 `150:122` / 취향분석 `150:123` / 약관동의 `150:126`
@@ -212,3 +216,18 @@ STEP 라벨 `x16~18 y82 83×15`, 진행바 `y77~82 h3~5`,
 - 좌측 X 버튼 `x22 y378 30×30`, 우측 하트 버튼 `x168 y378 30×30`
 - 가운데 캐릭터 썸 `x87 y365.5 46×55`
 - "별로예요" `x12 y414 50×8`, "좋아요" `x158 y414 50×8`
+
+
+## Code Connect
+
+**쓸 수 없다.** Dev 또는 Full 시트 + Organization/Enterprise 플랜이 필요한데 이 파일이
+속한 팀은 student 티어이고 시트가 View 다. `get_code_connect_suggestions` 가 그대로
+거절한다.
+
+그래서 코드 위치는 Figma 안에 다음 두 곳으로 남긴다. 플랜과 무관하게 동작한다.
+
+- **컴포넌트**: `description` 에 코드 경로를 적는다 (`SettlementCard` 적용 완료)
+- **화면 프레임**: `description` 이 없으므로 `annotations` 에 적는다 (`정산` 적용 완료)
+
+플랜이 올라가면 `@figma/code-connect` 를 넣고 `figma.config.json` 을 만든 뒤
+`*.figma.ts` 템플릿으로 옮기면 된다. 그때까지는 이 문서의 위 매핑 표가 기준이다.

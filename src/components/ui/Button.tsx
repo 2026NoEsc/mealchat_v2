@@ -1,158 +1,117 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import {
+  ActivityIndicator,
   Pressable,
+  PressableProps,
   StyleProp,
   StyleSheet,
   Text,
   ViewStyle,
 } from 'react-native';
 
-import { fs, s } from '../../theme/scale';
-import { colors, radii, shadows } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { v3Layout } from '../../theme/scale';
+import { colors as legacyColors, v3Colors as colors, v3FeedbackColors, v3Radii } from '../../theme/tokens';
+import { fontFamily } from '../../theme/typography';
 
-type BaseProps = {
+export type ButtonProps = Omit<PressableProps, 'children' | 'style'> & {
   label: string;
-  onPress?: () => void;
-  disabled?: boolean;
+  variant?: 'primary' | 'secondary' | 'text';
+  loading?: boolean;
+  showNext?: boolean;
   style?: StyleProp<ViewStyle>;
 };
 
-/**
- * Figma AccentButton (378:2894) / AccentAndNextButton (378:2906)
- * 그라디언트 #F66F3E 25.96% → #F6C53E 93.75%, radius 10, 높이 28
- */
-export function AccentButton({
+/** Figma Button set 493:1052; geometry supplied from the coordinator's measurements. */
+export function Button(props: ButtonProps) {
+  return <ButtonControl {...props} />;
+}
+
+export default Button;
+
+function ButtonControl({
   label,
-  onPress,
-  disabled,
+  variant = 'primary',
+  disabled = false,
+  loading = false,
+  showNext = false,
   style,
-  showNext,
-}: BaseProps & { showNext?: boolean }) {
+  accessibilityState,
+  accessibilityLabel,
+  ...rest
+}: Omit<ButtonProps, 'variant'> & { variant?: ButtonProps['variant'] | 'danger' }) {
+  const inactive = disabled || loading;
+  const foreground = variant === 'danger'
+    ? v3FeedbackColors.error
+    : variant === 'primary' ? colors.onPrimary : colors.ink;
+
   return (
     <Pressable
-      onPress={onPress}
-      disabled={disabled}
+      {...rest}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityState={{ ...accessibilityState, disabled: inactive, busy: loading }}
+      aria-busy={loading}
+      disabled={inactive}
       style={({ pressed }) => [
         styles.base,
-        shadows.accent,
-        pressed && styles.pressed,
-        disabled && styles.disabled,
+        styles[variant],
         style,
+        pressed && !inactive && styles.pressed,
+        inactive && styles.disabled,
       ]}>
-      <LinearGradient
-        colors={[...colors.accentGradient]}
-        locations={[...colors.accentGradientLocations]}
-        start={{ x: 0, y: 0.5 }}
-        end={{ x: 1, y: 0.5 }}
-        style={StyleSheet.absoluteFill}
-      />
-      <Text style={styles.accentLabel}>{showNext ? `${label} →` : label}</Text>
+      {loading ? <ActivityIndicator color={foreground} accessible={false} /> : null}
+      <Text style={[styles.label, { color: foreground }]}>
+        {showNext ? `${label} →` : label}
+      </Text>
     </Pressable>
   );
 }
 
-/**
- * Figma CompleteButton (309:2483) / CompleteAndNextButton (309:2484)
- * 단색 #FF9900, radius 10, 높이 28
- */
-export function CompleteButton({
-  label,
-  onPress,
-  disabled,
-  style,
-  showNext,
-}: BaseProps & { showNext?: boolean }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={({ pressed }) => [
-        styles.base,
-        styles.solid,
-        shadows.button,
-        pressed && styles.pressed,
-        disabled && styles.disabled,
-        style,
-      ]}>
-      <Text style={styles.solidLabel}>{showNext ? `${label} →` : label}</Text>
-    </Pressable>
-  );
+export function PrimaryButton(props: Omit<ButtonProps, 'variant'>) {
+  return <Button {...props} variant="primary" />;
 }
 
-/** Figma AddButton (525:3216) — CompleteButton 과 동일 스타일, 기본 라벨만 다름 */
-export function AddButton({ label = '+ 메이트 초대', onPress, disabled, style }: Partial<BaseProps>) {
-  return (
-    <CompleteButton label={label} onPress={onPress} disabled={disabled} style={style} />
-  );
+export function SecondaryButton(props: Omit<ButtonProps, 'variant'>) {
+  return <Button {...props} variant="secondary" />;
 }
 
-/**
- * Figma DangerButton (309:2422)
- * 흰 배경 + #F53942 보더 0.6, radius 8, 높이 28
- */
-export function DangerButton({ label, onPress, disabled, style }: BaseProps) {
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={({ pressed }) => [
-        styles.base,
-        styles.danger,
-        pressed && styles.pressed,
-        disabled && styles.disabled,
-        style,
-      ]}>
-      <Text style={styles.dangerLabel}>{label}</Text>
-    </Pressable>
-  );
+export function TextButton(props: Omit<ButtonProps, 'variant'>) {
+  return <Button {...props} variant="text" />;
+}
+
+/** Complete keeps one legacy alias; former Accent callers now use PrimaryButton. */
+export { PrimaryButton as CompleteButton };
+
+export function AddButton({ label = '+ 메이트 초대', ...rest }: Omit<ButtonProps, 'label' | 'variant'> & { label?: string }) {
+  return <PrimaryButton {...rest} label={label} />;
+}
+
+export function DangerButton(props: Omit<ButtonProps, 'variant'>) {
+  return <ButtonControl {...props} variant="danger" />;
 }
 
 const styles = StyleSheet.create({
   base: {
-    height: s(28),
-    borderRadius: s(radii.button),
+    minHeight: v3Layout.buttonHeight,
+    minWidth: v3Layout.minTouchTarget,
+    borderRadius: v3Radii.button,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    gap: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
   },
-  solid: {
-    backgroundColor: colors.primary,
-  },
-  danger: {
-    backgroundColor: colors.card,
-    borderWidth: s(0.6),
-    borderColor: colors.danger,
-    borderRadius: s(radii.buttonOutline),
-  },
-  pressed: {
-    opacity: 0.85,
-  },
-  disabled: {
-    opacity: 0.4,
-  },
-  accentLabel: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(10),
-    lineHeight: fs(15),
-    fontWeight: weight.extrabold,
-    color: colors.textOnAccent,
+  primary: { backgroundColor: colors.primary },
+  secondary: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  text: { backgroundColor: 'transparent' },
+  danger: { backgroundColor: colors.surface, borderWidth: 1, borderColor: legacyColors.danger },
+  pressed: { opacity: 0.8 },
+  disabled: { opacity: 0.4 },
+  label: {
+    fontFamily: fontFamily.bold,
+    fontSize: 16,
+    lineHeight: 24,
     textAlign: 'center',
-  },
-  solidLabel: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(9.5),
-    lineHeight: fs(20),
-    fontWeight: weight.extrabold,
-    color: colors.textOnAccent,
-    textAlign: 'center',
-  },
-  dangerLabel: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(8.5),
-    lineHeight: fs(11.5),
-    fontWeight: weight.semibold,
-    color: colors.danger,
-    textAlign: 'center',
+    flexShrink: 1,
   },
 });

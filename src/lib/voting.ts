@@ -1,3 +1,4 @@
+import { dedupeLabels } from './labels';
 import { supabase } from './supabase';
 
 export type VotingKind = 'menu' | 'time';
@@ -53,7 +54,7 @@ function votedIds(value: unknown): string[] {
 export async function fetchRoomVoting(
   roomId: string,
   myId: string | null,
-): Promise<{ data: VotingOption[] | null; error: Error | null }> {
+): Promise<{ data: VotingOption[] | null; memberCount: number; error: Error | null }> {
   const [roomResult, participantResult] = await Promise.all([
     supabase
       .from('rooms')
@@ -68,7 +69,7 @@ export async function fetchRoomVoting(
   ]);
 
   const error = roomResult.error ?? participantResult.error;
-  if (error) return { data: null, error };
+  if (error) return { data: null, memberCount: 0, error };
 
   const rawItems = Array.isArray(roomResult.data?.voting_items) ? roomResult.data.voting_items : [];
   const items = (rawItems as RawItem[]).map(toItem).filter((item): item is VotingItem => item !== null);
@@ -85,7 +86,12 @@ export async function fetchRoomVoting(
     };
   });
 
-  return { data: options, error: null };
+  // NULL profile_id는 레거시 표시 행일 수 있어 서버 정족수에서 제외한다.
+  const memberCount = (participantResult.data ?? []).filter(
+    (participant) => participant.profile_id !== null,
+  ).length;
+
+  return { data: options, memberCount, error: null };
 }
 
 /** 후보 추가. 방 참가자만, 같은 이름은 서버가 거절한다. */
@@ -102,9 +108,60 @@ export async function addVotingItem(
   return error;
 }
 
+/**
+ * 후보를 지운다. 올린 사람이나 방장만 가능하다.
+ *
+ * 그 후보에 던진 표도 서버가 함께 지운다 — 남겨 두면 득표수가 어긋난다.
+ */
+export async function removeVotingItem(roomId: string, itemId: string): Promise<Error | null> {
+  const { error } = await supabase.rpc('remove_voting_item', {
+    target_room: roomId,
+    item_id: itemId,
+  });
+  return error;
+}
+
 /** 표를 켜고 끈다. 내 참가행만 바뀐다. */
 export async function toggleVote(roomId: string, itemId: string): Promise<Error | null> {
   const { error } = await supabase.rpc('toggle_vote', {
+    target_room: roomId,
+    item_id: itemId,
+  });
+  return error;
+}
+
+/**
+ * 방을 만들 때 투표 후보를 미리 올려 둔다.
+ *
+ * 시간(`time`)은 방장이 고른 시간대를, 메뉴(`menu`)는 AI 가 추천한 식당을 심는다.
+ * 빈 방에서 각자 후보를 만들어 넣게 두면 아무도 시작하지 않아서, 첫 후보는
+ * 방을 만든 사람의 선택으로 채워 둔다.
+ *
+ * 한 건이 실패해도 나머지는 계속 심는다. 방은 이미 만들어졌고, 투표 후보가
+ * 덜 올라간 것 때문에 사용자가 방에 못 들어가면 그게 더 나쁘다.
+ */
+export async function seedVotingOptions(
+  roomId: string,
+  kind: VotingKind,
+  labels: string[],
+): Promise<{ failed: string[] }> {
+  const failed: string[] = [];
+
+  for (const label of dedupeLabels(labels)) {
+    const error = await addVotingItem(roomId, kind, label);
+    if (error) failed.push(label);
+  }
+
+  return { failed };
+}
+
+/**
+ * 가장 많은 표 후보를 실제 방 상태로 확정한다.
+ * 서버가 후보 존재·방 멤버십·최소 한 표를 확인하고, 고정 system event를 같은
+ * 트랜잭션으로 기록한다. 클라이언트는 임의 안내문을 보낼 수 없다.
+ */
+export async function confirmRoomVote(roomId: string, itemId: string): Promise<Error | null> {
+  const { error } = await supabase.rpc('confirm_room_vote', {
     target_room: roomId,
     item_id: itemId,
   });
