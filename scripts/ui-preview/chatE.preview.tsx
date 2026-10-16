@@ -9,7 +9,7 @@ import { v3Colors } from '../../src/theme/tokens';
 const scene = new URLSearchParams(globalThis.location?.search).get('scene') ?? 'chat';
 function Flow() {
   const { current, replace } = useNavigation(); const [ready,setReady]=useState(false);
-  useEffect(()=>{replace(scene.startsWith('detail')?'RoomDetail':'ChatRoom',{roomId:'room',...(scene==='members'?{openSheet:'members'}:{})});setReady(true);},[replace]);
+  useEffect(()=>{replace(scene.startsWith('detail')?'RoomDetail':'ChatRoom',{roomId:'room',...(scene==='members'?{openSheet:'members'}:scene.startsWith('voting-')?{openSheet:'menu'}:{})});setReady(true);},[replace]);
   if(!ready)return null;
   return <View style={{flex:1,backgroundColor:v3Colors.bg}}>{current.name==='ChatRoom'?<ChatRoomScreen/>:current.name==='RoomDetail'?<RoomDetailScreen/>:<Text>{'이동 결과: '+current.name+' '+JSON.stringify(current.params)}</Text>}</View>;
 }

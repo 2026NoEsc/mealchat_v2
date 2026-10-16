@@ -1,189 +1,135 @@
-import { X } from 'lucide-react-native';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-
-import { useAuth } from '../../auth/AuthProvider';
+import { Crown, MapPin, Plus, Search, Sparkles, Trash2, X } from 'lucide-react-native';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useKeyboardOverlap } from '../../theme/keyboard';
-import PlanConfirmation from '../../components/ui/PlanConfirmation';
+import { useAuth } from '../../auth/AuthProvider';
+import Avatar from '../../components/Avatar';
+import { Button } from '../../components/ui/Button';
+import { chatFeedbackColors } from '../../components/ui/chatTokens';
+import FailureCard from '../../components/ui/FailureCard';
 import { meetingTimeLabel } from '../../components/ui/MeetingCard';
-import { advanceRoomStage, type RoomStage } from '../../lib/rooms';
-import { CompleteButton } from '../../components/ui/Button';
-import {
-  addVotingItem,
-  removeVotingItem,
-  confirmRoomVote,
-  fetchRoomVoting,
-  toggleVote,
-  type VotingKind,
-  type VotingOption,
-} from '../../lib/voting';
+import PlanConfirmation from '../../components/ui/PlanConfirmation';
+import TextField from '../../components/ui/TextField';
+import Toast, { useToast } from '../../components/ui/Toast';
+import VoteToggle from '../../components/ui/VoteToggle';
+import { advanceRoomStage, type RoomParticipant, type RoomStage } from '../../lib/rooms';
 import { hasStrictVoteMajority, pickLeadingVoteOption } from '../../lib/votingLeader';
-import { fs, s } from '../../theme/scale';
-import { colors, v3Colors } from '../../theme/tokens';
+import { addVotingItem, confirmRoomVote, fetchRoomVoting, removeVotingItem, toggleVote, type VotingKind, type VotingOption } from '../../lib/voting';
+import { searchPlaces, type Place } from '../../lib/tmap';
+import { useKeyboardOverlap } from '../../theme/keyboard';
+import { v3Layout } from '../../theme/scale';
+import { v3Colors as colors, v3FeedbackColors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 
-const TINT = '#FFF5EB';
-
+export type RestaurantSuggestion = { label: string; matchPercent?: number; fresh?: boolean };
+export type RecommendationStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'error' | 'unavailable';
 type Props = {
-  visible: boolean;
-  isOwner?: boolean; stage?: RoomStage; confirmedSlot?: string | null; participantCount?: number;
-  roomId: string | null;
-  kind: VotingKind;
-  title: string;
-  subtitle: string;
-  placeholder: string;
-  onClose: () => void;
-  /** 서버가 실제 상태와 system event를 기록한 뒤 채팅을 새로 고친다. */
-  onConfirm: () => void;
-  /*
-   * 표가 하나 오갈 때마다 부른다. 마지막 한 표로 서버가 방을 '확정' 으로
-   * 넘겨 버리므로, 화면이 그걸 알아채려면 방을 다시 읽어야 한다.
-   */
-  onVoted?: () => void;
-  /**
-   * AI 가 고른 후보들. 목록 위에 순위와 취향 일치율로 보여 주고, 눌러서 투표
-   * 후보로 올릴 수 있다 — 흐름도의 "AI 식당 추천을 후보로 추가".
-   */
-  suggestions?: { label: string; matchPercent: number }[];
-  suggestionTitle?: string;
+  visible: boolean; isOwner?: boolean; stage?: RoomStage; confirmedSlot?: string | null; participantCount?: number;
+  confirmedRestaurant?: string | null; participants?: RoomParticipant[];
+  roomId: string | null; kind: VotingKind; title: string; subtitle: string; placeholder: string;
+  onClose: () => void; onConfirm: () => void; onVoted?: () => void;
+  suggestions?: RestaurantSuggestion[]; suggestionTitle?: string;
+  suggestionStatus?: RecommendationStatus; suggestionReason?: string; receivedMore?: boolean; onRequestSuggestions?: () => void;
 };
+type Plan = { id: string | null; label: string; voteSaved: boolean };
 
-/**
- * 메뉴 투표와 시간 투표는 화면 구조가 같다 — 후보 목록, 표, 직접 추가.
- * 다른 것은 문구와 kind 뿐이라 한 컴포넌트로 두고 인자로 가른다.
- */
-export default function VotingSheet({
-  visible,
-  isOwner = false, stage = 'place', confirmedSlot = null, participantCount,
-  roomId,
-  kind,
-  title,
-  subtitle,
-  placeholder,
-  onClose,
-  onConfirm,
-  onVoted,
-  suggestions,
-  suggestionTitle,
-}: Props) {
-  const { user } = useAuth();
-  const myId = user?.id ?? null;
-
-  const [options, setOptions] = useState<VotingOption[]>([]);
-  const [memberCount, setMemberCount] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [draft, setDraft] = useState('');
-  const [busy, setBusy] = useState(false);
-  const operation = useRef(false);
-  const [plan, setPlan] = useState<{ id: string; label: string; voteSaved: boolean } | null>(null);
-  const [confirmationOpen, setConfirmationOpen] = useState(false);
+/** Phone 540:1524 / 563:1755 / 628:3074 / 683:12975 / 540:1682. */
+export default function VotingSheet({ visible, isOwner = false, stage = 'place', confirmedSlot = null, participantCount, confirmedRestaurant,
+  participants = [], roomId, kind, title, subtitle, placeholder, onClose, onConfirm, onVoted, suggestions = [],
+  suggestionStatus = 'idle', suggestionReason, receivedMore = false, onRequestSuggestions }: Props) {
+  const { user } = useAuth(); const myId = user?.id ?? null;
+  const [options, setOptions] = useState<VotingOption[]>([]); const [memberCount, setMemberCount] = useState(0);
+  const [loading, setLoading] = useState(true); const [loadError, setLoadError] = useState(false);
+  const [busy, setBusy] = useState(false); const operation = useRef(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [plan, setPlan] = useState<Plan | null>(null); const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [confirmationError, setConfirmationError] = useState<string | null>(null);
-  useEffect(() => { setPlan(null); setConfirmationOpen(false); setConfirmationError(null); }, [roomId]);
-
-  /*
-   * 이미 투표 후보에 오른 것은 추천에서 뺀다. 남겨 두면 같은 이름이 위아래로
-   * 두 번 보이고, 무엇을 눌러야 하는지 헷갈린다.
-   */
-  const openSuggestions = (suggestions ?? []).filter(
-    (item) => !options.some((option) => option.label.trim() === item.label.trim()),
-  );
-
-  /* AI 가 고른 것을 투표 후보로 올린다 */
-  const addSuggestion = async (label: string) => {
-    if (!roomId) return;
-
-    setBusy(true);
-    const error = await addVotingItem(roomId, kind, label);
-    setBusy(false);
-
-    if (error) {
-      Alert.alert('추가하지 못했어요', error.message);
-      return;
-    }
-    await load();
-  };
-
-  const discard = async (option: VotingOption) => {
-    if (!roomId) return;
-
-    setBusy(true);
-    const error = await removeVotingItem(roomId, option.id);
-    setBusy(false);
-
-    if (error) {
-      Alert.alert('지우지 못했어요', error.message);
-      return;
-    }
-    await load();
-  };
+  const [adding, setAdding] = useState(false); const [query, setQuery] = useState('');
+  const [results, setResults] = useState<Place[]>([]); const [searchState, setSearchState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const savedRestaurant = kind === 'menu' && stage === 'place' ? confirmedRestaurant?.trim() : null;
+  const restaurantLocked = kind === 'menu' && stage === 'place' && Boolean(savedRestaurant || plan?.voteSaved);
+  useEffect(() => { if (restaurantLocked) { setAdding(false); setActionError(null); } }, [restaurantLocked]);
+  const [searchRequest, setSearchRequest] = useState(0); const { height } = useWindowDimensions();
+  const { showToast, toastProps } = useToast(); const shownMore = useRef(false);
+  useEffect(() => { setPlan(null); setConfirmationOpen(false); setConfirmationError(null); setAdding(false); setQuery(''); shownMore.current = false; }, [roomId]);
+  useEffect(() => {
+    if (!visible || restaurantLocked || !receivedMore || shownMore.current) return;
+    const count = suggestions.filter(item => item.fresh).length;
+    if (count > 0) { shownMore.current = true; showToast({ message: 'AI가 조건에 맞는 곳을 ' + count + '곳 더 찾았어요' }); }
+  }, [visible, receivedMore, suggestions, showToast, restaurantLocked]);
 
   const load = useCallback(async () => {
-    if (!roomId) return;
-    const { data, memberCount: fetchedMemberCount } = await fetchRoomVoting(roomId, myId);
-    setOptions((data ?? []).filter((option) => option.kind === kind));
-    setMemberCount(fetchedMemberCount);
-    setLoading(false);
+    if (!roomId) { setLoading(false); setLoadError(true); return []; }
+    setLoading(true); setLoadError(false);
+    try {
+      const result = await fetchRoomVoting(roomId, myId);
+      if (result.error) throw result.error;
+      const rows = (result.data ?? []).filter(option => option.kind === kind);
+      setOptions(rows); setMemberCount(result.memberCount); return rows;
+    } catch { setLoadError(true); return null; }
+    finally { setLoading(false); }
   }, [roomId, myId, kind]);
-
+  useEffect(() => { if (visible) void load(); }, [visible, load]);
   useEffect(() => {
-    if (!visible) return;
-    setLoading(true);
-    void load();
-  }, [visible, load]);
+    if (restaurantLocked || kind !== 'menu' || !adding || query.trim().length < 2) { setResults([]); setSearchState('idle'); return; }
+    let active = true; setSearchState('loading');
+    const timer = setTimeout(() => {
+      void searchPlaces(query.trim()).then(rows => { if (active) { setResults(rows); setSearchState('ready'); } })
+        .catch(() => { if (active) { setResults([]); setSearchState('error'); } });
+    }, 350);
+    return () => { active = false; clearTimeout(timer); };
+  }, [adding, query, searchRequest, kind, restaurantLocked]);
 
-  const vote = async (option: VotingOption) => {
-    if (!roomId) return;
-    setBusy(true);
-    const error = await toggleVote(roomId, option.id);
-    setBusy(false);
-
-    if (error) {
-      Alert.alert('투표 실패', error.message);
-      return;
-    }
-    void load();
-    onVoted?.();
+  const mutate = async (task: () => Promise<unknown>, message: string | (() => string)) => {
+    if (operation.current || !roomId || restaurantLocked) return;
+    operation.current = true; setBusy(true); setActionError(null);
+    try { await task(); }
+    catch { setActionError(typeof message === 'function' ? message() : message); }
+    finally { operation.current = false; setBusy(false); }
   };
-
-  const add = async () => {
-    if (!roomId) return;
-    const label = draft.trim();
-    if (!label) return;
-
-    setBusy(true);
-    const error = await addVotingItem(roomId, kind, label);
-    setBusy(false);
-
-    if (error) {
-      Alert.alert('추가 실패', error.message);
-      return;
+  const vote = (option: VotingOption) => void mutate(async () => {
+    const error = await toggleVote(roomId!, option.id); if (error) throw error;
+    await load(); onVoted?.();
+  }, '투표를 바꾸지 못했어요. 다시 시도해 주세요.');
+  const add = (label: string, thenVote = false) => { let added = false; return void mutate(async () => {
+    const error = await addVotingItem(roomId!, kind, label); if (error) throw error; added = true;
+    const rows = await load();
+    if (thenVote) {
+      const added = rows?.find(option => option.label.trim() === label.trim());
+      if (!added) throw Error('Candidate unavailable');
+      const voteError = await toggleVote(roomId!, added.id); if (voteError) throw voteError;
+      await load(); onVoted?.();
     }
-    setDraft('');
-    void load();
-  };
+    showToast({ message: '후보에 추가했어요' });
+  }, () => added && thenVote ? '후보는 추가됐지만 투표하지 못했어요. 추가된 후보에서 다시 투표해 주세요.' : '후보를 추가하지 못했어요. 목록을 확인하고 다시 시도해 주세요.'); };
+  const discard = (option: VotingOption) => void mutate(async () => {
+    const error = await removeVotingItem(roomId!, option.id); if (error) throw error; await load();
+  }, '후보를 지우지 못했어요. 다시 시도해 주세요.');
 
-  /* 표가 가장 많은 후보. 동률이면 먼저 추가된 쪽이 앞에 온다. */
   const leader = pickLeadingVoteOption(options);
-  const leaderHasMajority = leader !== null && hasStrictVoteMajority(leader.voters.length, memberCount);
-
+  const majority = leader !== null && hasStrictVoteMajority(leader.voters.length, memberCount);
+  // Only confirmed_menu proves the vote RPC succeeded. location_name may be a general location.
   const canConfirm = isOwner && (kind !== 'menu' || stage === 'place');
+  useEffect(() => { if (!canConfirm) { setConfirmationOpen(false); setPlan(null); setConfirmationError(null); } }, [canConfirm]);
+  const retry = Boolean(savedRestaurant || plan?.voteSaved);
+  const confirmationHint = retry ? '저장한 식당으로 약속 단계만 다시 전환해요' : !leader ? '정할 식당이 아직 없어요' : !majority ? '과반수 표가 필요해요' : '고른 식당을 확인한 뒤 약속을 확정해요';
   const startConfirmation = () => {
-    if (!canConfirm || busy || loading) return;
-    if (!plan?.voteSaved) {
-      if (!leader || !leaderHasMajority) return;
+    if (!canConfirm || busy || (!retry && (loading || loadError))) return;
+    if (savedRestaurant) setPlan({ id: null, label: savedRestaurant, voteSaved: true });
+    else if (!plan?.voteSaved) {
+      if (!leader || !majority) return;
       setPlan({ id: leader.id, label: leader.label, voteSaved: false });
     }
     Keyboard.dismiss(); setConfirmationError(null); setConfirmationOpen(true);
   };
   const confirmPlan = async () => {
     if (!canConfirm || !roomId || !plan || operation.current) return;
-    operation.current = true; setBusy(true); setConfirmationError(null);
-    let voteSaved = plan.voteSaved;
+    operation.current = true; setBusy(true); setConfirmationError(null); let voteSaved = plan.voteSaved;
     try {
       if (!voteSaved) {
+        if (!plan.id) return;
         const error = await confirmRoomVote(roomId, plan.id);
-        if (error) { setConfirmationError('식당 선택을 저장하지 못했어요. 투표를 확인하고 다시 시도해 주세요.'); return; }
+        if (error) { setConfirmationError('식당 선택을 저장하지 못했어요. 투표를 확인하고 다시 시도해 주세요.'); onVoted?.(); return; }
         voteSaved = true; setPlan({ ...plan, voteSaved: true });
       }
       if (kind === 'menu') {
@@ -192,294 +138,135 @@ export default function VotingSheet({
         if (error) { setConfirmationError('식당은 저장됐지만 약속을 확정하지 못했어요. 다시 시도해 주세요.'); return; }
       }
       setConfirmationOpen(false); setPlan(null); onConfirm(); onClose();
-    } catch {
-      setConfirmationError(voteSaved ? '식당은 저장됐지만 약속을 확정하지 못했어요. 다시 시도해 주세요.' : '식당 선택을 저장하지 못했어요. 투표를 확인하고 다시 시도해 주세요.');
-    } finally { operation.current = false; setBusy(false); }
+    } catch { setConfirmationError(voteSaved ? '식당은 저장됐지만 약속을 확정하지 못했어요. 다시 시도해 주세요.' : '식당 선택을 저장하지 못했어요. 투표를 확인하고 다시 시도해 주세요.'); }
+    finally { operation.current = false; setBusy(false); }
   };
+  // A refreshed room can recover an already-confirmed vote even after this component was remounted.
+  useEffect(() => {
+    if (savedRestaurant && confirmationOpen) { setPlan({ id: null, label: savedRestaurant, voteSaved: true }); setConfirmationError(null); }
+  }, [savedRestaurant, confirmationOpen]);
 
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={() => { if (!busy) { if (confirmationOpen) setConfirmationOpen(false); else onClose(); } }}>
-    <SafeAreaProvider>
+  const openSuggestions = restaurantLocked ? [] : suggestions.filter(item => !options.some(option => option.label.trim() === item.label.trim()));
+  const noCandidates = options.length === 0 && openSuggestions.length === 0;
+  const openAdding = () => { if (restaurantLocked) return; Keyboard.dismiss(); setActionError(null); setAdding(true); };
+  const close = () => { if (busy) return; if (confirmationOpen) setConfirmationOpen(false); else if (adding) { setAdding(false); setActionError(null); } else onClose(); };
+  const buttonLabel = retry ? '약속 확정 다시 시도' : leader ? leader.label + '으로 정하기' : '정할 식당이 아직 없어요';
+  const footer = !adding ? <View style={styles.footer}>
+    {restaurantLocked ? null : isOwner ? noCandidates && (suggestionStatus === 'error' || suggestionStatus === 'empty') ? null : <View style={styles.hintRow}><Crown size={14} color={colors.sub} /><Text style={styles.hint}>방장이 가장 많은 표를 받은 곳으로 정할 수 있어요.</Text></View>
+      : <View style={styles.mateHint}><Crown size={18} color={colors.sub} /><Text style={styles.mateHintText}>방장이 확정해요. 그동안 투표를 바꿀 수 있어요.</Text></View>}
+    {canConfirm ? <>{retry || (leader && !majority) ? <Text style={styles.hint} accessibilityLiveRegion="polite">{confirmationHint}</Text> : null}<Button label={buttonLabel} testID="voting-confirm-cta" accessibilityHint={confirmationHint}
+      disabled={busy || (!retry && (loading || loadError || !majority))} onPress={startConfirmation} /></> : null}
+  </View> : null;
+
+  return <Modal visible={visible} transparent animationType="fade" onRequestClose={close}><SafeAreaProvider>
     {confirmationOpen && plan ? <PlanConfirmation restaurant={plan.label} when={meetingTimeLabel(confirmedSlot, stage)} memberCount={participantCount ?? memberCount}
-      busy={busy} error={confirmationError} retry={plan.voteSaved} onCancel={() => setConfirmationOpen(false)} onConfirm={() => void confirmPlan()} />
-      : <VotingFrame title={title} onClose={() => { if (!busy) onClose(); }}>
-
-      {openSuggestions.length > 0 ? (
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>{suggestionTitle ?? 'AI 추천'}</Text>
-
-          {openSuggestions.map((item, i) => (
-            <View key={item.label} style={styles.suggestRow}>
-              <Text style={styles.suggestRank}>{i + 1}.</Text>
-
-              <Text style={styles.suggestLabel} numberOfLines={1}>
-                {item.label}
-              </Text>
-
-              <Text style={styles.suggestMatch} numberOfLines={1}>
-                메이트들의 취향과 {item.matchPercent}% 일치합니다!
-              </Text>
-
-              <Pressable
-                disabled={busy}
-                hitSlop={s(6)}
-                onPress={() => void addSuggestion(item.label)}>
-                <Text style={styles.suggestAdd}>＋ 추가</Text>
-              </Pressable>
-            </View>
-          ))}
-        </View>
-      ) : null}
-
-      <View style={styles.section}>
-        <Text style={styles.sectionLabel}>{subtitle}</Text>
-      </View>
-
-      {loading ? (
-        <Text style={styles.notice}>불러오는 중...</Text>
-      ) : options.length === 0 ? (
-        <Text style={styles.notice}>아직 후보가 없어요. 아래에서 추가해 보세요.</Text>
-      ) : (
-        options.map((option) => (
-          <Pressable
-            key={option.id}
-            style={[styles.row, option.mine && styles.rowOn]}
-            disabled={busy}
-            onPress={() => void vote(option)}>
-            <Text style={[styles.label, option.mine && styles.accent]} numberOfLines={1}>
-              {option.label}
-            </Text>
-
-            <View style={styles.voterStack}>
-              {option.voters.slice(0, 3).map((voter, i) => (
-                <View
-                  key={`${option.id}-${i}`}
-                  style={[
-                    styles.voterDot,
-                    i > 0 && styles.voterOverlap,
-                    { backgroundColor: voter.color },
-                  ]}>
-                  <Text style={styles.voterInitial}>{[...voter.name.trim()][0] ?? '?'}</Text>
-                </View>
-              ))}
-            </View>
-
-            <Text style={[styles.count, option.mine && styles.accent]}>
-              {option.voters.length}표
-            </Text>
-
-            {/* 올린 사람과 방장만 지울 수 있다 — 아니면 서버가 막는다 */}
-            <Pressable
-              style={styles.remove}
-              disabled={busy}
-              hitSlop={s(6)}
-              onPress={() => void discard(option)}>
-              <X size={s(8)} color={colors.textMuted} strokeWidth={2.5} />
-            </Pressable>
-          </Pressable>
-        ))
-      )}
-
-      <View style={styles.addRow}>
-        <TextInput
-          style={styles.addInput}
-          value={draft}
-          onChangeText={setDraft}
-          placeholder={placeholder}
-          placeholderTextColor={colors.placeholder}
-          onSubmitEditing={() => void add()}
-        />
-        <Pressable
-          style={[styles.addButton, (!draft.trim() || busy) && styles.addButtonOff]}
-          disabled={!draft.trim() || busy}
-          onPress={() => void add()}>
-          <Text style={styles.addButtonText}>추가</Text>
-        </Pressable>
-      </View>
-
-      {canConfirm ? <CompleteButton label={plan?.voteSaved ? '약속 확정 다시 시도' : kind === 'menu' ? '약속 확정' : '이걸로 정하기'}
-        style={styles.cta} disabled={busy || loading || (!plan?.voteSaved && (!leader || !leaderHasMajority))} onPress={startConfirmation} /> : null}
-
-    </VotingFrame>}
-    </SafeAreaProvider></Modal>
-  );
+      busy={busy} error={confirmationError} retry={plan.voteSaved} onCancel={close} onConfirm={() => void confirmPlan()} />
+      : <VotingFrame title={adding ? (kind === 'menu' ? '식당 직접 추가' : '시간 직접 추가') : title}
+        subtitle={adding ? (kind === 'menu' ? '가고 싶은 곳을 검색해서 후보에 올려요.' : '추가할 시간을 입력해 주세요.') : subtitle}
+        closeLabel={adding ? (kind === 'menu' ? '식당 직접 추가 닫기' : '시간 직접 추가 닫기') : (kind === 'menu' ? '식당 시트 닫기' : '시간 시트 닫기')}
+        onClose={close} footer={footer}>
+        {restaurantLocked ? <Text style={styles.savedNotice} accessibilityLiveRegion="polite">식당이 정해졌어요. 방장이 약속을 확정하면 끝나요</Text> : null}
+        {actionError ? <Text accessibilityRole="alert" style={styles.error}>{actionError}</Text> : null}
+        {adding ? <>
+          <View style={styles.searchField}><TextField style={styles.searchInput} label={kind === 'menu' ? '식당 검색' : '추가할 시간'} value={query} onChangeText={value => { setQuery(value); if (kind === 'menu' && value.trim().length >= 2) { setResults([]); setSearchState('loading'); } }} placeholder={placeholder} editable={!busy && !restaurantLocked}
+            inputAccessory={<Pressable style={styles.iconButton} accessibilityRole="button" accessibilityLabel="검색어 지우기" disabled={busy} onPress={() => setQuery('')}><X size={18} color={colors.sub} /></Pressable>} /><Search size={18} color={colors.sub} style={styles.searchIcon} /></View>
+          {searchState === 'loading' ? <Text style={styles.note}>검색하는 중이에요</Text> : null}
+          {searchState === 'error' ? <FailureCard title="식당을 검색하지 못했어요" reason="잠시 후 다시 시도하거나 식당 이름을 직접 추가해 주세요." icon={<MapPin size={28} color={colors.selectedText} />} onRetry={() => setSearchRequest(n => n + 1)} /> : null}
+          {searchState === 'ready' && results.length === 0 ? <Text style={styles.note}>검색 결과가 없어요. 식당 이름을 확인해 주세요.</Text> : null}
+          <View>{results.map(place => { const exists = options.some(option => option.label.trim() === place.name.trim()); return <View key={place.id} style={styles.result}>
+            <MapPin size={20} color={colors.sub} /><View style={styles.resultText}><Text style={styles.resultName}>{place.name}</Text><Text style={styles.note}>{[place.address, exists ? '후보에 있음' : ''].filter(Boolean).join(' · ')}</Text></View>
+            <Pressable accessibilityRole="button" accessibilityLabel={place.name + (exists ? ' 추가됨' : ' 추가')} accessibilityState={{ disabled: exists || busy || restaurantLocked }} disabled={exists || busy || restaurantLocked}
+              onPress={() => add(place.name)} style={[styles.resultAdd, exists && styles.inactive]}><Text style={styles.resultAddText}>{exists ? '✓ 추가됨' : '추가'}</Text></Pressable>
+          </View>; })}</View>
+          {query.trim() && searchState !== 'loading' ? <Button label="이 이름으로 후보 추가" variant="secondary" disabled={busy || options.some(option => option.label.trim() === query.trim())} onPress={() => add(query.trim())} /> : !query.trim() ? <Text style={styles.note}>{kind === 'menu' ? '식당 이름을 두 글자 이상 입력해 주세요.' : '추가할 시간을 입력해 주세요.'}</Text> : null}
+          {/* TODO(서버 단계): 후보에는 이름만 저장된다. 검색 주소/사진/가격/거리와 AI 출처 저장 계약은 없다. */}
+        </> : <>
+          {loading ? <Text style={styles.note}>후보를 불러오는 중이에요</Text> : loadError ? <FailureCard title="후보를 불러오지 못했어요" reason="잠시 후 다시 시도해 주세요." icon={<MapPin size={28} color={colors.sub} />} onRetry={() => void load()} /> : null}
+          {!loading && !loadError ? options.map(option => <CandidateRow key={option.id} option={option} highlighted={leader?.id === option.id && option.voters.length > 0} participants={participants}
+            suggestion={suggestions.find(item => item.label.trim() === option.label.trim())} busy={busy || restaurantLocked} onVote={() => vote(option)}
+            onRemove={isOwner || (Boolean(myId) && option.createdBy === myId) ? () => discard(option) : undefined} />) : null}
+          {!loadError ? openSuggestions.map(item => <CandidateRow key={'ai-' + item.label} option={{ id: item.label, kind, label: item.label, createdBy: null, voters: [], mine: false }}
+            suggestion={item} pendingAddition participants={participants} busy={busy || loading} onVote={() => add(item.label, true)} />) : null}
+          {!restaurantLocked && (suggestionStatus === 'error' || suggestionStatus === 'empty') ? <View style={styles.failure}>
+            <View style={styles.failureIcon}><MapPin size={28} color={colors.selectedText} /></View><Text style={styles.failureTitle}>{suggestionStatus === 'empty' ? '근처에서 찾은 곳이 없어요' : '추천을 불러오지 못했어요'}</Text>
+            <Text style={styles.failureNote}>{suggestionReason || (suggestionStatus === 'empty' ? '아는 식당을 직접 추가해 주세요.' : '추천을 불러오지 못했어요. 다시 시도해 주세요.') }</Text>
+            {suggestionStatus === 'error' ? <Button label="다시 시도" style={styles.retry} onPress={onRequestSuggestions} disabled={!onRequestSuggestions} /> : null}
+          </View> : !restaurantLocked && suggestionStatus === 'loading' ? <Text style={styles.note} accessibilityLiveRegion="polite">AI가 식당을 찾고 있어요</Text> : !restaurantLocked && suggestionReason ? <Text style={styles.note}>{suggestionReason}</Text> : !restaurantLocked && noCandidates && !loading && !loadError ? <Text style={styles.note}>아직 후보가 없어요. 직접 추가해 주세요.</Text> : null}
+          <View style={styles.addRow}><AddAction label="직접 추가" Icon={Plus} onPress={openAdding} disabled={busy || restaurantLocked} />
+            {kind === 'menu' && (restaurantLocked || (suggestionStatus !== 'error' && suggestionStatus !== 'empty')) && onRequestSuggestions ? <AddAction label={receivedMore ? 'AI 추천을 받았어요' : 'AI 추천 더 받기'} Icon={Sparkles} accent onPress={onRequestSuggestions} disabled={busy || restaurantLocked || suggestionStatus === 'loading' || suggestionStatus === 'unavailable' || receivedMore} /> : null}</View>
+        </>}
+      </VotingFrame>}
+    <Toast {...toastProps} bottom={Math.max(16, height - 164)} />
+  </SafeAreaProvider></Modal>;
 }
 
-/** One Modal switches its content, avoiding iOS sheet/dialog presentation overlap. */
-function VotingFrame({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  const insets = useSafeAreaInsets(); const root = useRef<View>(null);
-  const { overlap, remeasure } = useKeyboardOverlap(root);
-  return <View ref={root} onLayout={remeasure} style={[frameStyles.root, { paddingTop: insets.top, paddingBottom: overlap }]}>
-    <Pressable accessible={false} style={frameStyles.scrim} onPress={onClose} />
-    <View style={[frameStyles.sheet, { paddingBottom: 24 + (overlap > 0 ? 0 : insets.bottom) }]} accessibilityViewIsModal aria-modal>
-      <View style={frameStyles.handle} /><View style={frameStyles.heading}><Text style={frameStyles.title}>{title}</Text><Pressable accessibilityRole="button" accessibilityLabel="식당 시트 닫기" onPress={onClose} style={frameStyles.close}><X size={24} color={v3Colors.ink} /></Pressable></View>
-      <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>{children}</ScrollView>
+function CandidateRow({ option, pendingAddition = false, highlighted = false, suggestion, participants, busy, onVote, onRemove }: { option: VotingOption; pendingAddition?: boolean; highlighted?: boolean; suggestion?: RestaurantSuggestion; participants: RoomParticipant[]; busy: boolean; onVote: () => void; onRemove?: () => void }) {
+  return <View style={[styles.candidate, highlighted && styles.candidateSelected, suggestion?.fresh && styles.candidateFresh]}>
+    {/* TODO(서버 단계): 식당 사진·도보 거리·가격 값이 없다. 임의 이미지나 숫자를 표시하지 않는다. */}
+    <View style={styles.candidateText}><View style={styles.nameRow}><Text style={styles.candidateName}>{option.label}</Text>
+      {suggestion ? <View style={styles.aiBadge}><Sparkles size={11} color={colors.selectedText} /><Text style={styles.aiLabel}>{suggestion.fresh ? 'AI 새 추천' : 'AI 추천'}</Text></View> : null}</View>
+      <View style={styles.voters}><View style={styles.avatarStack}>{option.voters.slice(0, 3).map((voter, index) => {
+        // Voter IDs are absent in the existing contract. Only use a unique name match for a saved photo.
+        const matching = participants.filter(member => member.name === voter.name);
+        const person = matching.length === 1 ? matching[0] : null;
+        return <View key={index} style={[styles.voterAvatar, index > 0 && styles.avatarOverlap]}><Avatar name={voter.name} url={person?.avatarUrl} seed={person?.profileId ?? voter.name} size={18} /></View>;
+      })}</View><Text style={[styles.votes, option.voters.length === 0 && styles.note]}>{option.voters.length ? option.voters.length + '표' : '아직 표 없음'}</Text></View>
+    </View>
+    <VoteToggle label={option.label} selected={option.mine} disabled={busy} onPress={onVote} hint={pendingAddition ? '후보에 추가하고 투표해요' : undefined} />
+    {onRemove ? <Pressable style={styles.iconButton} disabled={busy} accessibilityRole="button" accessibilityLabel={option.label + ' 후보 삭제'} onPress={onRemove}><Trash2 size={18} color={colors.sub} /></Pressable> : null}
+  </View>;
+}
+function AddAction({ label, Icon, onPress, disabled, accent = false }: { label: string; Icon: typeof Plus; onPress: () => void; disabled?: boolean; accent?: boolean }) {
+  return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={[styles.addAction, disabled && styles.inactive]}>
+    <Icon size={16} color={accent ? colors.selectedText : colors.ink} /><Text style={[styles.addLabel, accent && styles.accent]}>{label}</Text>
+  </Pressable>;
+}
+/** One Modal switches its content; the protected shared BottomSheet needs no API changes. */
+function VotingFrame({ title, subtitle, closeLabel, onClose, children, footer }: { title: string; subtitle: string; closeLabel: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
+  const insets = useSafeAreaInsets(); const rootRef = useRef<View>(null); const { overlap, remeasure } = useKeyboardOverlap(rootRef);
+  return <View ref={rootRef} onLayout={remeasure} style={[styles.root, { paddingTop: insets.top, paddingBottom: overlap }]}>
+    <Pressable accessible={false} importantForAccessibility="no" aria-hidden style={styles.scrim} onPress={onClose} />
+    <View testID="voting-sheet" style={[styles.sheet, { paddingBottom: 24 + (overlap > 0 ? 0 : insets.bottom) }]} accessibilityViewIsModal aria-modal>
+      <View style={styles.handle} /><View style={styles.heading}><View style={styles.headingText}><Text accessibilityRole="header" style={styles.title}>{title}</Text><Text style={styles.subtitle}>{subtitle}</Text></View>
+        <Pressable accessibilityRole="button" accessibilityLabel={closeLabel} onPress={onClose} style={styles.iconButton}><X size={24} color={colors.ink} /></Pressable></View>
+      <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={styles.body}>{children}</ScrollView>{footer}
     </View>
   </View>;
 }
-const frameStyles = StyleSheet.create({
-  root: { flex: 1, justifyContent: 'flex-end' }, scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: v3Colors.ink, opacity: 0.5 },
-  sheet: { maxHeight: '95%', borderTopLeftRadius: 24, borderTopRightRadius: 24, backgroundColor: v3Colors.surface, paddingHorizontal: 20, paddingTop: 8, paddingBottom: 24 },
-  handle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: v3Colors.border },
-  heading: { flexDirection: 'row', alignItems: 'center', gap: 8 }, title: { flex: 1, fontFamily: fontFamily.bold, fontSize: 20, lineHeight: 28, color: v3Colors.ink },
-  close: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-});
-
 const styles = StyleSheet.create({
-  extraAction: {
-    marginTop: s(8),
-    alignItems: 'center',
-  },
-  extraActionText: {
-    fontFamily: fontFamily.bold,
-    fontSize: fs(7),
-    lineHeight: fs(10),
-    color: colors.primary,
-  },
-  extraActionTextOff: {
-    color: colors.textMuted,
-  },
-  notice: {
-    marginTop: s(18),
-    marginBottom: s(6),
-    textAlign: 'center',
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    color: colors.textMuted,
-  },
-  row: {
-    marginTop: s(8),
-    height: s(26),
-    borderRadius: s(8),
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    paddingHorizontal: s(10),
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: s(8),
-  },
-  rowOn: {
-    backgroundColor: TINT,
-    borderColor: colors.primary,
-  },
-  label: {
-    flex: 1,
-    fontFamily: fontFamily.semibold,
-    fontSize: fs(8),
-    color: colors.textPrimary,
-  },
-  accent: {
-    color: colors.primary,
-  },
-  voterStack: {
-    flexDirection: 'row',
-  },
-  voterDot: {
-    width: s(13),
-    height: s(13),
-    borderRadius: s(999),
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.surface,
-  },
-  voterOverlap: {
-    marginLeft: s(-4),
-  },
-  voterInitial: {
-    fontFamily: fontFamily.bold,
-    fontSize: fs(5.5),
-    color: colors.textOnAccent,
-  },
-  section: {
-    marginTop: s(8),
-    gap: s(5),
-  },
-  sectionLabel: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(9),
-    color: colors.textMuted,
-  },
-  /* 시안 Option 행 — h30 radius7, 주황 테두리 */
-  suggestRow: {
-    height: s(30),
-    borderRadius: s(7),
-    borderWidth: s(0.8),
-    borderColor: colors.primary,
-    backgroundColor: colors.card,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: s(6),
-    gap: s(5),
-  },
-  suggestRank: {
-    fontFamily: fontFamily.semibold,
-    fontSize: fs(7),
-    color: colors.primary,
-  },
-  suggestLabel: {
-    fontFamily: fontFamily.semibold,
-    fontSize: fs(7),
-    color: colors.textPrimary,
-  },
-  suggestMatch: {
-    flex: 1,
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    color: colors.textMuted,
-  },
-  suggestAdd: {
-    fontFamily: fontFamily.semibold,
-    fontSize: fs(6.5),
-    color: colors.primary,
-  },
-  remove: {
-    marginLeft: s(4),
-    padding: s(2),
-  },
-  count: {
-    minWidth: s(22),
-    textAlign: 'right',
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    color: colors.textMuted,
-  },
-  addRow: {
-    marginTop: s(12),
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: s(6),
-  },
-  addInput: {
-    flex: 1,
-    height: s(24),
-    borderRadius: s(8),
-    backgroundColor: colors.surfaceSunken,
-    paddingHorizontal: s(9),
-    paddingVertical: 0,
-    fontFamily: fontFamily.body,
-    fontSize: fs(7.5),
-    color: colors.textPrimary,
-  },
-  addButton: {
-    paddingHorizontal: s(12),
-    height: s(24),
-    borderRadius: s(8),
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  addButtonOff: {
-    opacity: 0.4,
-  },
-  addButtonText: {
-    fontFamily: fontFamily.bold,
-    fontSize: fs(7.5),
-    color: colors.textOnAccent,
-  },
-  cta: {
-    marginTop: s(14),
-  },
+  root: { flex: 1, justifyContent: 'flex-end' }, scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.ink, opacity: 0.5 },
+  sheet: { maxHeight: '95%', borderTopLeftRadius: 24, borderTopRightRadius: 24, backgroundColor: colors.surface, paddingHorizontal: 20, paddingTop: 8, gap: 14 },
+  handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center' },
+  heading: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' }, headingText: { flex: 1, gap: 2 },
+  title: { fontFamily: fontFamily.bold, fontSize: 20, lineHeight: 29, color: colors.ink },
+  subtitle: { fontFamily: fontFamily.body, fontSize: 14, lineHeight: 20, color: colors.sub },
+  iconButton: { width: v3Layout.minTouchTarget, height: v3Layout.minTouchTarget, alignItems: 'center', justifyContent: 'center' },
+  body: { gap: 14 }, footer: { gap: 14 }, hintRow: { flexDirection: 'row', gap: 6, alignItems: 'center' },
+  hint: { flexShrink: 1, fontFamily: fontFamily.body, fontSize: 13, lineHeight: 19, color: colors.sub },
+  mateHint: { backgroundColor: colors.mutedBg, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  mateHintText: { flex: 1, fontFamily: fontFamily.medium, fontSize: 14, lineHeight: 20, color: colors.sub },
+  note: { fontFamily: fontFamily.body, fontSize: 12, lineHeight: 18, color: colors.sub },
+  savedNotice: { fontFamily: fontFamily.medium, fontSize: 14, lineHeight: 20, color: colors.selectedText, backgroundColor: colors.selectedBg, padding: 12, borderRadius: 12 },
+  error: { fontFamily: fontFamily.medium, fontSize: 14, lineHeight: 20, color: v3FeedbackColors.error },
+  candidate: { minHeight: 92, flexDirection: 'row', alignItems: 'center', padding: 12, gap: 12, borderWidth: 1, borderRadius: 16, borderColor: colors.border, backgroundColor: colors.surface },
+  candidateSelected: { borderWidth: 2, borderColor: colors.primary, backgroundColor: chatFeedbackColors.candidateBackground },
+  candidateFresh: { borderWidth: 1.5, borderColor: colors.primary }, candidateText: { flex: 1, minWidth: 0, gap: 4 },
+  nameRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 },
+  candidateName: { fontFamily: fontFamily.bold, fontSize: 16, lineHeight: 23, color: colors.ink, flexShrink: 1 },
+  aiBadge: { borderRadius: 10, backgroundColor: colors.selectedBg, paddingHorizontal: 7, paddingVertical: 2, flexDirection: 'row', alignItems: 'center', gap: 3 },
+  aiLabel: { fontFamily: fontFamily.bold, fontSize: 12, lineHeight: 18, color: colors.selectedText },
+  voters: { flexDirection: 'row', alignItems: 'center', gap: 6 }, avatarStack: { flexDirection: 'row' },
+  voterAvatar: { width: 22, height: 22, borderWidth: 2, borderColor: colors.surface, borderRadius: 11, backgroundColor: colors.mutedBg, overflow: 'hidden' }, avatarOverlap: { marginLeft: -6 },
+  votes: { fontFamily: fontFamily.bold, fontSize: 12, lineHeight: 18, color: colors.ink },
+  addRow: { flexDirection: 'row', gap: 8 }, addAction: { flex: 1, minHeight: 44, borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  addLabel: { fontFamily: fontFamily.bold, fontSize: 14, lineHeight: 20, color: colors.ink, flexShrink: 1 }, accent: { color: colors.selectedText }, inactive: { opacity: 0.4 },
+  searchField: { position: 'relative' }, searchInput: { paddingLeft: 44, paddingRight: 48 }, searchIcon: { position: 'absolute', left: 14, top: 43 },
+  result: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 }, resultText: { flex: 1 },
+  resultName: { fontFamily: fontFamily.bold, fontSize: 15, lineHeight: 22, color: colors.ink },
+  resultAdd: { minWidth: 44, minHeight: 44, paddingHorizontal: 12, borderRadius: 10, backgroundColor: colors.selectedBg, alignItems: 'center', justifyContent: 'center' },
+  resultAddText: { fontFamily: fontFamily.bold, fontSize: 13, lineHeight: 19, color: colors.selectedText },
+  failure: { alignItems: 'center', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 24, gap: 12 },
+  failureIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: colors.selectedBg, alignItems: 'center', justifyContent: 'center' },
+  failureTitle: { fontFamily: fontFamily.bold, fontSize: 18, lineHeight: 26, color: colors.ink, textAlign: 'center' },
+  failureNote: { fontFamily: fontFamily.body, fontSize: 14, lineHeight: 20, color: colors.sub, textAlign: 'center' }, retry: { alignSelf: 'stretch', marginTop: 12 },
 });

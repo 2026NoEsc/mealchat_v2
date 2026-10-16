@@ -44,7 +44,7 @@ import { fontFamily } from '../../theme/typography';
 import { MembersSheet, SettlementSheet } from './ChatRoomSheets';
 import EmoticonPanel, { findSticker } from './EmoticonPanel';
 import ScheduleSheet from './ScheduleSheet';
-import VotingSheet from './VotingSheet';
+import VotingSheet, { type RecommendationStatus, type RestaurantSuggestion } from './VotingSheet';
 
 type Message = { key: string } & (
   | { kind: 'date'; text: string }
@@ -167,6 +167,10 @@ export function toDisplayMessages(
 }
 
 type SheetKey = 'schedule' | 'menu' | 'settlement' | 'members' | null;
+type SuggestionState = { key: string; roomId: string | null; status: RecommendationStatus; items: RestaurantSuggestion[]; reason?: string; receivedMore: boolean };
+type RecommendationCache = { current: Map<string, { sequence: number; state: SuggestionState }> };
+// Share requests across room re-entry while the same signed-in user object is alive.
+const recommendationSessions = new WeakMap<object, RecommendationCache>();
 
 /**
  * Figma 채팅/채팅방 (315:4324) — 220 x 486
@@ -209,66 +213,85 @@ export default function ChatRoomScreen() {
   // 홈의 "미완료 정산 보기" 처럼 특정 시트를 펼친 채로 들어오는 경로가 있다
   const stage = room?.stage ?? 'scheduling';
 
-  /*
-   * 식당 결정 단계에서 AI 추천을 미리 받아 둔다. 시트를 열 때마다 부르면
-   * 열 때마다 몇 초씩 기다려야 하고, Gemini 호출도 그만큼 늘어난다.
-   */
-  const [suggestions, setSuggestions] = useState<
-    { label: string; matchPercent: number }[]
-  >([]);
-
+  const recommendationKey = JSON.stringify([user?.id ?? null, roomId]);
+  const restaurantLocked = stage === 'place' && Boolean(room?.confirmedMenu?.trim());
+  const [suggestionRequest, setSuggestionRequest] = useState({ key: '', sequence: 0 });
+  const [suggestionState, setSuggestionState] = useState<SuggestionState>({ key: recommendationKey, roomId, status: 'idle', items: [], receivedMore: false });
+  const recommendationUser = useRef(user);
+  if (recommendationUser.current?.id !== user?.id) recommendationUser.current = user;
+  const sessionUser = recommendationUser.current;
+  const recommendationCache = useMemo(() => {
+    const existing = sessionUser ? recommendationSessions.get(sessionUser) : undefined;
+    if (existing) return existing;
+    const cache: RecommendationCache = { current: new Map() };
+    if (sessionUser) recommendationSessions.set(sessionUser, cache);
+    return cache;
+  }, [sessionUser]);
+  const origin = bundle?.privateProfile;
+  const originReady = typeof origin?.startLat === 'number' && Number.isFinite(origin.startLat) && typeof origin?.startLng === 'number' && Number.isFinite(origin.startLng);
+  const recommendationInput = useRef({ lat: origin?.startLat, lng: origin?.startLng, name: origin?.startLocationName, members: room?.participants, title });
+  recommendationInput.current = { lat: origin?.startLat, lng: origin?.startLng, name: origin?.startLocationName, members: room?.participants, title };
+  const requestSequence = suggestionRequest.key === recommendationKey ? suggestionRequest.sequence : 0;
   useEffect(() => {
-    /* 식당을 고르는 단계에서만, 그리고 한 번만 부른다 */
-    if (stage !== 'place' || !roomId || suggestions.length > 0) return;
-
-    const profile = bundle?.privateProfile;
-    if (!profile?.startLat || !profile?.startLng) return;
-
+    if (stage !== 'place' || !roomId || restaurantLocked) return;
+    const cache = recommendationCache.current;
+    const previous = cache.get(recommendationKey);
+    // Changing participants, title or origin cannot trigger another automatic request for this room.
+    if (previous && previous.sequence >= requestSequence) {
+      const cached = { ...previous.state, items: previous.state.items.map(item => ({ ...item, fresh: false })), receivedMore: false };
+      cache.set(recommendationKey, { sequence: previous.sequence, state: cached });
+      setSuggestionState(cached); return;
+    }
+    if (!originReady) {
+      setSuggestionState({ key: recommendationKey, roomId, status: 'unavailable', items: [], reason: '프로필 출발지를 설정하면 AI 추천을 받을 수 있어요. 식당을 직접 추가할 수도 있어요.', receivedMore: false });
+      return;
+    }
+    const input = recommendationInput.current;
     let active = true;
-
+    const update = (state: SuggestionState) => {
+      cache.set(recommendationKey, { sequence: requestSequence, state });
+      if (active) setSuggestionState(state);
+    };
+    const base = { key: recommendationKey, roomId, items: (previous?.state.items ?? []).map(item => ({ ...item, fresh: false })), receivedMore: false };
+    update({ ...base, status: 'loading' });
+    const empty = () => update({ ...base, status: 'empty', reason: '아는 식당을 직접 추가해 주세요.' });
     void (async () => {
       try {
-        const memberIds = (room?.participants ?? [])
-          .map((participant) => participant.profileId)
-          .filter((id): id is string => Boolean(id));
-
-        const candidates = await buildPlaceCandidates(memberIds, {
-          name: profile.startLocationName?.trim() || '사는 곳',
-          address: '',
-          lat: profile.startLat!,
-          lng: profile.startLng!,
-          fromGps: false,
-        });
-
-        if (!active || !candidates || candidates.candidates.length === 0) return;
-
-        const { data, error } = await supabase.functions.invoke('schedule-recommend', {
-          body: { meetingName: title, roomId, placeCandidates: candidates.candidates },
-        });
-
-        if (!active || error) return;
-
+        const memberIds = (input.members ?? []).map(member => member.profileId).filter((id): id is string => Boolean(id));
+        const candidates = await buildPlaceCandidates(memberIds, { name: input.name?.trim() || '사는 곳', address: '', lat: input.lat!, lng: input.lng!, fromGps: false });
+        if (!active) return;
+        if (!candidates || candidates.candidates.length === 0) { empty(); return; }
+        const { data, error } = await supabase.functions.invoke('schedule-recommend', { body: { meetingName: input.title, roomId, placeCandidates: candidates.candidates } });
+        if (!active) return;
+        if (error) throw error;
         const response = data as ScheduleRecommendResponse;
-        if (!Array.isArray(response?.placeRecommendations)) return;
-
-        setSuggestions(
-          [...response.placeRecommendations]
-            .sort((a, b) => a.rank - b.rank)
-            .map((pick) => ({
-              label: pick.place.name,
-              matchPercent: Math.round(pick.score),
-            })),
-        );
-      } catch (error) {
-        /* 추천이 없어도 직접 후보를 올릴 수 있다 — 화면을 막지 않는다 */
-        console.warn('place suggestion failed:', error);
+        if (!Array.isArray(response?.placeRecommendations)) throw Error('Invalid recommendations');
+        if (response.placeRecommendations.length === 0) { empty(); return; }
+        const allowed = new Set(candidates.candidates.map(place => place.name.trim()));
+        const picks = response.placeRecommendations.filter(pick => typeof pick?.place?.name === 'string' && allowed.has(pick.place.name.trim())).sort((a, b) => a.rank - b.rank);
+        if (picks.length === 0) throw Error('Invalid restaurant recommendations');
+        const existing = new Set(base.items.map(item => item.label)); const items = [...base.items];
+        for (const pick of picks) {
+          const label = pick.place.name.trim();
+          if (!existing.has(label)) { existing.add(label); items.push({ label, fresh: requestSequence > 0 }); }
+        }
+        const receivedMore = requestSequence > 0 && items.some(item => item.fresh);
+        update({ ...base, status: 'ready', items, receivedMore, reason: requestSequence > 0 && !receivedMore ? '새로운 식당을 찾지 못했어요. 기존 후보에 투표하거나 직접 추가해 주세요.' : undefined });
+      } catch {
+        if (active) update({ ...base, status: 'error', reason: '추천을 불러오지 못했어요. 다시 시도해 주세요.' });
       }
     })();
-
     return () => {
       active = false;
+      const pending = cache.get(recommendationKey);
+      if (pending?.state.status === 'loading') cache.set(recommendationKey, { sequence: requestSequence, state: { ...base, status: 'idle', reason: 'AI 추천 더 받기를 눌러 추천을 다시 요청할 수 있어요.' } });
     };
-  }, [stage, roomId, room, bundle, title, suggestions.length]);
+  }, [stage, roomId, restaurantLocked, recommendationKey, originReady, requestSequence, recommendationCache]);
+  const currentSuggestions = suggestionState.key === recommendationKey ? suggestionState : { status: 'idle' as const, items: [], receivedMore: false, reason: undefined };
+  const requestSuggestions = () => {
+    if (restaurantLocked || currentSuggestions.status === 'loading') return;
+    setSuggestionRequest({ key: recommendationKey, sequence: (recommendationCache.current.get(recommendationKey)?.sequence ?? 0) + 1 });
+  };
 
   const isOwner = Boolean(user?.id && room?.ownerId && user.id === room.ownerId);
 
@@ -304,11 +327,15 @@ export default function ChatRoomScreen() {
 
   // [결정] 기존 알림 행동을 유지한다. Figma의 칩 아래에 44px 행동 배지를 복원한다.
   const onNoticeAction = useCallback((kind: RoomNotice['kind']) => {
-    if (kind === 'place') { setSheet('menu'); return; }
+    if (kind === 'place') {
+      if (stage === 'place') setSheet('menu');
+      else navigate('RoomDetail', { roomId, title });
+      return;
+    }
     if (kind === 'settlement') { setSheet('settlement'); return; }
     // TODO(서버 단계): 실제 캘린더 저장 계약 전에는 기존 준비 안내만 유지한다.
     notify('아직 준비 중이에요', '캘린더 저장은 곧 붙일게요.');
-  }, []);
+  }, [stage, navigate, roomId, title]);
 
   /* 보낸 사람 id 로 프로필 사진을 찾을 수 있게 참가자 목록을 표로 바꿔 둔다 */
   const avatarBySender = useMemo(() => {
@@ -325,9 +352,11 @@ export default function ChatRoomScreen() {
     () => toDisplayMessages(remoteMessages, user?.id ?? null, avatarBySender).reverse(),
     [remoteMessages, user?.id, avatarBySender],
   );
+  const noticeActionRef = useRef(onNoticeAction); noticeActionRef.current = onNoticeAction;
+  const handleNoticeAction = useCallback((kind: RoomNotice['kind']) => noticeActionRef.current(kind), []);
   const renderMessage = useCallback(
-    ({ item }: { item: Message }) => <Row message={item} onAction={onNoticeAction} />,
-    [onNoticeAction],
+    ({ item }: { item: Message }) => <Row message={item} onAction={handleNoticeAction} />,
+    [handleNoticeAction],
   );
 
   const send = async () => {
@@ -402,7 +431,7 @@ export default function ChatRoomScreen() {
         <View style={styles.headerCenter}><View style={styles.headerTitleRow}><Text style={styles.headerTitle} numberOfLines={1}>{title}</Text><View style={styles.countChip}><Text style={styles.countText}>{room ? room.participants.length : '-'}</Text></View></View>{room && (stage === 'settling' || stage === 'done') ? <RoomTimer expiresAt={room.expiresAt} settled={stage === 'done'} /> : null}</View>
         <Pressable onPress={() => navigate('RoomDetail', { roomId, title })} style={styles.iconButton} accessibilityRole="button" accessibilityLabel="방 상세정보"><MoreVertical size={22} color={colors.ink} /></Pressable>
       </View>
-      {room ? <View style={styles.pinned}><MeetingCard compact={panelOpen || keyboard > 0} isOwner={isOwner} slot={room.confirmedSlot} stage={stage} location={room.locationName} memberCount={room.participants.length} onChooseRestaurant={() => chooseAction('menu')} /></View> : null}
+      {room ? <View style={styles.pinned}><MeetingCard compact={panelOpen || keyboard > 0} isOwner={isOwner} confirmedRestaurant={room.confirmedMenu} slot={room.confirmedSlot} stage={stage} location={room.locationName} memberCount={room.participants.length} onChooseRestaurant={() => chooseAction('menu')} /></View> : null}
 
       <FlatList
         ref={scrollRef}
@@ -490,12 +519,18 @@ export default function ChatRoomScreen() {
         stage={stage}
         confirmedSlot={room?.confirmedSlot}
         participantCount={room?.participants.length}
+        confirmedRestaurant={room?.confirmedMenu}
+        participants={room?.participants}
         kind="menu"
         title="식당 정하기"
         subtitle="가고 싶은 식당에 투표해 주세요"
         placeholder="예: 조선칼국수 하단점"
         suggestionTitle="AI 추천 식당"
-        suggestions={suggestions}
+        suggestions={currentSuggestions.items}
+        suggestionStatus={currentSuggestions.status}
+        suggestionReason={currentSuggestions.reason}
+        receivedMore={currentSuggestions.receivedMore}
+        onRequestSuggestions={requestSuggestions}
         onClose={() => setSheet(null)}
         onConfirm={() => {
           reload();

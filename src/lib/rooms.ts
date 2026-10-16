@@ -41,6 +41,8 @@ export type RoomSummary = {
   expiresAt: string;
   meetingDate: string;
   locationName: string | null;
+  /** 기존 confirmed_menu 원본: 일반 위치와 식당 저장 성공을 구분한다. */
+  confirmedMenu?: string | null;
   participants: RoomParticipant[];
   lastMessage: { text: string; senderName: string; createdAt: string } | null;
 };
@@ -229,6 +231,7 @@ export async function fetchMyRooms(): Promise<{
       meetingDate: row.meeting_date,
       /* 메뉴 확정 RPC가 쓴 서버 상태를 표시한다. 클라이언트가 rooms 를 직접 갱신하지 않는다. */
       locationName: row.location_name ?? row.confirmed_menu,
+      confirmedMenu: row.confirmed_menu,
       participants: (row.participants ?? []).map(toParticipant),
       lastMessage: last
         ? { text: last.message, senderName: last.sender_name, createdAt: last.created_at }
@@ -272,6 +275,7 @@ export async function fetchRoom(roomId: string): Promise<{
     expiresAt: data.expires_at,
     meetingDate: data.meeting_date,
     locationName: data.location_name ?? data.confirmed_menu,
+    confirmedMenu: data.confirmed_menu,
     participants: (data.participants ?? []).map(toParticipant),
     lastMessage: null,
   };

@@ -6,7 +6,7 @@ const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const output = path.resolve('tmp/chat-e-render');
+const output = path.resolve('tmp/chat-e-final-review');
 fs.mkdirSync(output, { recursive: true });
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'mealchat-chatE-chrome-'));
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -27,7 +27,10 @@ async function waitFor(expression) {
   for (let attempt = 0; attempt < 200; attempt++) { if (await evaluate(expression)) return; await delay(150); }
   throw new Error('Timed out: ' + expression + ' / ' + await evaluate('document.body.innerText'));
 }
-const element = label => 'document.querySelector(' + JSON.stringify('[aria-label=' + JSON.stringify(label) + ']') + ')';
+const element = label => {
+  const ordinary = 'document.querySelector(' + JSON.stringify('[aria-label=' + JSON.stringify(label) + ']') + ')';
+  return label==='약속 확정' ? '(document.querySelector(' + JSON.stringify('[data-testid=voting-confirm-cta]') + ')||'+ordinary+')' : ordinary;
+};
 async function click(label) {
   await waitFor('Boolean(' + element(label) + ')');
   await evaluate(element(label) + '.click()');
@@ -40,7 +43,7 @@ async function visit(scene, expected) {
   await waitFor('[...document.images].every(image => image.complete && image.naturalWidth > 0)');
 }
 async function capture(name, figma) {
-  console.log('capture',name);await evaluate('document.activeElement?.blur?.()');await delay(120);
+  console.log('capture',name);await delay(250);if(name!=='voting-direct-add')await evaluate('document.activeElement?.blur?.()');
   const metrics = await evaluate('(() => {' +
     'const rect=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return {label:e.getAttribute("aria-label"),role:e.getAttribute("role"),x:r.x,y:r.y,width:r.width,height:r.height,background:s.backgroundColor,color:s.color,border:s.borderTopWidth,radius:s.borderTopLeftRadius,checked:e.getAttribute("aria-checked"),selected:e.getAttribute("aria-selected"),disabled:e.getAttribute("aria-disabled")};};' +
     'const list=document.querySelector("[data-testid=chat-message-list]");const compact=document.querySelector("[data-testid=meeting-card-compact]");return {messageList:list?rect(list):null,compact:compact?rect(compact):null,width:innerWidth,height:innerHeight,overflow:document.documentElement.scrollWidth>innerWidth,text:document.body.innerText,textNodes:[...document.querySelectorAll("[dir=auto]")].filter(e=>e.children.length===0&&e.innerText).map(e=>({...rect(e),text:e.innerText,fontSize:getComputedStyle(e).fontSize,lineHeight:getComputedStyle(e).lineHeight,fontFamily:getComputedStyle(e).fontFamily})),controls:[...document.querySelectorAll("[role=button],[role=radio],[role=checkbox],[role=tab],[role=switch]")].map(rect),inputs:[...document.querySelectorAll("input,textarea")].map(rect),fixtureCalls:window.__chatEFixtureCalls||[]};})()');
@@ -112,15 +115,26 @@ async function main() {
   await visit('time-unset','일정이 정해지면 시작할 수 있어요'); await capture('chat-time-unset','496:1126'); assert.equal(await evaluate(element('식당 정하기')+'.getAttribute("aria-disabled")'),'true'); assert.equal(await evaluate('document.body.innerText.includes("2099")'),false);
   await visit('message-failure','메시지를 불러오지 못했어요'); await capture('message-failure','496:1126'); await click('다시 시도'); await waitFor('!document.body.innerText.includes("메시지를 불러오지 못했어요")');
   await visit('chat','식당을 함께 골라 보세요');await click('약속 확정');await waitFor('document.body.innerText.includes(' + JSON.stringify('가고 싶은 식당에 투표해 주세요') + ')');
-  await evaluate("[...document.querySelectorAll('[aria-label=\"약속 확정\"]')].at(-1).click()");await waitFor('document.body.innerText.includes("약속을 확정할까요?")');await capture('plan-confirmation','540:1812');
+  await evaluate("document.querySelector('[data-testid=voting-confirm-cta]').click()");await waitFor('document.body.innerText.includes("약속을 확정할까요?")');await capture('plan-confirmation','540:1812');
   await click('다시 볼게요');assert.equal(await evaluate('window.__chatEFixtureCalls.some(c=>c.name==="confirmRoomVote")'),false);
-  await evaluate("[...document.querySelectorAll('[aria-label=\"약속 확정\"]')].at(-1).click()");await click('확정하기');await waitFor('window.__chatEFixtureCalls.some(c=>c.name==="advanceRoomStage")');await click('메뉴 펼치기');assert.notEqual(await evaluate(element('N빵 정산')+'.getAttribute("aria-disabled")'),'true');
+  await evaluate("document.querySelector('[data-testid=voting-confirm-cta]').click()");await click('확정하기');await waitFor('window.__chatEFixtureCalls.some(c=>c.name==="advanceRoomStage")');await click('메뉴 펼치기');assert.notEqual(await evaluate(element('N빵 정산')+'.getAttribute("aria-disabled")'),'true');
   let calls=await evaluate('window.__chatEFixtureCalls');assert.ok(calls.findIndex(c=>c.name==='confirmRoomVote')<calls.findIndex(c=>c.name==='advanceRoomStage'));
-  await visit('confirm-retry','식당을 함께 골라 보세요');await click('약속 확정');await waitFor('document.body.innerText.includes("가고 싶은 식당에 투표해 주세요")');await evaluate("[...document.querySelectorAll('[aria-label=\"약속 확정\"]')].at(-1).click()");await click('확정하기');await waitFor('document.body.innerText.includes("식당은 저장됐지만")');await capture('plan-confirmation-retry','540:1812');await click('다시 확정하기');await waitFor('window.__chatEFixtureCalls.filter(c=>c.name==="advanceRoomStage").length===2');calls=await evaluate('window.__chatEFixtureCalls');assert.equal(calls.filter(c=>c.name==='confirmRoomVote').length,1);
+  await visit('confirm-retry','식당을 함께 골라 보세요');await click('약속 확정');await waitFor('document.body.innerText.includes("가고 싶은 식당에 투표해 주세요")');await evaluate("document.querySelector('[data-testid=voting-confirm-cta]').click()");await click('확정하기');await waitFor('document.body.innerText.includes("식당은 저장됐지만")');await capture('plan-confirmation-retry','540:1812');await click('다시 확정하기');await waitFor('window.__chatEFixtureCalls.filter(c=>c.name==="advanceRoomStage").length===2');calls=await evaluate('window.__chatEFixtureCalls');assert.equal(calls.filter(c=>c.name==='confirmRoomVote').length,1);
   await visit('detail-loading','방 상세정보');await capture('detail-loading','528:1525');assert.ok(await evaluate('document.body.innerText.includes("••••••")'));
   await visit('detail-failure','방 정보를 불러오지 못했어요');await capture('detail-failure','528:1525');await click('다시 시도');await waitFor('document.body.innerText.includes("VF4HLD")');
   await visit('settled','방이 사라져요');await capture('chat-timer','496:1202');
   await visit('notice','위치 보기');await capture('chat-notice','496:1126');await click('위치 보기');await waitFor('document.body.innerText.includes("가고 싶은 식당에 투표해 주세요")');
+  await visit('voting-owner','식당 정하기');await waitFor('document.body.innerText.includes("AI 추천")');await capture('voting-owner','540:1524');
+  assert.equal(await evaluate(element('약속 확정')+'.getAttribute("aria-disabled")'),null);
+  await evaluate(element('돼지집 서면점 투표')+'.click()');await waitFor('window.__chatEFixtureCalls.some(c=>c.name==="toggleVote")');assert.equal(await evaluate(element('돼지집 서면점 투표')+'.getAttribute("aria-checked")'),'false');
+  await visit('voting-mate','방장이 확정해요');await waitFor('document.body.innerText.includes("AI 추천")');await capture('voting-mate','563:1755');assert.equal(await evaluate('Boolean('+element('약속 확정')+')'),false);
+  await visit('voting-failure','추천을 불러오지 못했어요');await capture('voting-failure','683:12975');assert.ok((await evaluate('window.__chatEFixtureCalls')).some(c=>c.name==='invoke'));await click('다시 시도');await waitFor('document.body.innerText.includes("AI 추천")');
+  await visit('voting-add','식당 정하기');await click('직접 추가');await waitFor('Boolean('+element('식당 검색')+')');await evaluate(element('식당 검색')+'.focus()');await call('Input.insertText',{text:'서면 삼겹살'});await waitFor('document.body.innerText.includes("하남돼지집 서면점")');await capture('voting-direct-add','540:1682');await click('하남돼지집 서면점 추가');await waitFor('window.__chatEFixtureCalls.some(c=>c.name==="addVotingItem"&&c.args.label==="하남돼지집 서면점")');await waitFor('Boolean('+element('하남돼지집 서면점 추가됨')+')');
+  await visit('voting-more','식당 정하기');await waitFor('document.body.innerText.includes("AI 추천")');await click('AI 추천 더 받기');await waitFor('document.body.innerText.includes("AI 새 추천")');await capture('voting-more','628:3074');assert.ok(await evaluate('document.body.innerText.includes("AI가 조건에 맞는 곳을 1곳 더 찾았어요")'));
+  await visit('voting-recovered','식당 정하기');await evaluate("[...document.querySelectorAll('[aria-label=\"약속 확정 다시 시도\"]')].at(-1).click()");await waitFor('document.body.innerText.includes("원래 저장한 식당으로")');await capture('voting-recovered-confirmation','540:1812');await click('다시 확정하기');await waitFor('window.__chatEFixtureCalls.some(c=>c.name==="advanceRoomStage")');assert.equal(await evaluate('window.__chatEFixtureCalls.some(c=>c.name==="confirmRoomVote")'),false);
+  await visit('voting-locked-mate','식당이 정해졌어요. 방장이 약속을 확정하면 끝나요');await capture('voting-locked-mate','563:1755');
+  assert.equal(await evaluate(element('직접 추가')+'.getAttribute("aria-disabled")'),'true');assert.equal(await evaluate(element('AI 추천 더 받기')+'.getAttribute("aria-disabled")'),'true');assert.equal(await evaluate('window.__chatEFixtureCalls.some(c=>c.name==="buildPlaceCandidates"||c.name==="invoke")'),false);assert.ok((await evaluate('[...document.querySelectorAll("[role=checkbox]")].map(e=>e.getAttribute("aria-disabled"))')).every(value=>value==='true'));
+  await visit('voting-empty','근처에서 찾은 곳이 없어요');await capture('voting-empty','683:12975');assert.equal(await evaluate('Boolean('+element('다시 시도')+')'),false);assert.equal(await evaluate('window.__chatEFixtureCalls.some(c=>c.name==="invoke")'),false);
   await viewport(360,640);await visit('place-unset','시간 미정');await capture('narrow-chat','496:1126');await click('메뉴 펼치기');await capture('narrow-action-tray','527:1393');await click('이모티콘');await capture('narrow-emoticon-panel','527:1507');
   await evaluate("document.querySelector('[aria-label=\"메시지\"]').focus()");await waitFor('!document.body.innerText.includes("이모티콘")');
   await visit('keyboard','오늘 저녁팟');await capture('narrow-keyboard-simulated','496:1126');

@@ -15,8 +15,8 @@ export function meetingTimeLabel(slot: string | null | undefined, stage: RoomSta
 }
 
 /** Phone 496:1141/1217. Current contract exposes restaurants, not a separate food menu. */
-export default function MeetingCard({ slot, stage, location, memberCount, onChooseRestaurant, isOwner = false, compact = false }: {
-  slot?: string | null; stage: RoomStage; location?: string | null; memberCount: number; onChooseRestaurant: () => void; isOwner?: boolean; compact?: boolean;
+export default function MeetingCard({ slot, stage, location, memberCount, onChooseRestaurant, isOwner = false, compact = false, confirmedRestaurant }: {
+  slot?: string | null; stage: RoomStage; location?: string | null; memberCount: number; onChooseRestaurant: () => void; isOwner?: boolean; compact?: boolean; confirmedRestaurant?: string | null;
 }) {
   const canChoose = stage === 'place';
   if (compact) return <View testID="meeting-card-compact" style={[styles.card, styles.compact]}><Text style={styles.value} numberOfLines={1}>{[meetingTimeLabel(slot, stage), location?.trim() || '장소 미정', memberCount + '명'].join(' · ')}</Text></View>;
@@ -34,7 +34,7 @@ export default function MeetingCard({ slot, stage, location, memberCount, onChoo
         <Text style={styles.note}>{stage === 'scheduling' ? '일정이 정해지면 시작할 수 있어요' : '가고 싶은 식당에 투표해 주세요'}</Text>
       </View></View>
       <Button label="식당 정하기" style={styles.action} disabled={!canChoose} onPress={onChooseRestaurant} />
-      {isOwner && stage === 'place' ? <Button label="약속 확정" variant="secondary" style={styles.action} onPress={onChooseRestaurant} /> : null}
+      {isOwner && stage === 'place' ? <Button label={confirmedRestaurant?.trim() ? '약속 확정 다시 시도' : '약속 확정'} variant="secondary" style={styles.action} onPress={onChooseRestaurant} /> : null}
     </> : null}
   </View>;
 }
