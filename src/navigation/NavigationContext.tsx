@@ -18,7 +18,7 @@ type NavigationValue = {
    */
   goBackWith: (params: Record<string, unknown>) => void;
   /** 탭 전환 — 스택을 해당 루트로 초기화한다 */
-  resetTo: (name: RouteName) => void;
+  resetTo: (name: RouteName, params?: Record<string, unknown>) => void;
 };
 
 const NavigationContext = createContext<NavigationValue | null>(null);
@@ -58,8 +58,8 @@ export function NavigationProvider({
     setStack((prev) => popStack(prev, params));
   }, []);
 
-  const resetTo = useCallback((name: RouteName) => {
-    setStack([{ name }]);
+  const resetTo = useCallback((name: RouteName, params?: Record<string, unknown>) => {
+    setStack([{ name, params }]);
   }, []);
 
   const canGoBack = stack.length > 1;

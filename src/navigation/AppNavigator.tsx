@@ -15,6 +15,7 @@ import ScheduleConfirmedScreen from '../screens/schedule/ScheduleConfirmedScreen
 import SettlementsScreen from '../screens/settlement/SettlementsScreen';
 import ScheduleDetailScreen from '../screens/schedule/ScheduleDetailScreen';
 import ScheduleHomeScreen from '../screens/schedule/ScheduleHomeScreen';
+import ScheduleOriginSearchScreen from '../screens/schedule/ScheduleOriginSearchScreen';
 import ScheduleTimeScreen from '../screens/schedule/ScheduleTimeScreen';
 import SignupCalendarScreen from '../screens/signup/SignupCalendarScreen';
 import SignupPersonalScreen from '../screens/signup/SignupPersonalScreen';
@@ -22,6 +23,10 @@ import SignupStartScreen from '../screens/signup/SignupStartScreen';
 import SignupTasteScreen from '../screens/signup/SignupTasteScreen';
 import SignupTermsScreen from '../screens/signup/SignupTermsScreen';
 import TasteGameScreen from '../screens/taste/TasteGameScreen';
+import SettingsScreen from '../screens/settings/SettingsScreen';
+import ServiceTermsScreen from '../screens/settings/ServiceTermsScreen';
+import PrivacyPolicyScreen from '../screens/settings/PrivacyPolicyScreen';
+import AppInfoScreen from '../screens/settings/AppInfoScreen';
 import { colors } from '../theme/tokens';
 import { useNavigation } from './NavigationContext';
 import { ROUTE_TO_TAB, TAB_ROUTES, type RouteName } from './routes';
@@ -43,6 +48,14 @@ export default function AppNavigator() {
 
 function renderScreen(name: RouteName) {
   switch (name) {
+    case 'Settings':
+      return <SettingsScreen />;
+    case 'ServiceTerms':
+      return <ServiceTermsScreen />;
+    case 'PrivacyPolicy':
+      return <PrivacyPolicyScreen />;
+    case 'AppInfo':
+      return <AppInfoScreen />;
     case 'Login':
       return <LoginScreen />;
     case 'SignupStart':
@@ -61,6 +74,8 @@ function renderScreen(name: RouteName) {
       return <HomeScreen />;
     case 'Schedule':
       return <ScheduleHomeScreen />;
+    case 'ScheduleOriginSearch':
+      return <ScheduleOriginSearchScreen />;
     case 'ScheduleDetail':
       return <ScheduleDetailScreen />;
     case 'ScheduleTime':

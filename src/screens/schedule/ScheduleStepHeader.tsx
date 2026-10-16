@@ -1,96 +1,34 @@
-import { LinearGradient } from 'expo-linear-gradient';
-import { StyleSheet, Text, View } from 'react-native';
+import { ChevronLeft } from 'lucide-react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import BackButton from '../../components/BackButton';
-import { fs, s } from '../../theme/scale';
-import { colors } from '../../theme/tokens';
+import { v3Layout } from '../../theme/scale';
+import { scheduleLayout as layout } from '../../theme/scheduleTokens';
+import { v3Colors as colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 
-/**
- * Figma 일정 추가 STEP 1 (309:1065) / STEP 2 (160:733) 상단.
- * AppHeader 아래의 진행바 + 우측 STEP 라벨 + 타이틀/서브타이틀.
- */
-export default function ScheduleStepHeader({
-  step,
-  title,
-  subtitle,
-  onBack,
-}: {
-  step: 1 | 2;
-  title: string;
-  subtitle: string;
-  onBack?: () => void;
-}) {
-  return (
-    <View>
-      <View style={styles.track}>
-        <LinearGradient
-          colors={[...colors.accentGradient]}
-          locations={[...colors.accentGradientLocations]}
-          start={{ x: 0, y: 0.5 }}
-          end={{ x: 1, y: 0.5 }}
-          style={[styles.fill, { width: `${(step / 3) * 100}%` }]}
-        />
-      </View>
-
-      <Text style={styles.step}>STEP {step}</Text>
-
-      {/* 뒤로가기는 타이틀 왼쪽에 붙는다 — 무엇에서 돌아가는지가 바로 읽힌다 */}
-      <View style={styles.titleRow}>
-        {onBack ? <BackButton onPress={onBack} /> : null}
-        <Text style={styles.title}>{title}</Text>
-      </View>
-
-      <Text style={styles.subtitle}>{subtitle}</Text>
+export default function ScheduleStepHeader({ step, title, subtitle, onBack }: { step: 1 | 2 | 3; title: string; subtitle: string; onBack: () => void }) {
+  return <View style={styles.header}>
+    <View style={styles.top}>
+      <View style={styles.left}><Pressable accessibilityRole="button" accessibilityLabel="뒤로" onPress={onBack} style={styles.back}><ChevronLeft size={24} color={colors.ink} /></Pressable><Text style={styles.name}>새 밥약</Text></View>
+      <Text style={styles.step}>STEP {step} / 3</Text>
     </View>
-  );
+    <View accessibilityLabel={'3단계 중 ' + step + '단계'} style={styles.progress}>
+      {[1, 2, 3].map((segment) => <View key={segment} style={[styles.segment, segment <= step && styles.complete]} />)}
+    </View>
+    <View style={styles.titles}><Text accessibilityRole="header" style={styles.title}>{title}</Text><Text style={styles.subtitle}>{subtitle}</Text></View>
+  </View>;
 }
-
 const styles = StyleSheet.create({
-  track: {
-    marginTop: s(8),
-    marginHorizontal: s(11.5),
-    height: s(5),
-    borderRadius: s(3),
-    backgroundColor: '#D9D9D9',
-    overflow: 'hidden',
-  },
-  fill: {
-    height: s(5),
-    borderRadius: s(3),
-  },
-  step: {
-    marginTop: s(4),
-    marginRight: s(11.5),
-    textAlign: 'right',
-    fontFamily: fontFamily.bold,
-    fontSize: fs(6.5),
-    lineHeight: fs(9),
-    color: colors.primary,
-  },
-  /*
-   * 타이틀 줄. 칩(13)이 글자 줄(16)보다 낮아 줄 높이를 밀지 않으므로,
-   * 뒤로가기가 있든 없든 시안(2111:15252) 의 y 좌표가 그대로 유지된다.
-   */
-  titleRow: {
-    marginTop: s(4),
-    marginLeft: s(11.5),
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: s(5),
-  },
-  title: {
-    fontFamily: fontFamily.extrabold,
-    fontSize: fs(12),
-    lineHeight: fs(16),
-    color: colors.textPrimary,
-  },
-  subtitle: {
-    marginTop: s(3),
-    marginLeft: s(11.5),
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    lineHeight: fs(10),
-    color: colors.textMuted,
-  },
+  header: { paddingTop: 8, paddingBottom: 16, paddingHorizontal: layout.pagePadding, gap: 10 },
+  top: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  left: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  back: { width: v3Layout.minTouchTarget, height: v3Layout.minTouchTarget, alignItems: 'center', justifyContent: 'center' },
+  name: { fontFamily: fontFamily.bold, fontSize: 17, lineHeight: 25, color: colors.ink },
+  step: { fontFamily: fontFamily.bold, fontSize: 13, lineHeight: 19, color: colors.selectedText },
+  progress: { flexDirection: 'row', gap: 6 },
+  segment: { flex: 1, height: 4, borderRadius: 2, backgroundColor: colors.border },
+  complete: { backgroundColor: colors.primary },
+  titles: { paddingTop: 6, gap: 4 },
+  title: { fontFamily: fontFamily.bold, fontSize: 22, lineHeight: 32, color: colors.ink },
+  subtitle: { fontFamily: fontFamily.body, fontSize: 14, lineHeight: 20, color: colors.sub },
 });

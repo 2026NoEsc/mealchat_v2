@@ -19,7 +19,7 @@ export function useMyRooms() {
   const userId = user?.id ?? null;
   const foregroundRefreshToken = useForegroundRefreshToken();
 
-  const [rooms, setRooms] = useState<RoomSummary[]>([]);
+  const [roomState, setRoomState] = useState<{ ownerId: string | null; rooms: RoomSummary[] }>({ ownerId: userId, rooms: [] });
   const [status, setStatus] = useState<Status>('loading');
   const [error, setError] = useState<Error | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
@@ -27,8 +27,9 @@ export function useMyRooms() {
   const reload = useCallback(() => setReloadToken((token) => token + 1), []);
 
   useEffect(() => {
+    setRoomState(previous => previous.ownerId === userId ? previous : { ownerId: userId, rooms: [] });
     if (!userId) {
-      setRooms([]);
+      setRoomState({ ownerId: userId, rooms: [] });
       setStatus('loading');
       return;
     }
@@ -45,7 +46,7 @@ export function useMyRooms() {
           setStatus('error');
           return;
         }
-        setRooms(result.data ?? []);
+        setRoomState({ ownerId: userId, rooms: result.data ?? [] });
         setStatus('ready');
       })
       .catch((cause: unknown) => {
@@ -59,7 +60,9 @@ export function useMyRooms() {
     };
   }, [userId, reloadToken, foregroundRefreshToken]);
 
-  return { rooms, status, error, reload };
+  // Hide the previous account even in the render before effects run.
+  const sameAccount = roomState.ownerId === userId;
+  return { rooms: sameAccount ? roomState.rooms : [], status: sameAccount ? status : 'loading' as Status, error: sameAccount ? error : null, reload };
 }
 
 export function useRoomMessages(roomId: string | null) {
@@ -116,6 +119,7 @@ export function useRoomMessages(roomId: string | null) {
 export function useRoom(roomId: string | null) {
   const foregroundRefreshToken = useForegroundRefreshToken();
   const [room, setRoom] = useState<RoomSummary | null>(null);
+  const [status, setStatus] = useState<Status>('loading');
   const [reloadToken, setReloadToken] = useState(0);
 
   const reload = useCallback(() => setReloadToken((token) => token + 1), []);
@@ -123,17 +127,20 @@ export function useRoom(roomId: string | null) {
   useEffect(() => {
     if (!roomId) {
       setRoom(null);
+      setStatus('error');
       return;
     }
 
     let active = true;
+    setStatus('loading');
     void fetchRoom(roomId)
       .then(({ data, error }) => {
         if (!active) return;
         setRoom(error ? null : data);
+        setStatus(error || !data ? 'error' : 'ready');
       })
       .catch(() => {
-        if (active) setRoom(null);
+        if (active) { setRoom(null); setStatus('error'); }
       });
 
     return () => {
@@ -141,7 +148,7 @@ export function useRoom(roomId: string | null) {
     };
   }, [roomId, reloadToken, foregroundRefreshToken]);
 
-  return { room, reload };
+  return { room, reload, status };
 }
 
 /** 내가 볼 수 있는 정산 목록. 홈의 정산 넛지가 쓴다. */
@@ -149,21 +156,21 @@ export function useMySettlements() {
   const { user } = useAuth();
   const userId = user?.id ?? null;
   const foregroundRefreshToken = useForegroundRefreshToken();
-  const [settlements, setSettlements] = useState<SettlementSummary[]>([]);
+  const [settlementState, setSettlementState] = useState<{ ownerId: string | null; settlements: SettlementSummary[] }>({ ownerId: userId, settlements: [] });
 
   useEffect(() => {
+    setSettlementState(previous => previous.ownerId === userId ? previous : { ownerId: userId, settlements: [] });
     if (!userId) {
-      setSettlements([]);
       return;
     }
 
     let active = true;
     void fetchMySettlements(userId)
       .then(({ data }) => {
-        if (active) setSettlements(data ?? []);
+        if (active) setSettlementState({ ownerId: userId, settlements: data ?? [] });
       })
       .catch(() => {
-        if (active) setSettlements([]);
+        if (active) setSettlementState({ ownerId: userId, settlements: [] });
       });
 
     return () => {
@@ -171,5 +178,6 @@ export function useMySettlements() {
     };
   }, [userId, foregroundRefreshToken]);
 
-  return settlements;
+  // Account changes must hide old counts in the render before the effect clears its state.
+  return settlementState.ownerId === userId ? settlementState.settlements : [];
 }

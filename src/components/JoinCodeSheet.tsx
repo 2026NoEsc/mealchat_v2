@@ -1,12 +1,11 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { notify } from '../lib/confirm';
 import { joinRoomByCode } from '../lib/rooms';
-import { fs, s } from '../theme/scale';
-import { colors } from '../theme/tokens';
-import { fontFamily } from '../theme/typography';
-import BottomSheet from './BottomSheet';
+import BottomSheet from './ui/BottomSheet';
+import { Button } from './ui/Button';
+import TextField from './ui/TextField';
 
 const CODE_LENGTH = 6;
 
@@ -67,72 +66,14 @@ export default function JoinCodeSheet({
     }
   };
 
-  return (
-    <BottomSheet
-      visible={visible}
-      title="초대 코드 입력"
-      subtitle="친구에게 받은 6자리 코드를 넣어 주세요"
-      onClose={close}>
-      <View style={styles.row}>
-        <TextInput
-          style={styles.input}
-          value={code}
-          /* 저장된 코드가 대문자라 입력도 맞춰 올린다 — RPC 는 정확히 일치해야 찾는다 */
-          onChangeText={(text) => setCode(text.replace(/\s/g, '').toUpperCase())}
-          placeholder="예: ABC123"
-          placeholderTextColor={colors.placeholder}
-          autoCapitalize="characters"
-          autoCorrect={false}
-          autoFocus
-          maxLength={CODE_LENGTH}
-          returnKeyType="go"
-          onSubmitEditing={() => void join()}
-        />
-        <Pressable
-          style={[styles.enter, !ready && styles.enterDisabled]}
-          disabled={!ready}
-          onPress={() => void join()}
-          accessibilityRole="button">
-          <Text style={styles.enterText}>{joining ? '입장 중' : '입장'}</Text>
-        </Pressable>
-      </View>
-    </BottomSheet>
-  );
+  // TODO(서버 단계): 6칸 입력·방 미리보기·만료 기준·시도 제한은 서버 계약과 함께 적용한다.
+  return <BottomSheet visible={visible} title="초대 코드 입력" subtitle="메이트에게 받은 6자리 코드를 넣어 주세요" onClose={close}>
+    <View style={styles.body}>
+      <TextField label="초대 코드" value={code} onChangeText={(text) => setCode(text.replace(/\s/g, '').toUpperCase())}
+        placeholder="예: ABC123" autoCapitalize="characters" autoCorrect={false} autoFocus maxLength={CODE_LENGTH}
+        returnKeyType="go" editable={!joining} onSubmitEditing={() => void join()} />
+      <Button label="입장" loading={joining} disabled={!ready} onPress={() => void join()} />
+    </View>
+  </BottomSheet>;
 }
-
-/* 식당 정하기 시트(VotingSheet)의 입력줄과 같은 치수·글꼴을 쓴다 — 시트끼리 모양이 달라 보이지 않게 */
-const styles = StyleSheet.create({
-  row: {
-    marginTop: s(12),
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: s(6),
-  },
-  input: {
-    flex: 1,
-    height: s(24),
-    borderRadius: s(8),
-    backgroundColor: colors.surfaceSunken,
-    paddingHorizontal: s(9),
-    paddingVertical: 0,
-    fontFamily: fontFamily.body,
-    fontSize: fs(7.5),
-    color: colors.textPrimary,
-  },
-  enter: {
-    height: s(24),
-    paddingHorizontal: s(12),
-    borderRadius: s(8),
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  enterDisabled: {
-    opacity: 0.4,
-  },
-  enterText: {
-    fontFamily: fontFamily.bold,
-    fontSize: fs(7.5),
-    color: colors.textOnAccent,
-  },
-});
+const styles = StyleSheet.create({ body: { gap: 16 } });

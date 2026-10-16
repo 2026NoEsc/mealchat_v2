@@ -1,7 +1,10 @@
-import { CalendarDays, Send, Smile, Users, Utensils, Wallet } from 'lucide-react-native';
+import { ChevronLeft, MoreVertical, Plus, Send } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  BackHandler,
   FlatList,
+  Keyboard,
+  Platform,
   Image,
   ImageSourcePropType,
   Pressable,
@@ -16,37 +19,32 @@ import { useKeyboardOverlap } from '../../theme/keyboard';
 
 import { useAuth } from '../../auth/AuthProvider';
 import Avatar from '../../components/Avatar';
-import { MenuBarsIcon, RoomBackIcon } from '../../components/icons';
+import ActionTray, { type ChatAction } from '../../components/ui/ActionTray';
+import FailureCard from '../../components/ui/FailureCard';
+import RoomTimer from '../../components/ui/RoomTimer';
+import MeetingCard from '../../components/ui/MeetingCard';
 import { buildPlaceCandidates } from '../../lib/placeCandidates';
 import { supabase } from '../../lib/supabase';
 import { useMyProfile } from '../../profile/useMyProfile';
 import type { ScheduleRecommendResponse } from '../schedule/scheduleTypes';
 import { parseEmoticonToken } from '../../lib/emoticon';
-import { confirmAction, notify } from '../../lib/confirm';
-import { roomCharacterFor } from '../../lib/roomCharacter';
+import { notify } from '../../lib/confirm';
 import { roomNoticeOf, type RoomNotice } from '../../lib/roomNotice';
-import { roomColor } from '../../lib/roomTheme';
-import { dayKey, dayLabel, meetingDateText, roomTimerLabel, timeLabel } from '../../lib/roomFormat';
+import { dayKey, dayLabel, timeLabel } from '../../lib/roomFormat';
 import {
-  advanceRoomStage,
   sendRoomMessage,
   sendRoomSticker,
   type RoomMessage,
 } from '../../lib/rooms';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useRoom, useRoomMessages } from '../../rooms/useMyRooms';
-import { fs, s } from '../../theme/scale';
-import { colors, shadows } from '../../theme/tokens';
+import { v3Layout } from '../../theme/scale';
+import { v3Colors as colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 import { MembersSheet, SettlementSheet } from './ChatRoomSheets';
 import EmoticonPanel, { findSticker } from './EmoticonPanel';
 import ScheduleSheet from './ScheduleSheet';
 import VotingSheet from './VotingSheet';
-
-/** Figma 채팅방 색상 — 말풍선 시간 / 날짜 구분선 / 시스템 말풍선 글자 */
-const TIME_GRAY = '#B4B2A8';
-const DIVIDER = '#D3D1C6';
-const SYS_TEXT = '#696969';
 
 type Message = { key: string } & (
   | { kind: 'date'; text: string }
@@ -86,8 +84,8 @@ function SenderAvatar({ name, senderId, avatarUrl, grouped }: Sender & { grouped
       name={name ?? '?'}
       url={avatarUrl}
       seed={senderId ?? undefined}
-      size={s(20)}
-      radius={s(5)}
+      size={36}
+      radius={18}
       /* 시안의 옅은 주황 칸 — 기본 캐릭터에도 깔려야 해서 style 로 넘긴다 */
       style={styles.msgAvatar}
     />
@@ -198,12 +196,6 @@ export default function ChatRoomScreen() {
    * 홈의 정산 링크처럼 roomId 만 들고 들어오는 경로도 있어 불러온 값으로 채운다.
    */
   const title = params?.title ?? room?.title ?? '밥약';
-  /*
-   * 방 테마 색 — 목록과 같은 값이어야 같은 방으로 보인다. 예전에 만든 방은
-   * 색을 전부 '#FF9900' 로 저장해서 roomColor() 가 id 로 골라 준다. 방을 아직
-   * 못 불러왔으면 목록에서 실어 보낸 색으로 버틴다.
-   */
-  const theme = room ? roomColor(room) : params?.color ?? colors.primary;
   const { messages: remoteMessages, status, reload } = useRoomMessages(roomId);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -282,8 +274,17 @@ export default function ChatRoomScreen() {
 
   const [sheet, setSheet] = useState<SheetKey>(params?.openSheet ?? null);
   const [emoticonOpen, setEmoticonOpen] = useState(false);
-  /* 입력창의 ＋ 로 여닫는다. 기본은 펴진 상태 — 방에 들어오면 뭘 할 수 있는지 보여야 한다 */
-  const [actionsOpen, setActionsOpen] = useState(true);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const panelOpen = actionsOpen || emoticonOpen;
+  const chooseAction = (action: ChatAction) => {
+    Keyboard.dismiss(); setActionsOpen(false);
+    if (action === 'emoticons') setEmoticonOpen(true); else { setEmoticonOpen(false); setSheet(action); }
+  };
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !panelOpen) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => { setActionsOpen(false); setEmoticonOpen(false); return true; });
+    return () => subscription.remove();
+  }, [panelOpen]);
   const scrollRef = useRef<FlatList<Message>>(null);
   const nearLatest = useRef(true);
   const userScrolling = useRef(false);
@@ -301,58 +302,13 @@ export default function ChatRoomScreen() {
     followLatest();
   }, [keyboard, followLatest]);
 
-  /*
-   * 식당 결정을 마치고 약속을 확정한다. 방장만 누를 수 있고, 되돌릴 수 없어서
-   * 한 번 묻는다 — 확정하면 식당을 다시 고를 수 없다.
-   */
-  const confirmPlan = async () => {
-    if (!roomId) return;
-
-    /* Alert.alert 의 버튼 콜백은 react-native-web 에서 불리지 않는다 */
-    confirmAction({
-      title: '약속을 확정할까요?',
-      message: '확정하면 식당을 다시 고를 수 없어요.',
-      cancelLabel: '더 볼게요',
-      confirmLabel: '확정',
-      onConfirm: () => {
-        void (async () => {
-          const { error } = await advanceRoomStage(roomId, 'confirmed');
-          if (error) {
-            notify('확정하지 못했어요', error.message);
-            return;
-          }
-          reload();
-          void reloadRoom();
-        })();
-      },
-    });
-  };
-
-  /*
-   * 알림 카드의 배지. 방 안에서 할 수 있는 일로 이어 준다.
-   * 일정 카드의 "캘린더에 저장" 은 아직 붙일 곳이 없어 안내만 남긴다.
-   */
+  // [결정] 기존 알림 행동을 유지한다. Figma의 칩 아래에 44px 행동 배지를 복원한다.
   const onNoticeAction = useCallback((kind: RoomNotice['kind']) => {
-    if (kind === 'place') {
-      setSheet('menu');
-      return;
-    }
-    if (kind === 'settlement') {
-      setSheet('settlement');
-      return;
-    }
+    if (kind === 'place') { setSheet('menu'); return; }
+    if (kind === 'settlement') { setSheet('settlement'); return; }
+    // TODO(서버 단계): 실제 캘린더 저장 계약 전에는 기존 준비 안내만 유지한다.
     notify('아직 준비 중이에요', '캘린더 저장은 곧 붙일게요.');
   }, []);
-
-  /*
-   * 방 위에 걸어 둘 확정 내용 — "9월 28일 · 리코리코" 처럼 때와 곳을 나란히 적는다.
-   *
-   * 시각(confirmed_slot)은 시간 투표를 확정해야 채워지는데, 지금 앱에는 그 단계가
-   * 없어 늘 비어 있다. 그래서 있으면 시각을, 없으면 방을 만들 때 정한 약속 날짜를
-   * 쓴다 - 날짜는 어느 방에나 있다.
-   */
-  const when = room?.confirmedSlot?.trim() || (room ? meetingDateText(room.meetingDate) : '');
-  const confirmedLine = [when, room?.locationName?.trim()].filter(Boolean).join(' · ');
 
   /* 보낸 사람 id 로 프로필 사진을 찾을 수 있게 참가자 목록을 표로 바꿔 둔다 */
   const avatarBySender = useMemo(() => {
@@ -440,66 +396,17 @@ export default function ChatRoomScreen() {
      * 위의 목록이 줄어드는 것과 겹쳐 두 배로 밀려 올라간다 (실측 690 → 169).
      */
     <View ref={screenRef} style={[styles.screen, { paddingBottom: keyboard }]} onLayout={remeasure}>
-      <View style={{ height: insets.top, backgroundColor: colors.screen }} />
-
+      <View style={{ height: insets.top }} />
       <View style={styles.header}>
-        <Pressable onPress={goBack} hitSlop={s(8)}>
-          <RoomBackIcon size={s(24)} />
-        </Pressable>
-
-        {/*
-          * 방 대표 그림 — 목록 카드와 같은 캐릭터다. 색을 꽉 채우면 그림이 묻혀서
-          * 테마 색을 옅게(24 = 14%) 깔고 그 위에 올린다.
-          */}
-        <View style={[styles.headerAvatar, { backgroundColor: `${theme}24` }]}>
-          {roomId ? (
-            <Image
-              source={roomCharacterFor(roomId)}
-              style={styles.headerAvatarImage}
-              resizeMode="contain"
-            />
-          ) : null}
-        </View>
-
-        <View style={styles.headerCenter}>
-          <View style={styles.headerTitleRow}>
-            <Text style={styles.headerTitle} numberOfLines={1}>
-              {title}
-            </Text>
-            <View style={styles.countChip}>
-              <Text style={styles.countText}>{room ? room.participants.length : '-'}</Text>
-            </View>
-          </View>
-          {room ? (
-            <RoomTimer expiresAt={room.expiresAt} settled={room.stage === 'done'} />
-          ) : (
-            <Text style={styles.timer}> </Text>
-          )}
-        </View>
-
-        <Pressable hitSlop={s(8)} onPress={() => navigate('RoomDetail', { roomId, title })}>
-          <MenuBarsIcon size={s(24)} />
-        </Pressable>
+        <Pressable onPress={goBack} style={styles.iconButton} accessibilityRole="button" accessibilityLabel="뒤로"><ChevronLeft size={24} color={colors.ink} /></Pressable>
+        <View style={styles.headerCenter}><View style={styles.headerTitleRow}><Text style={styles.headerTitle} numberOfLines={1}>{title}</Text><View style={styles.countChip}><Text style={styles.countText}>{room ? room.participants.length : '-'}</Text></View></View>{room && (stage === 'settling' || stage === 'done') ? <RoomTimer expiresAt={room.expiresAt} settled={stage === 'done'} /> : null}</View>
+        <Pressable onPress={() => navigate('RoomDetail', { roomId, title })} style={styles.iconButton} accessibilityRole="button" accessibilityLabel="방 상세정보"><MoreVertical size={22} color={colors.ink} /></Pressable>
       </View>
-
-      {/*
-        * 확정된 것을 방 맨 위에 공지처럼 붙여 둔다 — 대화가 길어지면 확정 안내
-        * 메시지가 위로 밀려 올라가 다시 찾기 어렵다.
-        *
-        * 일정과 식당은 저장되는 곳이 다르다 (confirmed_slot / confirmed_menu).
-        * 예전에는 is_confirmed 와 일정만 보고 그려서, 식당만 정해진 방에서는
-        * 아무것도 뜨지 않았고 둘 다 정해져도 시간만 보였다.
-        */}
-      {confirmedLine ? (
-        <View style={styles.banner}>
-          <Text style={styles.bannerText} numberOfLines={1}>
-            {confirmedLine}
-          </Text>
-        </View>
-      ) : null}
+      {room ? <View style={styles.pinned}><MeetingCard compact={panelOpen || keyboard > 0} isOwner={isOwner} slot={room.confirmedSlot} stage={stage} location={room.locationName} memberCount={room.participants.length} onChooseRestaurant={() => chooseAction('menu')} /></View> : null}
 
       <FlatList
         ref={scrollRef}
+        testID="chat-message-list"
         style={styles.messageList}
         data={messages}
         renderItem={renderMessage}
@@ -516,21 +423,21 @@ export default function ChatRoomScreen() {
         scrollEventThrottle={16}
         onScrollBeginDrag={(event) => {
           userScrolling.current = true;
-          nearLatest.current = event.nativeEvent.contentOffset.y <= s(40);
+          nearLatest.current = event.nativeEvent.contentOffset.y <= 40;
         }}
         onScroll={(event) => {
           // Native anchor/layout adjustments are not a request to read history.
           if (userScrolling.current) {
-            nearLatest.current = event.nativeEvent.contentOffset.y <= s(40);
+            nearLatest.current = event.nativeEvent.contentOffset.y <= 40;
           }
         }}
         onScrollEndDrag={(event) => {
-          nearLatest.current = event.nativeEvent.contentOffset.y <= s(40);
+          nearLatest.current = event.nativeEvent.contentOffset.y <= 40;
           userScrolling.current = false;
         }}
         onMomentumScrollBegin={() => { userScrolling.current = true; }}
         onMomentumScrollEnd={(event) => {
-          nearLatest.current = event.nativeEvent.contentOffset.y <= s(40);
+          nearLatest.current = event.nativeEvent.contentOffset.y <= 40;
           userScrolling.current = false;
         }}
         onLayout={followLatest}
@@ -539,116 +446,31 @@ export default function ChatRoomScreen() {
           status === 'loading' ? (
             <Text style={styles.listNotice}>메시지를 불러오는 중...</Text>
           ) : status === 'error' ? (
-            <View style={styles.retryBox}>
-              <Text style={styles.listNotice}>메시지를 불러오지 못했어요</Text>
-              <Pressable style={styles.retryButton} onPress={reload}>
-                <Text style={styles.retryText}>다시 시도</Text>
-              </Pressable>
-            </View>
+            <FailureCard title="메시지를 불러오지 못했어요" onRetry={reload} />
           ) : messages.length === 0 ? (
             <Text style={styles.listNotice}>아직 대화가 없어요. 먼저 인사해 보세요!</Text>
           ) : null
         }
       />
 
-      {/*
-        약속 단계에 따라 열 수 있는 것이 다르다. 정산까지 간 방에서 식당을 다시
-        고르거나, 식당도 안 정한 방에서 정산을 시작할 수는 없다.
-      */}
-      {actionsOpen ? (
-      <View style={styles.actionBar}>
-        <ActionButton
-          icon={<CalendarDays size={s(13)} color={SYS_TEXT} strokeWidth={2} />}
-          label="일정 조율"
-          disabled={stage !== 'scheduling'}
-          onPress={() => setSheet('schedule')}
-        />
-        <View style={styles.actionDivider} />
-        <ActionButton
-          icon={<Utensils size={s(13)} color={SYS_TEXT} strokeWidth={2} />}
-          label="식당 정하기"
-          disabled={stage !== 'place'}
-          onPress={() => setSheet('menu')}
-        />
-        <View style={styles.actionDivider} />
-        <ActionButton
-          icon={<Wallet size={s(13)} color={SYS_TEXT} strokeWidth={2} />}
-          /* 식당을 정하는 중이면 확정으로, 확정된 뒤에는 정산으로 */
-          label={stage === 'place' ? '약속 확정' : 'N빵 정산'}
-          disabled={
-            stage === 'scheduling' || (stage === 'place' && !isOwner)
-          }
-          onPress={() => (stage === 'place' ? void confirmPlan() : setSheet('settlement'))}
-        />
-        <View style={styles.actionDivider} />
-        <ActionButton
-          icon={<Users size={s(13)} color={SYS_TEXT} strokeWidth={2} />}
-          label="멤버"
-          onPress={() => setSheet('members')}
-        />
-      </View>
-      ) : null}
-
-      {/*
-        인셋을 더한다. 예전엔 paddingBottom 을 insets.bottom 으로 덮어써서, 인셋이
-        0 인 웹·구형 안드로이드에서는 스타일의 아래 여백까지 같이 사라졌다.
-
-        키보드가 올라오면 그 높이만큼 통째로 띄운다. 이때 제스처바 인셋은 빼야
-        한다 — 키보드가 이미 그 자리를 덮고 있어서, 그대로 두면 입력바가 키보드
-        위에 한 칸 떠 보인다.
-      */}
-      <View
-        style={[
-          styles.inputBar,
-          /* 키보드가 제스처바까지 덮으므로 그때는 인셋을 더하지 않는다 */
-          { paddingBottom: s(7) + (keyboard > 0 ? 0 : insets.bottom) },
-        ]}>
-        {/*
-          위 액션 행을 여닫는다. 예전에는 ScheduleDetail 로 보냈는데, 그 화면은
-          createRoom 으로 새 방을 만드는 곳이라 대화 중에 누르면 지금 방을 두고
-          엉뚱한 방이 생겼다.
-        */}
-        <Pressable
-          style={styles.plusButton}
-          hitSlop={s(6)}
-          accessibilityRole="button"
-          accessibilityLabel={actionsOpen ? '메뉴 접기' : '메뉴 펼치기'}
-          onPress={() => setActionsOpen((v) => !v)}>
-          <Text style={[styles.plusText, actionsOpen && styles.plusTextOpen]}>＋</Text>
+      <View style={[styles.inputBar, { paddingBottom: 20 + (keyboard > 0 || panelOpen ? 0 : insets.bottom) }]}>
+        <Pressable style={[styles.plusButton, actionsOpen && styles.plusOpen]} accessibilityRole="button" accessibilityLabel={actionsOpen ? '메뉴 접기' : '메뉴 펼치기'} accessibilityState={{ expanded: actionsOpen }}
+          onPress={() => { Keyboard.dismiss(); setEmoticonOpen(false); setActionsOpen(!actionsOpen); }}>
+          <Plus size={20} color={colors.ink} />
         </Pressable>
-
-        <View style={styles.input}>
-          <TextInput
-            style={styles.inputText}
-            value={draft}
-            onChangeText={changeDraft}
-            placeholder="메시지를 입력해 주세요..."
-            placeholderTextColor={TIME_GRAY}
-            onSubmitEditing={send}
-            returnKeyType="send"
-          />
-          <Pressable accessibilityLabel="이모티콘 선택" disabled={sending} onPress={() => setEmoticonOpen((v) => !v)} hitSlop={s(6)}>
-            <Smile size={s(10)} color={emoticonOpen ? colors.primary : TIME_GRAY} strokeWidth={2} />
-          </Pressable>
-        </View>
-
-        <Pressable
-          style={[styles.sendButton, (sending || !roomId) && styles.sendButtonDisabled]}
-          disabled={sending || !roomId}
-          onPress={() => void send()}>
-          <Send size={s(9)} color={colors.textOnAccent} strokeWidth={2.5} />
+        <View style={styles.input}><TextInput style={styles.inputText} accessibilityLabel="메시지" value={draft} onChangeText={changeDraft}
+          placeholder="메시지를 입력해 주세요" placeholderTextColor={colors.sub} onSubmitEditing={send} returnKeyType="send"
+          onFocus={() => { setActionsOpen(false); setEmoticonOpen(false); }} /></View>
+        <Pressable style={[styles.sendButton, (sending || !roomId) && styles.sendButtonDisabled]} accessibilityRole="button" accessibilityLabel="메시지 보내기"
+          accessibilityState={{ disabled: sending || !roomId, busy: sending }} disabled={sending || !roomId} onPress={() => void send()}>
+          <Send size={20} color={colors.ink} />
         </Pressable>
       </View>
-
-      {emoticonOpen ? (
-        <EmoticonPanel
-          onPick={(sticker) => {
-            if (sendingRef.current) return;
-            setEmoticonOpen(false);
-            void sendSticker(sticker.id);
-          }}
-        />
-      ) : null}
+      {actionsOpen ? <ActionTray stage={stage} onChoose={chooseAction} bottomInset={keyboard > 0 ? 0 : insets.bottom} /> : null}
+      {emoticonOpen ? <EmoticonPanel disabled={sending} bottomInset={keyboard > 0 ? 0 : insets.bottom} onClose={() => setEmoticonOpen(false)} onPick={sticker => {
+        if (sendingRef.current) return;
+        setEmoticonOpen(false); void sendSticker(sticker.id);
+      }} /> : null}
 
       <ScheduleSheet
         visible={sheet === 'schedule'}
@@ -664,6 +486,10 @@ export default function ChatRoomScreen() {
       <VotingSheet
         visible={sheet === 'menu'}
         roomId={roomId}
+        isOwner={isOwner}
+        stage={stage}
+        confirmedSlot={room?.confirmedSlot}
+        participantCount={room?.participants.length}
         kind="menu"
         title="식당 정하기"
         subtitle="가고 싶은 식당에 투표해 주세요"
@@ -691,6 +517,7 @@ export default function ChatRoomScreen() {
         participants={room?.participants ?? []}
         code={room?.code ?? null}
         myId={user?.id ?? null}
+        ownerId={room?.ownerId ?? null}
         onClose={() => setSheet(null)}
         onInvite={(code) => {
           setSheet(null);
@@ -701,25 +528,6 @@ export default function ChatRoomScreen() {
   );
 }
 
-/*
- * 헤더 타이머. 정산을 마친 방은 24시간만 남아 초까지 세는데, 화면 전체를 1초마다
- * 다시 그리면 채팅 목록까지 딸려 들어간다. 그래서 이 줄만 따로 떼어 낸다.
- */
-function RoomTimer({ expiresAt, settled }: { expiresAt: string; settled: boolean }) {
-  const [label, setLabel] = useState(() => roomTimerLabel(expiresAt, settled));
-
-  useEffect(() => {
-    setLabel(roomTimerLabel(expiresAt, settled));
-    /* 정산 전에는 문구가 고정이라 셀 것이 없다 */
-    if (!settled) return;
-
-    const id = setInterval(() => setLabel(roomTimerLabel(expiresAt, settled)), 1000);
-    return () => clearInterval(id);
-  }, [expiresAt, settled]);
-
-  return <Text style={styles.timer}>{label}</Text>;
-}
-
 const messageKey = (message: Message) => message.key;
 const visibleContentPosition = { minIndexForVisible: 0 };
 
@@ -728,11 +536,9 @@ function MessageSeparator() {
 }
 
 const Row = memo(function Row({
-  message,
-  onAction,
+  message, onAction,
 }: {
-  message: Message;
-  onAction: (kind: RoomNotice['kind']) => void;
+  message: Message; onAction: (kind: RoomNotice['kind']) => void;
 }) {
   switch (message.kind) {
     case 'date':
@@ -815,432 +621,56 @@ const Row = memo(function Row({
         </View>
       );
 
-    case 'notice': {
-      const { title, detail, action } = message.notice;
-      return (
-        <View style={styles.noticeRow}>
-          <View style={styles.noticeCard}>
-            {/* 시안은 🎉 를 벡터로 내보냈지만 양옆에 하나씩 두는 그림이다 */}
-            <Text style={styles.noticeTitle}>🎉 {title} 🎉</Text>
-            {detail ? <Text style={styles.noticeDetail}>{detail}</Text> : null}
-            <Pressable
-              style={styles.noticeBadge}
-              hitSlop={s(4)}
-              onPress={() => onAction(message.notice.kind)}>
-              <Text style={styles.noticeBadgeText}>{action}</Text>
-            </Pressable>
-          </View>
-        </View>
-      );
-    }
+    case 'notice':
+      // TODO(서버 단계): 독립 메뉴 확정/다음 단계 계약 전에는 실제 서버 안내만 칩으로 표시한다.
+      return <View style={styles.sysRow}><View style={styles.sysPill}><Text style={styles.sysText}>{message.notice.title}{message.notice.detail ? ' · ' + message.notice.detail : ''}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={message.notice.action} onPress={() => onAction(message.notice.kind)} style={styles.noticeAction}><Text style={styles.noticeActionText}>{message.notice.action}</Text></Pressable></View>;
+
   }
 });
 
-function ActionButton({
-  icon,
-  label,
-  onPress,
-  disabled,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onPress?: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <Pressable
-      style={[styles.action, disabled && styles.actionOff]}
-      disabled={disabled}
-      onPress={onPress}>
-      {icon}
-      <Text style={styles.actionLabel}>{label}</Text>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    /* 시안 2178:556 주석 "배경 색상 변경" — 화면과 헤더가 같은 #F8F6F2 다 */
-    backgroundColor: colors.screen,
-  },
-
-  // roomHeader y30 h44
-  header: {
-    height: s(44),
-    backgroundColor: colors.screen,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: s(10),
-    gap: s(7),
-    /*
-     * 그림자를 뺀다. 본문과 같은 색이 되면서 그림자가 회색 띠처럼 보였고,
-     * 시안에도 헤더 아래 구분선이 없다.
-     */
-    zIndex: 2,
-  },
-  headerAvatar: {
-    width: s(24),
-    height: s(24),
-    borderRadius: s(5),
-    backgroundColor: colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  /*
-   * 시안 값(16.8 x 18.24)은 여백이 넓은 원본에 맞춰 잰 것이라, 여백을 떼어낸
-   * 그림을 넣으면 칸 한가운데 조그맣게 떠 보였다. 칸(24)의 대부분을 쓰게 키운다.
-   * contain 이라 가로로 넓은 캐릭터든 세로로 긴 캐릭터든 잘리지 않는다.
-   */
-  headerAvatarImage: {
-    width: s(20),
-    height: s(20),
-  },
-  headerCenter: {
-    flex: 1,
-  },
-  headerTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: s(4),
-  },
-  headerTitle: {
-    flexShrink: 1,
-    fontFamily: fontFamily.extrabold,
-    fontSize: fs(9.5),
-    lineHeight: fs(13),
-    color: colors.textPrimary,
-  },
-  countChip: {
-    paddingHorizontal: s(4),
-    paddingVertical: s(1),
-    borderRadius: s(4),
-    backgroundColor: colors.surfaceSunken,
-  },
-  countText: {
-    fontFamily: fontFamily.semibold,
-    fontSize: fs(5.8),
-    lineHeight: fs(8),
-    color: SYS_TEXT,
-  },
-  timer: {
-    marginTop: s(1),
-    fontFamily: fontFamily.semibold,
-    fontSize: fs(5.8),
-    lineHeight: fs(8),
-    color: colors.danger,
-  },
-
-  // 확정 배너 x9 y83 w200 h18
-  banner: {
-    marginTop: s(11),
-    marginHorizontal: s(9),
-    height: s(18),
-    /* 식당 이름이 길어도 글자가 테두리에 닿지 않게 */
-    paddingHorizontal: s(10),
-    borderRadius: s(9),
-    borderWidth: s(0.8),
-    borderColor: colors.primary,
-    backgroundColor: '#FFF5EB',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bannerText: {
-    fontFamily: fontFamily.semibold,
-    fontSize: fs(6.7),
-    lineHeight: fs(9),
-    color: '#FF8C3A',
-  },
-
-  /*
-   * chatScroll x11.5 — 시안 줄간격은 8 이지만 말풍선이 띄엄띄엄 떨어져 보여
-   * 5 로 좁혔다. 한 사람이 이어 보낸 줄(grouped)은 한 덩어리로 보이게 더 붙인다.
-   */
-  messageList: {
-    flex: 1,
-  },
-  messageSeparator: {
-    height: s(5),
-  },
-  list: {
-    paddingHorizontal: s(11.5),
-    // inverted 목록이라 화면 위·아래 여백도 반대로 준다.
-    paddingTop: s(10),
-    paddingBottom: s(14),
-  },
-  /* 위 줄과 같은 사람·같은 분이면 gap 을 덜어내 붙여 놓는다 */
-  grouped: {
-    marginTop: s(-2.5),
-  },
-  dateRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: s(6),
-    paddingVertical: s(2),
-  },
-  dateLine: {
-    flex: 1,
-    height: s(0.6),
-    backgroundColor: DIVIDER,
-  },
-  dateText: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(5.8),
-    lineHeight: fs(8),
-    color: colors.textMuted,
-  },
-  sysRow: {
-    alignItems: 'center',
-  },
-  sysPill: {
-    paddingHorizontal: s(8),
-    paddingVertical: s(3),
-    borderRadius: s(999),
-    backgroundColor: colors.surfaceSunken,
-  },
-  sysText: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(5.8),
-    lineHeight: fs(8),
-    color: SYS_TEXT,
-  },
-  otherRow: {
-    flexDirection: 'row',
-    gap: s(5),
-  },
-  msgAvatar: {
-    backgroundColor: colors.primarySoft,
-  },
-  /* 아바타(20)를 안 그리는 줄이 왼쪽으로 밀리지 않게 자리를 지킨다 */
-  avatarSpacer: {
-    width: s(20),
-  },
-  otherCol: {
-    flexShrink: 1,
-    gap: s(2),
-  },
-  name: {
-    fontFamily: fontFamily.semibold,
-    fontSize: fs(6),
-    lineHeight: fs(8),
-    color: SYS_TEXT,
-  },
-  otherLine: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: s(4),
-  },
-  mineRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'flex-end',
-    gap: s(4),
-  },
-  bubble: {
-    flexShrink: 1,
-    paddingHorizontal: s(8),
-    paddingVertical: s(6),
-    ...shadows.card,
-  },
-  bubbleOther: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: s(2),
-    borderTopRightRadius: s(9),
-    borderBottomLeftRadius: s(9),
-    borderBottomRightRadius: s(9),
-  },
-  bubbleMine: {
-    backgroundColor: colors.primary,
-    borderTopLeftRadius: s(9),
-    borderTopRightRadius: s(2),
-    borderBottomLeftRadius: s(9),
-    borderBottomRightRadius: s(9),
-  },
-  bubbleText: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(7.2),
-    lineHeight: fs(10),
-    color: colors.textPrimary,
-  },
-  bubbleTextMine: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(7.2),
-    lineHeight: fs(10),
-    color: colors.textOnAccent,
-  },
-  time: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(5.4),
-    lineHeight: fs(8),
-    color: TIME_GRAY,
-  },
-  sticker: {
-    width: s(52),
-    height: s(56),
-    borderRadius: s(8),
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...shadows.card,
-  },
-  stickerImage: {
-    width: s(34),
-    height: s(40),
-  },
-  // 알림 카드 — 시안 2111:16085 (w181 h57)
-  noticeRow: {
-    alignItems: 'center',
-  },
-  noticeCard: {
-    width: s(181),
-    borderRadius: s(9),
-    borderWidth: s(1),
-    borderColor: colors.primary,
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    paddingTop: s(7),
-    paddingBottom: s(7.3),
-    ...shadows.button,
-  },
-  noticeTitle: {
-    fontFamily: fontFamily.extrabold,
-    fontSize: fs(7.2),
-    lineHeight: fs(9.94),
-    color: colors.textPrimary,
-  },
-  noticeDetail: {
-    marginTop: s(4),
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(8.97),
-    color: SYS_TEXT,
-  },
-  noticeBadge: {
-    marginTop: s(4),
-    paddingHorizontal: s(9),
-    paddingVertical: s(3),
-    borderRadius: s(5),
-    backgroundColor: colors.primarySoft,
-  },
-  noticeBadgeText: {
-    fontFamily: fontFamily.semibold,
-    fontSize: fs(6),
-    lineHeight: fs(8.28),
-    color: colors.primaryVivid,
-  },
-
-  // 액션바 y407 h43
-  actionBar: {
-    height: s(43),
-    backgroundColor: colors.card,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderTopWidth: s(0.6),
-    borderTopColor: colors.border,
-  },
-  action: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: s(2),
-  },
-  actionLabel: {
-    fontFamily: fontFamily.semibold,
-    fontSize: fs(5.6),
-    lineHeight: fs(8),
-    color: SYS_TEXT,
-  },
-  /* 아직 열 수 없는 단계는 눌리지 않는 것을 눈으로도 알 수 있게 한다 */
-  actionOff: {
-    opacity: 0.35,
-  },
-
-  actionDivider: {
-    width: s(0.6),
-    height: s(26),
-    backgroundColor: colors.border,
-  },
-
-  // 입력바 y448 h38
-  inputBar: {
-    backgroundColor: colors.surface,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: s(6),
-    paddingHorizontal: s(10),
-    paddingVertical: s(7),
-  },
-  plusButton: {
-    width: s(20),
-    height: s(20),
-    borderRadius: s(999),
-    backgroundColor: colors.surfaceSunken,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  plusText: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(9),
-    lineHeight: fs(11),
-    color: SYS_TEXT,
-  },
-  /* 펴져 있을 때는 ＋ 를 돌려 × 로 보여 준다 — 다시 누르면 접힌다는 뜻 */
-  plusTextOpen: {
-    transform: [{ rotate: '45deg' }],
-  },
-  input: {
-    flex: 1,
-    height: s(24),
-    borderRadius: s(999),
-    backgroundColor: colors.card,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: s(5),
-    paddingHorizontal: s(8),
-    ...shadows.card,
-  },
-  inputText: {
-    flex: 1,
-    minWidth: 0,
-    paddingVertical: 0,
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    color: colors.textPrimary,
-  },
-  sendButton: {
-    width: s(24),
-    height: s(24),
-    borderRadius: s(999),
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...shadows.button,
-  },
-  sendButtonDisabled: {
-    opacity: 0.5,
-  },
-  listNotice: {
-    marginVertical: s(16),
-    textAlign: 'center',
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    lineHeight: fs(10),
-    color: SYS_TEXT,
-  },
-  retryBox: {
-    alignItems: 'center',
-  },
-  retryButton: {
-    marginTop: s(-10),
-    paddingHorizontal: s(8),
-    paddingVertical: s(3),
-    borderRadius: s(6),
-    backgroundColor: colors.primarySoft,
-  },
-  retryText: {
-    fontFamily: fontFamily.bold,
-    fontSize: fs(6),
-    lineHeight: fs(8),
-    color: colors.primary,
-  },
+  screen: { flex: 1, backgroundColor: colors.bg },
+  header: { minHeight: v3Layout.headerHeight, padding: 8, gap: 8, flexDirection: 'row', alignItems: 'center' },
+  iconButton: { width: v3Layout.minTouchTarget, height: v3Layout.minTouchTarget, alignItems: 'center', justifyContent: 'center' },
+  headerCenter: { flex: 1, minWidth: 0 },
+  headerTitleRow: { minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  headerTitle: { flexShrink: 1, fontFamily: fontFamily.bold, fontSize: 17, lineHeight: 25, color: colors.ink },
+  countChip: { paddingHorizontal: 7, paddingVertical: 1, borderRadius: 10, backgroundColor: colors.mutedBg },
+  countText: { fontFamily: fontFamily.bold, fontSize: 12, lineHeight: 18, color: colors.sub },
+  pinned: { paddingHorizontal: 16, paddingBottom: 8 },
+  messageList: { flex: 1 },
+  messageSeparator: { height: 14 },
+  list: { flexGrow: 1, justifyContent: 'flex-end', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12 },
+  grouped: { marginTop: -6 },
+  dateRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4 },
+  dateLine: { flex: 1, height: 1, backgroundColor: colors.border },
+  dateText: { fontFamily: fontFamily.body, fontSize: 12, lineHeight: 18, color: colors.sub },
+  sysRow: { alignItems: 'center' },
+  noticeAction: { minWidth: 44, minHeight: 44, paddingHorizontal: 12, marginTop: 4, borderRadius: 12, backgroundColor: colors.selectedBg, justifyContent: 'center', alignItems: 'center' },
+  noticeActionText: { fontFamily: fontFamily.medium, fontSize: 13, lineHeight: 19, color: colors.selectedText },
+  sysPill: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 12, backgroundColor: colors.mutedBg },
+  sysText: { fontFamily: fontFamily.medium, fontSize: 12, lineHeight: 18, color: colors.sub, textAlign: 'center' },
+  otherRow: { flexDirection: 'row', gap: 8 },
+  msgAvatar: { backgroundColor: colors.mutedBg },
+  avatarSpacer: { width: 36 },
+  otherCol: { flexShrink: 1, minWidth: 0, gap: 4 },
+  name: { fontFamily: fontFamily.medium, fontSize: 12, lineHeight: 18, color: colors.sub },
+  otherLine: { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
+  mineRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'flex-end', gap: 6 },
+  bubble: { flexShrink: 1, paddingHorizontal: 12, paddingVertical: 9 },
+  bubbleOther: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderTopLeftRadius: 4, borderTopRightRadius: 14, borderBottomLeftRadius: 14, borderBottomRightRadius: 14 },
+  bubbleMine: { backgroundColor: colors.primary, borderTopLeftRadius: 14, borderTopRightRadius: 4, borderBottomLeftRadius: 14, borderBottomRightRadius: 14 },
+  bubbleText: { fontFamily: fontFamily.body, fontSize: 14, lineHeight: 20, color: colors.ink },
+  bubbleTextMine: { fontFamily: fontFamily.medium, fontSize: 14, lineHeight: 20, color: colors.ink },
+  time: { fontFamily: fontFamily.body, fontSize: 12, lineHeight: 18, color: colors.sub },
+  sticker: { width: 96, height: 96, borderRadius: 16, overflow: 'hidden', backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
+  stickerImage: { width: 96, height: 96 },
+  inputBar: { backgroundColor: colors.surface, borderTopWidth: 1, borderColor: colors.border, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 20 },
+  plusButton: { width: v3Layout.minTouchTarget, height: v3Layout.minTouchTarget, borderRadius: 22, backgroundColor: colors.mutedBg, alignItems: 'center', justifyContent: 'center' },
+  plusOpen: { backgroundColor: colors.primary },
+  input: { flex: 1, minWidth: 0, height: 44, borderRadius: 22, backgroundColor: colors.bg, paddingHorizontal: 16, justifyContent: 'center' },
+  inputText: { paddingVertical: 0, fontFamily: fontFamily.body, fontSize: 14, color: colors.ink },
+  sendButton: { width: v3Layout.minTouchTarget, height: v3Layout.minTouchTarget, borderRadius: 22, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  sendButtonDisabled: { opacity: 0.4 },
+  listNotice: { marginVertical: 28, textAlign: 'center', fontFamily: fontFamily.body, fontSize: 14, lineHeight: 20, color: colors.sub },
 });

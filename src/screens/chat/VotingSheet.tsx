@@ -1,9 +1,13 @@
 import { X } from 'lucide-react-native';
-import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useAuth } from '../../auth/AuthProvider';
-import BottomSheet from '../../components/BottomSheet';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useKeyboardOverlap } from '../../theme/keyboard';
+import PlanConfirmation from '../../components/ui/PlanConfirmation';
+import { meetingTimeLabel } from '../../components/ui/MeetingCard';
+import { advanceRoomStage, type RoomStage } from '../../lib/rooms';
 import { CompleteButton } from '../../components/ui/Button';
 import {
   addVotingItem,
@@ -16,13 +20,14 @@ import {
 } from '../../lib/voting';
 import { hasStrictVoteMajority, pickLeadingVoteOption } from '../../lib/votingLeader';
 import { fs, s } from '../../theme/scale';
-import { colors } from '../../theme/tokens';
+import { colors, v3Colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 
 const TINT = '#FFF5EB';
 
 type Props = {
   visible: boolean;
+  isOwner?: boolean; stage?: RoomStage; confirmedSlot?: string | null; participantCount?: number;
   roomId: string | null;
   kind: VotingKind;
   title: string;
@@ -50,6 +55,7 @@ type Props = {
  */
 export default function VotingSheet({
   visible,
+  isOwner = false, stage = 'place', confirmedSlot = null, participantCount,
   roomId,
   kind,
   title,
@@ -69,6 +75,11 @@ export default function VotingSheet({
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const operation = useRef(false);
+  const [plan, setPlan] = useState<{ id: string; label: string; voteSaved: boolean } | null>(null);
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
+  const [confirmationError, setConfirmationError] = useState<string | null>(null);
+  useEffect(() => { setPlan(null); setConfirmationOpen(false); setConfirmationError(null); }, [roomId]);
 
   /*
    * 이미 투표 후보에 오른 것은 추천에서 뺀다. 남겨 두면 같은 이름이 위아래로
@@ -156,8 +167,43 @@ export default function VotingSheet({
   const leader = pickLeadingVoteOption(options);
   const leaderHasMajority = leader !== null && hasStrictVoteMajority(leader.voters.length, memberCount);
 
+  const canConfirm = isOwner && (kind !== 'menu' || stage === 'place');
+  const startConfirmation = () => {
+    if (!canConfirm || busy || loading) return;
+    if (!plan?.voteSaved) {
+      if (!leader || !leaderHasMajority) return;
+      setPlan({ id: leader.id, label: leader.label, voteSaved: false });
+    }
+    Keyboard.dismiss(); setConfirmationError(null); setConfirmationOpen(true);
+  };
+  const confirmPlan = async () => {
+    if (!canConfirm || !roomId || !plan || operation.current) return;
+    operation.current = true; setBusy(true); setConfirmationError(null);
+    let voteSaved = plan.voteSaved;
+    try {
+      if (!voteSaved) {
+        const error = await confirmRoomVote(roomId, plan.id);
+        if (error) { setConfirmationError('식당 선택을 저장하지 못했어요. 투표를 확인하고 다시 시도해 주세요.'); return; }
+        voteSaved = true; setPlan({ ...plan, voteSaved: true });
+      }
+      if (kind === 'menu') {
+        // TODO(서버 단계): 식당 저장과 단계 전환을 하나의 원자적 RPC로 합친다.
+        const { error } = await advanceRoomStage(roomId, 'confirmed');
+        if (error) { setConfirmationError('식당은 저장됐지만 약속을 확정하지 못했어요. 다시 시도해 주세요.'); return; }
+      }
+      setConfirmationOpen(false); setPlan(null); onConfirm(); onClose();
+    } catch {
+      setConfirmationError(voteSaved ? '식당은 저장됐지만 약속을 확정하지 못했어요. 다시 시도해 주세요.' : '식당 선택을 저장하지 못했어요. 투표를 확인하고 다시 시도해 주세요.');
+    } finally { operation.current = false; setBusy(false); }
+  };
+
   return (
-    <BottomSheet visible={visible} title={title} onClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={() => { if (!busy) { if (confirmationOpen) setConfirmationOpen(false); else onClose(); } }}>
+    <SafeAreaProvider>
+    {confirmationOpen && plan ? <PlanConfirmation restaurant={plan.label} when={meetingTimeLabel(confirmedSlot, stage)} memberCount={participantCount ?? memberCount}
+      busy={busy} error={confirmationError} retry={plan.voteSaved} onCancel={() => setConfirmationOpen(false)} onConfirm={() => void confirmPlan()} />
+      : <VotingFrame title={title} onClose={() => { if (!busy) onClose(); }}>
+
       {openSuggestions.length > 0 ? (
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>{suggestionTitle ?? 'AI 추천'}</Text>
@@ -251,27 +297,33 @@ export default function VotingSheet({
         </Pressable>
       </View>
 
-      <CompleteButton
-        label="이걸로 정하기"
-        style={styles.cta}
-        disabled={busy || !leader || !leaderHasMajority}
-        onPress={() => void (async () => {
-          if (!leader || !roomId) return;
-          setBusy(true);
-          const error = await confirmRoomVote(roomId, leader.id);
-          setBusy(false);
-          if (error) {
-            Alert.alert('확정 실패', error.message);
-            return;
-          }
-          onConfirm();
-          onClose();
-        })()}
-      />
+      {canConfirm ? <CompleteButton label={plan?.voteSaved ? '약속 확정 다시 시도' : kind === 'menu' ? '약속 확정' : '이걸로 정하기'}
+        style={styles.cta} disabled={busy || loading || (!plan?.voteSaved && (!leader || !leaderHasMajority))} onPress={startConfirmation} /> : null}
 
-    </BottomSheet>
+    </VotingFrame>}
+    </SafeAreaProvider></Modal>
   );
 }
+
+/** One Modal switches its content, avoiding iOS sheet/dialog presentation overlap. */
+function VotingFrame({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  const insets = useSafeAreaInsets(); const root = useRef<View>(null);
+  const { overlap, remeasure } = useKeyboardOverlap(root);
+  return <View ref={root} onLayout={remeasure} style={[frameStyles.root, { paddingTop: insets.top, paddingBottom: overlap }]}>
+    <Pressable accessible={false} style={frameStyles.scrim} onPress={onClose} />
+    <View style={[frameStyles.sheet, { paddingBottom: 24 + (overlap > 0 ? 0 : insets.bottom) }]} accessibilityViewIsModal aria-modal>
+      <View style={frameStyles.handle} /><View style={frameStyles.heading}><Text style={frameStyles.title}>{title}</Text><Pressable accessibilityRole="button" accessibilityLabel="식당 시트 닫기" onPress={onClose} style={frameStyles.close}><X size={24} color={v3Colors.ink} /></Pressable></View>
+      <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>{children}</ScrollView>
+    </View>
+  </View>;
+}
+const frameStyles = StyleSheet.create({
+  root: { flex: 1, justifyContent: 'flex-end' }, scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: v3Colors.ink, opacity: 0.5 },
+  sheet: { maxHeight: '95%', borderTopLeftRadius: 24, borderTopRightRadius: 24, backgroundColor: v3Colors.surface, paddingHorizontal: 20, paddingTop: 8, paddingBottom: 24 },
+  handle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: v3Colors.border },
+  heading: { flexDirection: 'row', alignItems: 'center', gap: 8 }, title: { flex: 1, fontFamily: fontFamily.bold, fontSize: 20, lineHeight: 28, color: v3Colors.ink },
+  close: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+});
 
 const styles = StyleSheet.create({
   extraAction: {

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../auth/AuthProvider';
 import { fetchMonthNotes, type CalendarNote } from '../lib/calendarNotes';
 import { useForegroundRefreshToken } from '../lifecycle/AppLifecycleContext';
+import { scheduleEventColors } from '../theme/scheduleTokens';
 import type { PersonalEvent } from '../screens/schedule/PersonalEventSheet';
 
 type Status = 'loading' | 'ready' | 'error';
@@ -72,7 +73,7 @@ export function groupNotes(notes: CalendarNote[]) {
         id: note.id,
         title: note.title,
         time: `${note.time} ~ ${note.endTime ?? ''}`.trim(),
-        color: note.color ?? '#5B9BD5',
+        color: note.color ?? scheduleEventColors[0].value,
       });
       eventsByDay[day] = list;
       continue;

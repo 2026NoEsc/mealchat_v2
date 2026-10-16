@@ -1,374 +1,162 @@
-import { ChevronDown, UserMinus, UserPlus } from 'lucide-react-native';
-import { useCallback, useEffect, useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-
-import { useTopInset } from '../../theme/insets';
+import { Search, X } from 'lucide-react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useAuth } from '../../auth/AuthProvider';
-import AppHeader from '../../components/AppHeader';
+import Avatar from '../../components/Avatar';
+import { SecondaryButton } from '../../components/ui/Button';
+import Toast, { useToast } from '../../components/ui/Toast';
 import { notify } from '../../lib/confirm';
-import {
-  addFriend,
-  fetchMyFriends,
-  removeFriend,
-  searchProfilesByTag,
-  type Friend,
-} from '../../lib/friends';
-import { fs, s, v3Layout } from '../../theme/scale';
-import { colors, v3Colors } from '../../theme/tokens';
+import { addFriend, fetchMyFriends, removeFriend, searchProfilesByTag, type Friend } from '../../lib/friends';
+import { v3Layout } from '../../theme/scale';
+import { v3Colors as colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
+import ProfileFrame, { profileStyles as shared } from './ProfileFrame';
 
-/** friends.ts 의 검색 결과 행 */
-type SearchedProfile = { id: string; name: string; tag: string; avatar_color: string };
+type Candidate = { id: string; name: string; tag: string; avatar_color: string };
 
+/** Phone 530:1594, 601:2884/2954/3028. No new server contract. */
 export default function FriendsScreen() {
-  /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
-  const topInset = useTopInset();
   const { user } = useAuth();
   const userId = user?.id ?? null;
-
   const [friends, setFriends] = useState<Friend[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [inviteOpen, setInviteOpen] = useState(false);
   const [keyword, setKeyword] = useState('');
-  const [candidates, setCandidates] = useState<SearchedProfile[]>([]);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [searched, setSearched] = useState(false);
   const [busy, setBusy] = useState(false);
+  const locked = useRef(false);
+  const revision = useRef(0);
+  const searchRevision = useRef(0);
+  const active = useRef(true);
+  const { showToast, dismissToast, toastProps } = useToast();
 
   const load = useCallback(async () => {
     if (!userId) return;
+    const version = ++revision.current;
     const { data, error } = await fetchMyFriends(userId);
-    if (error) {
-      setLoadError(error.message);
-      return;
-    }
-    setLoadError(null);
-    setFriends(data ?? []);
+    if (!active.current || version !== revision.current) return;
+    setLoadError(error?.message ?? null);
+    if (!error) setFriends(data ?? []);
   }, [userId]);
-
   useEffect(() => {
+    const loadVersion = revision;
+    const searchVersion = searchRevision;
+    active.current = true;
     void load();
+    return () => { active.current = false; ++loadVersion.current; ++searchVersion.current; };
   }, [load]);
 
-  /*
-   * 추천 목록을 만들 근거가 없다 — "같은 학과", "2번 함께 먹음" 같은 데이터가
-   * 스키마에 없다. 대신 태그나 이름으로 직접 찾게 한다.
-   */
   const search = async () => {
-    if (!userId) return;
+    if (!userId || locked.current || !keyword.trim()) return;
+    const version = ++searchRevision.current;
+    locked.current = true;
     setBusy(true);
-    const { data, error } = await searchProfilesByTag(keyword, userId);
-    setBusy(false);
-
-    /*
-     * 실패를 삼키면 안 된다. 예전에는 error 를 버려서, 검색이 막히거나
-     * 끊겨도 화면에는 "결과 없음" 과 똑같이 보였다 — 사람은 그 사람이
-     * 없는 줄 안다.
-     */
-    if (error) {
-      setCandidates([]);
-      notify('검색하지 못했어요', error.message);
-      return;
-    }
-
-    const already = new Set(friends.map((friend) => friend.profileId));
-    setCandidates((data ?? []).filter((profile) => !already.has(profile.id)));
+    try {
+      const { data, error } = await searchProfilesByTag(keyword, userId);
+      if (!active.current || version !== searchRevision.current) return;
+      if (error) { notify('검색하지 못했어요', error.message); return; }
+      const already = new Set(friends.map((friend) => friend.profileId));
+      setCandidates((data ?? []).filter((person) => !already.has(person.id)));
+      setSearched(true);
+    } finally { locked.current = false; if (active.current) setBusy(false); }
   };
 
-  const add = async (targetId: string) => {
-    if (!userId) return;
+  const add = async (person: Candidate) => {
+    if (!userId || locked.current) return;
+    locked.current = true;
     setBusy(true);
-    const error = await addFriend(userId, targetId);
-    setBusy(false);
-
-    if (error) {
-      notify('추가 실패', error.message);
-      return;
-    }
-    setCandidates((prev) => prev.filter((profile) => profile.id !== targetId));
-    void load();
+    dismissToast();
+    try {
+      const error = await addFriend(userId, person.id);
+      if (!active.current) return;
+      if (error) { notify('추가 실패', error.message); return; }
+      setCandidates((previous) => previous.filter((item) => item.id !== person.id));
+      setSearched(false);
+      await load();
+      if (active.current) showToast({ message: person.name + '님을 메이트로 추가했어요' });
+    } finally { locked.current = false; if (active.current) setBusy(false); }
   };
 
-  const remove = async (followId: string) => {
+  const remove = async (friend: Friend) => {
+    if (!userId || locked.current) return;
+    locked.current = true;
     setBusy(true);
-    const error = await removeFriend(followId);
-    setBusy(false);
-
-    if (error) {
-      notify('삭제 실패', error.message);
-      return;
-    }
-    void load();
+    dismissToast();
+    ++revision.current;
+    setFriends((previous) => previous.filter((item) => item.id !== friend.id));
+    try {
+      // Persist immediately: termination during the undo window leaves no pending delete.
+      // Undo inserts a new follows row, so reload its new id before allowing another delete.
+      const error = await removeFriend(friend.id);
+      if (!active.current) return;
+      if (error) {
+        notify('삭제 실패', error.message);
+        await load();
+        return;
+      }
+      showToast({
+        message: friend.name + '님을 메이트에서 뺐어요. 되돌리기는 마지막 삭제만 가능해요',
+        actionLabel: '되돌리기',
+        onAction: async () => {
+          if (locked.current || !active.current) return;
+          locked.current = true;
+          setBusy(true);
+          try {
+            // TODO(서버 단계): addFriend가 role을 mate로 고정한다. 다른 role의 삭제 복구에는 기존 role 보존 계약이 필요하다.
+            const restoreError = await addFriend(userId, friend.profileId);
+            if (!active.current) return;
+            if (restoreError) notify('복구 실패', restoreError.message);
+            await load();
+          } finally { locked.current = false; if (active.current) setBusy(false); }
+        },
+      });
+    } finally { locked.current = false; if (active.current) setBusy(false); }
   };
 
-  return (
-    <View style={styles.screen}>
-      {/* 상태바 자리. 배경을 칠하지 않아 화면 배경이 그대로 비친다 —
-          헤더와 같은 색으로 칠하면 둘이 한 덩어리로 보여서 헤더가
-          어디서 시작하는지 알 수 없다 */}
-      <View style={{ height: topInset }} />
-      <AppHeader />
-
-      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        <Text style={styles.title}>내 친구 관리</Text>
-        <Text style={styles.sub}>함께 밥약을 잡을 메이트 {friends.length}명</Text>
-
-        <View style={styles.card}>
-          {loadError ? (
-            <Text style={styles.empty}>친구 목록을 불러오지 못했어요: {loadError}</Text>
-          ) : friends.length === 0 ? (
-            <Text style={styles.empty}>아직 등록된 메이트가 없어요</Text>
-          ) : (
-            friends.map((friend, i) => (
-              <View key={friend.id} style={[styles.row, i > 0 && styles.rowDivided]}>
-                <Avatar name={friend.name} color={friend.avatarColor} />
-                <View style={styles.rowBody}>
-                  <Text style={styles.name}>{friend.name}</Text>
-                  <Text style={styles.status}>@{friend.tag}</Text>
-                </View>
-                <Pressable
-                  style={styles.removeButton}
-                  hitSlop={s(6)}
-                  disabled={busy}
-                  onPress={() => void remove(friend.id)}>
-                  <UserMinus size={s(9)} color={colors.danger} strokeWidth={2} />
-                </Pressable>
-              </View>
-            ))
-          )}
+  return <ProfileFrame title="내 친구 관리">
+    <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+      <View style={shared.row}>
+        <View style={styles.searchBox}><Search size={18} color={colors.sub} aria-hidden={true} />
+          <TextInput accessibilityLabel="닉네임 또는 유저 코드" style={styles.input} value={keyword}
+            onChangeText={(text) => { setKeyword(text); ++searchRevision.current; setCandidates([]); setSearched(false); }}
+            placeholder="닉네임 또는 @user-코드" placeholderTextColor={colors.sub} autoCapitalize="none" returnKeyType="search" onSubmitEditing={() => void search()} />
         </View>
-
-        {/* 초대는 별도 화면 대신 이 자리에서 펼쳐지는 토글 목록으로 처리한다 */}
-        <Pressable
-          style={[styles.inviteToggle, inviteOpen && styles.inviteToggleOpen]}
-          onPress={() => setInviteOpen((v) => !v)}>
-          <Text style={styles.inviteToggleText}>＋ 메이트 초대</Text>
-          <View style={inviteOpen ? styles.chevronOpen : undefined}>
-            <ChevronDown size={s(9)} color={colors.textOnAccent} strokeWidth={2.5} />
-          </View>
-        </Pressable>
-
-        {inviteOpen ? (
-          <View style={styles.card}>
-            <Text style={styles.inviteHint}>닉네임이나 @로 시작하는 유저 코드로 찾아서 추가하세요</Text>
-
-            <View style={styles.searchRow}>
-              <TextInput
-                style={styles.searchInput}
-                value={keyword}
-                onChangeText={setKeyword}
-                placeholder="닉네임 또는 @user-코드"
-                placeholderTextColor={colors.placeholder}
-                autoCapitalize="none"
-                onSubmitEditing={() => void search()}
-              />
-              <Pressable style={styles.searchButton} disabled={busy} onPress={() => void search()}>
-                <Text style={styles.searchButtonText}>찾기</Text>
-              </Pressable>
-            </View>
-
-            {candidates.length === 0 ? (
-              <Text style={styles.inviteHint}>
-                {keyword.trim() ? '찾은 사람이 없어요' : ' '}
-              </Text>
-            ) : (
-              candidates.map((person, i) => (
-                <View key={person.id} style={[styles.row, i > 0 && styles.rowDivided]}>
-                  <Avatar name={person.name} color={person.avatar_color} />
-                  <View style={styles.rowBody}>
-                    <Text style={styles.name}>{person.name}</Text>
-                    <Text style={styles.status}>@{person.tag}</Text>
-                  </View>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`${person.name} 메이트 추가`}
-                    accessibilityState={{ disabled: busy }}
-                    disabled={busy}
-                    onPress={() => void add(person.id)}
-                    style={({ pressed }) => [styles.addFriendButton, pressed && { opacity: 0.8 }, busy && { opacity: 0.4 }]}>
-                    <View accessible={false} importantForAccessibility="no-hide-descendants">
-                      <UserPlus size={20} color={v3Colors.selectedText} />
-                    </View>
-                  </Pressable>
-                </View>
-              ))
-            )}
-          </View>
-        ) : null}
-      </ScrollView>
-    </View>
-  );
+        <SecondaryButton label="찾기" style={styles.searchButton} loading={busy} disabled={!keyword.trim()} onPress={() => void search()} />
+      </View>
+      <Text style={shared.sub}>닉네임이나 @로 시작하는 유저 코드로 찾아서 추가하세요.</Text>
+      {searched && candidates.length === 0 ? <View style={styles.result}><Text style={shared.sub}>찾은 사람이 없어요</Text></View> : null}
+      {candidates.map((person) => <View key={person.id} style={styles.result}>
+        <Avatar name={person.name} seed={person.id} size={44} />
+        <View style={shared.grow}><Text style={shared.title}>{person.name}</Text><Text style={shared.sub}>@{person.tag}</Text></View>
+        <SecondaryButton label="추가" accessibilityLabel={person.name + ' 메이트 추가'} style={styles.addButton} disabled={busy} onPress={() => void add(person)} />
+      </View>)}
+      <View testID="profile-mates-card" style={styles.card}>
+        <Text style={styles.heading}>메이트 {friends.length}명</Text>
+        {loadError ? <Text style={styles.empty}>친구 목록을 불러오지 못했어요: {loadError}</Text>
+          : friends.length === 0 ? <Text style={styles.empty}>아직 등록된 메이트가 없어요</Text>
+          : friends.map((friend) => <View key={friend.id} style={styles.mate}>
+            <Avatar name={friend.name} seed={friend.profileId} size={44} />
+            <View style={shared.grow}><Text style={shared.title}>{friend.name}</Text><Text style={shared.sub}>@{friend.tag}</Text></View>
+            <Pressable accessibilityRole="button" accessibilityLabel={friend.name + ' 삭제'} accessibilityState={{ disabled: busy }} disabled={busy}
+              onPress={() => void remove(friend)} style={({ pressed }) => [shared.iconButton, pressed && shared.pressed]}><X size={18} color={colors.sub} aria-hidden={true} /></Pressable>
+          </View>)}
+      </View>
+      {/* TODO(서버 단계): 함께 먹은 횟수·학과는 제공되지 않아 기존 유저 코드만 표시한다. */}
+      {/* TODO(서버 단계): 초대 공유 계약이 없어 메이트 초대 버튼은 표시하지 않는다. */}
+    </ScrollView>
+    <Toast {...toastProps} />
+  </ProfileFrame>;
 }
-
-/** 아바타 업로드가 없어 avatar_color 원에 이름 첫 글자를 넣는다 */
-function Avatar({ name, color }: { name: string; color: string }) {
-  return (
-    <View style={[styles.avatarBox, { backgroundColor: color }]}>
-      <Text style={styles.avatarInitial}>{[...name.trim()][0] ?? '?'}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  addFriendButton: {
-    width: v3Layout.minTouchTarget,
-    height: v3Layout.minTouchTarget,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: v3Colors.border,
-    backgroundColor: v3Colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  screen: {
-    flex: 1,
-    backgroundColor: colors.surfaceSunken,
-  },
-  avatarInitial: {
-    fontFamily: fontFamily.bold,
-    fontSize: fs(11),
-    color: colors.textOnAccent,
-  },
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: s(6),
-    marginBottom: s(8),
-  },
-  searchInput: {
-    flex: 1,
-    height: s(22),
-    borderRadius: s(8),
-    backgroundColor: colors.surfaceSunken,
-    paddingHorizontal: s(8),
-    paddingVertical: 0,
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    color: colors.textPrimary,
-  },
-  searchButton: {
-    paddingHorizontal: s(10),
-    height: s(22),
-    borderRadius: s(8),
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  searchButtonText: {
-    fontFamily: fontFamily.bold,
-    fontSize: fs(7),
-    color: colors.textOnAccent,
-  },
-  body: {
-    paddingHorizontal: s(11.5),
-    paddingTop: s(10),
-    paddingBottom: s(20),
-  },
-  title: {
-    fontFamily: fontFamily.bold,
-    fontSize: fs(12),
-    lineHeight: fs(16),
-    color: colors.textPrimary,
-  },
-  sub: {
-    marginTop: s(7),
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(9),
-    color: colors.textMuted,
-  },
-  card: {
-    marginTop: s(7),
-    backgroundColor: colors.card,
-    borderRadius: s(10),
-    paddingHorizontal: s(9),
-    paddingVertical: s(4),
-  },
-  row: {
-    height: s(34),
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  rowDivided: {
-    borderTopWidth: s(0.6),
-    borderTopColor: colors.border,
-  },
-  avatarBox: {
-    width: s(22),
-    height: s(22),
-    borderRadius: s(7),
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatar: {
-    width: s(14),
-    height: s(17),
-  },
-  rowBody: {
-    flex: 1,
-    marginLeft: s(8),
-  },
-  name: {
-    fontFamily: fontFamily.semibold,
-    fontSize: fs(7.5),
-    lineHeight: fs(10),
-    color: colors.textPrimary,
-  },
-  status: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(8),
-    color: colors.textMuted,
-  },
-  removeButton: {
-    width: s(18),
-    height: s(18),
-    borderRadius: s(18),
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  empty: {
-    paddingVertical: s(14),
-    textAlign: 'center',
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    color: colors.textMuted,
-  },
-  inviteToggle: {
-    marginTop: s(10),
-    height: s(28),
-    borderRadius: s(10),
-    backgroundColor: colors.primary,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: s(5),
-  },
-  inviteToggleOpen: {
-    borderBottomLeftRadius: s(4),
-    borderBottomRightRadius: s(4),
-  },
-  inviteToggleText: {
-    fontFamily: fontFamily.extrabold,
-    fontSize: fs(9.5),
-    lineHeight: fs(13),
-    color: colors.textOnAccent,
-  },
-  chevronOpen: {
-    transform: [{ rotate: '180deg' }],
-  },
-  inviteHint: {
-    marginTop: s(6),
-    marginBottom: s(2),
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(8),
-    color: colors.textMuted,
-  },
+  body: { paddingTop: 8, paddingHorizontal: 20, paddingBottom: 120, gap: 14 },
+  searchBox: { flex: 1, minWidth: 0, minHeight: v3Layout.fieldHeight, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, paddingHorizontal: 14, gap: 6, flexDirection: 'row', alignItems: 'center' },
+  input: { flex: 1, minWidth: 0, height: v3Layout.fieldHeight, padding: 0, fontFamily: fontFamily.body, fontSize: 16, color: colors.ink },
+  searchButton: { width: 72, paddingHorizontal: 8 },
+  result: { padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 16, borderWidth: 1.5, borderColor: colors.primary, backgroundColor: colors.surface },
+  addButton: { width: 72, minHeight: 44, paddingVertical: 8, paddingHorizontal: 8 },
+  card: { borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, paddingTop: 8, paddingRight: 8, paddingBottom: 8, paddingLeft: 16 },
+  heading: { paddingVertical: 8, fontFamily: fontFamily.bold, fontSize: 15, lineHeight: 22, color: colors.ink },
+  mate: { minHeight: v3Layout.rowHeight, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  empty: { paddingVertical: 16, fontFamily: fontFamily.body, fontSize: 13, lineHeight: 20, color: colors.sub },
 });

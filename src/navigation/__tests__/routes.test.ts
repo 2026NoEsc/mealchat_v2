@@ -12,6 +12,10 @@ describe('navigation route mappings', () => {
 
   it('maps every root route to the expected active tab', () => {
     expect(ROUTE_TO_TAB).toEqual({
+      Settings: 'profile',
+      ServiceTerms: 'profile',
+      PrivacyPolicy: 'profile',
+      AppInfo: 'profile',
       // 예전 경로로 들어와도 홈 탭이 켜져 있어야 한다
       Chat: 'home',
       Friends: 'profile',
@@ -21,9 +25,6 @@ describe('navigation route mappings', () => {
       Profile: 'profile',
       ProfileEdit: 'profile',
       Schedule: 'schedule',
-      ScheduleConfirmed: 'schedule',
-      ScheduleDetail: 'schedule',
-      ScheduleTime: 'schedule',
       Settlements: 'home',
     });
   });

@@ -1,173 +1,80 @@
-import { useState } from 'react';
-import {
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Lock } from 'lucide-react-native';
+import { useEffect, useRef, useState } from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import KeyboardSafeScreen from '../../components/KeyboardSafeScreen';
 import { useAuth } from '../../auth/AuthProvider';
-import ScreenHeader from '../../components/ScreenHeader';
-import { PrimaryButton } from '../../components/ui/Button';
-import { fs, s } from '../../theme/scale';
-import { colors } from '../../theme/tokens';
-import { fontFamily } from '../../theme/typography';
+import KeyboardSafeScreen from '../../components/KeyboardSafeScreen';
+import { AuthFooter, AuthTopBar, authStyles } from '../../components/ui/AuthLayout';
+import { PrimaryButton, TextButton } from '../../components/ui/Button';
+import TextField from '../../components/ui/TextField';
+import { authErrorMessage, confirmProblem, passwordProblem } from '../../lib/password';
+import { v3Colors as colors } from '../../theme/tokens';
 
-/** Supabase 기본 최소 길이 — Dashboard 에서 올리면 서버가 다시 거른다 */
-const MIN_LENGTH = 6;
+type Props = { onCancelRequested?: () => void; onCancelFailed?: () => void; onPasswordChanged?: () => void };
 
-/**
- * 비밀번호 재설정 링크로 들어왔을 때만 나오는 화면.
- * 링크 교환으로 이미 세션이 생긴 상태이므로, 새 비밀번호를 정하기 전에는
- * 앱 본문으로 넘어가지 못하게 막는다. (링크 = 사실상 로그인 이 되는 것을 막는다)
- */
-export default function NewPasswordScreen() {
+export default function NewPasswordScreen({ onCancelRequested, onCancelFailed, onPasswordChanged }: Props = {}) {
   const insets = useSafeAreaInsets();
-  const { completePasswordReset, cancelPasswordReset } = useAuth();
-
+  const { user, completePasswordReset, cancelPasswordReset } = useAuth();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [submitting, setSubmitting] = useState(false);
-
-  const canSubmit = password.length >= MIN_LENGTH && confirm.length > 0;
-
+  const [error, setError] = useState('');
+  const mounted = useRef(true);
+  const busy = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const passwordError = password ? passwordProblem(password) ?? undefined : undefined;
+  const confirmError = confirm ? confirmProblem(password, confirm) ?? undefined : undefined;
+  const canSubmit = !passwordProblem(password) && !confirmProblem(password, confirm);
   const submit = async () => {
-    if (!canSubmit) return;
-
-    if (password !== confirm) {
-      Alert.alert('입력 확인', '비밀번호가 서로 다릅니다.');
-      return;
-    }
-
+    if (!canSubmit || busy.current) return;
+    busy.current = true;
     setSubmitting(true);
-    const error = await completePasswordReset(password);
-    setSubmitting(false);
-
-    if (error) {
-      Alert.alert('변경 실패', error.message);
-      return;
-    }
-
-    Alert.alert('변경 완료', '새 비밀번호로 바뀌었어요.');
+    setError('');
+    try {
+      const result = await completePasswordReset(password);
+      if (result) { if (mounted.current) setError(authErrorMessage(result.message)); }
+      else onPasswordChanged?.();
+    } catch { if (mounted.current) setError('변경하지 못했어요. 잠시 후 다시 시도해 주세요.'); }
+    finally { busy.current = false; if (mounted.current) setSubmitting(false); }
   };
-
   const cancel = async () => {
-    const error = await cancelPasswordReset();
-    if (error) Alert.alert('취소 실패', error.message);
+    if (busy.current) return;
+    busy.current = true;
+    onCancelRequested?.();
+    setSubmitting(true);
+    try {
+      const result = await cancelPasswordReset();
+      if (result) {
+        onCancelFailed?.();
+        if (mounted.current) setError(authErrorMessage(result.message));
+      }
+    } catch {
+      onCancelFailed?.();
+      if (mounted.current) setError('취소하지 못했어요. 잠시 후 다시 시도해 주세요.');
+    } finally { busy.current = false; if (mounted.current) setSubmitting(false); }
   };
-
-  return (
-    <KeyboardSafeScreen style={[styles.screen, { paddingTop: insets.top }]}>
-      <ScreenHeader title="새 비밀번호 설정" />
-
-      <View style={styles.flex}>
-        <ScrollView
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}>
-          <Text style={styles.intro}>
-            {`쓰실 새 비밀번호를 정해주세요.\n최소 ${MIN_LENGTH}자 이상이어야 해요.`}
-          </Text>
-
-          <Text style={styles.label}>새 비밀번호</Text>
-          <TextInput
-            style={styles.input}
-            value={password}
-            onChangeText={setPassword}
-            placeholder="새 비밀번호를 입력하세요"
-            placeholderTextColor={colors.placeholder}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            autoFocus
-          />
-
-          <Text style={[styles.label, styles.labelSpacing]}>새 비밀번호 재확인</Text>
-          <TextInput
-            style={styles.input}
-            value={confirm}
-            onChangeText={setConfirm}
-            placeholder="한 번 더 입력하세요"
-            placeholderTextColor={colors.placeholder}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-
-          <PrimaryButton
-            label={submitting ? '변경 중' : '비밀번호 변경'}
-            style={styles.submit}
-            onPress={() => void submit()}
-            disabled={!canSubmit || submitting}
-          />
-
-          <Pressable style={styles.cancelRow} onPress={() => void cancel()} disabled={submitting}>
-            <Text style={styles.helper}>나중에 하기 (로그인 화면으로)</Text>
-          </Pressable>
-        </ScrollView>
+  return <KeyboardSafeScreen style={[authStyles.screen, { paddingTop: insets.top }]}>
+    <AuthTopBar />
+    <ScrollView style={authStyles.scroll} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+      <View style={authStyles.iconBadge}><Lock size={26} color={colors.selectedText} aria-hidden={true} /></View>
+      <View style={styles.title}>
+        <Text accessibilityRole="header" style={authStyles.title}>새 비밀번호를 정해 주세요</Text>
+        <Text style={authStyles.subtitle}>{user?.email ? `${user.email} 계정의 비밀번호를 바꿔요.` : '계정의 비밀번호를 바꿔요.'}</Text>
       </View>
-    </KeyboardSafeScreen>
-  );
+      <TextField label="새 비밀번호" value={password} secureTextEntry autoCapitalize="none" autoCorrect={false} onChangeText={(value) => { setPassword(value); setError(''); }}
+        helper="8자 이상" error={passwordError || error || undefined} autoFocus autoComplete="new-password" />
+      <TextField label="새 비밀번호 재확인" value={confirm} secureTextEntry autoCapitalize="none" autoCorrect={false} onChangeText={setConfirm} error={confirmError}
+        helper={confirm && !confirmError ? '비밀번호가 일치해요.' : undefined} autoComplete="new-password" />
+    </ScrollView>
+    <AuthFooter>
+      <PrimaryButton label="비밀번호 바꾸기" loading={submitting} disabled={!canSubmit} onPress={() => void submit()} />
+      <TextButton label="나중에 하기 (로그인 화면으로)" disabled={submitting} onPress={() => void cancel()} />
+    </AuthFooter>
+  </KeyboardSafeScreen>;
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.surface,
-  },
-  flex: {
-    flex: 1,
-  },
-  content: {
-    paddingHorizontal: s(18),
-    paddingBottom: s(30),
-  },
-  intro: {
-    marginTop: s(28),
-    marginBottom: s(14),
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    lineHeight: fs(11),
-    color: colors.textMuted,
-  },
-  label: {
-    marginTop: s(4),
-    fontFamily: fontFamily.semibold,
-    fontSize: fs(7),
-    lineHeight: fs(10),
-    color: colors.textPrimary,
-  },
-  labelSpacing: {
-    marginTop: s(8),
-  },
-  input: {
-    marginTop: s(1),
-    height: s(23),
-    borderRadius: s(9),
-    backgroundColor: colors.card,
-    paddingHorizontal: s(8),
-    paddingVertical: 0,
-    fontFamily: fontFamily.semibold,
-    fontSize: fs(8),
-    color: colors.textPrimary,
-  },
-  submit: {
-    marginTop: s(12),
-    marginHorizontal: s(-6),
-  },
-  cancelRow: {
-    marginTop: s(9),
-    alignItems: 'center',
-  },
-  helper: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(10),
-    color: colors.textMuted,
-  },
+  body: { paddingTop: 8, paddingHorizontal: 20, paddingBottom: 24, gap: 18 },
+  title: { gap: 6 },
 });

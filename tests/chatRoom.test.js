@@ -235,9 +235,11 @@ describe('chat status and stickers', () => {
     sendRoomMessage.mockResolvedValue(null);
     await mount();
     await type('after sticker');
-    const button = renderer.root.findAll((node) =>
-      node.props.accessibilityLabel === '이모티콘 선택' && typeof node.props.onPress === 'function')[0];
-    await act(async () => button.props.onPress());
+    const pressLabel = async label => {
+      const button = renderer.root.findAll(node => node.props.accessibilityLabel === label && typeof node.props.onPress === 'function')[0];
+      await act(async () => button.props.onPress());
+    };
+    await pressLabel('메뉴 펼치기'); await pressLabel('이모티콘');
     const pick = renderer.root.findByType(EmoticonPanel).props.onPick;
     await act(async () => {
       pick({ id: 'dudu-love' });

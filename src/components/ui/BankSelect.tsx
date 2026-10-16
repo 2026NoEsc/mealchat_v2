@@ -1,142 +1,59 @@
 import { ChevronDown } from 'lucide-react-native';
 import { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions } from 'react-native';
 
-import { fs, s } from '../../theme/scale';
-import { colors } from '../../theme/tokens';
+import { s, v3Layout } from '../../theme/scale';
+import { v3Colors as colors, v3Radii } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
+import { authStyles } from './AuthLayout';
+import BottomSheet from './BottomSheet';
+import TextField from './TextField';
 
-/** Figma 은행 선택 드롭다운 (549:3366) — 항목 8개 */
+/** Display names only; existing profile contract stores the selected string. */
 export const BANKS = [
-  '국민은행',
-  '기업은행',
-  '농협',
-  '네이버페이',
-  '부산은행',
-  '우리은행',
-  '카카오페이',
-  '토스페이',
+  '국민은행', '기업은행', '농협', '신한은행', '우리은행', '하나은행', 'SC제일은행', '한국씨티은행',
+  '산업은행', '수협은행', '부산은행', '경남은행', '광주은행', '전북은행', '제주은행', '아이엠뱅크',
+  '우체국', '새마을금고', '신협', '저축은행', '카카오뱅크', '케이뱅크', '토스뱅크',
+  '미래에셋증권', '삼성증권', '한국투자증권', 'NH투자증권', 'KB증권', '키움증권',
+  '신한투자증권', '하나증권', '대신증권', '메리츠증권', '유안타증권', '토스증권',
+  '카카오페이증권', '네이버페이', '카카오페이', '토스페이',
 ];
 
-type Props = {
-  value: string | null;
-  onChange: (bank: string) => void;
-  /** 회원가입은 h19, 프로필 수정은 h24 로 쓰인다 */
-  height?: number;
-  /** Unscaled dimensions for the v3 signup form; legacy callers keep height. */
-  logicalHeight?: number;
-  fontSize?: number;
-};
+type Props = { value: string | null; onChange: (bank: string) => void; height?: number; logicalHeight?: number; fontSize?: number };
 
-/**
- * 회원가입 개인정보 입력(150:121)과 프로필 수정(309:1086)이 공유하는 은행 선택.
- * Figma 는 인라인 드롭다운이지만, 목록이 잘리지 않도록 모달로 띄운다.
- */
-export default function BankSelect({ value, onChange, height = 19, logicalHeight, fontSize }: Props) {
+export default function BankSelect({ value, onChange, height = 19, logicalHeight, fontSize = 16 }: Props) {
   const [open, setOpen] = useState(false);
-
-  return (
-    <>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`은행 선택${value ? `, ${value}` : ''}`}
-        style={[styles.trigger, { height: logicalHeight ?? s(height) }]}
-        onPress={() => setOpen(true)}>
-        <Text style={[styles.triggerText, !value && styles.placeholder, fontSize !== undefined && { fontSize }]} numberOfLines={1}>
-          {value ?? '은행 선택'}
-        </Text>
-        <ChevronDown size={s(7)} color={colors.textMuted} strokeWidth={2.5} />
-      </Pressable>
-
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
-          <View style={styles.sheet}>
-            <Text style={styles.sheetTitle}>은행 선택</Text>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {BANKS.map((bank, i) => (
-                <Pressable
-                  key={bank}
-                  style={[styles.option, i > 0 && styles.optionDivided]}
-                  onPress={() => {
-                    onChange(bank);
-                    setOpen(false);
-                  }}>
-                  <Text style={[styles.optionText, bank === value && styles.optionSelected]}>
-                    {bank}
-                  </Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </View>
-        </Pressable>
-      </Modal>
-    </>
-  );
+  const [query, setQuery] = useState('');
+  const window = useWindowDimensions();
+  const normalized = query.replace(/\s/g, '').toLowerCase();
+  const options = BANKS.filter((bank) => bank.replace(/\s/g, '').toLowerCase().includes(normalized));
+  return <>
+    <Pressable accessibilityRole="button" accessibilityLabel={`은행 선택${value ? `, ${value}` : ''}`}
+      accessibilityState={{ expanded: open }} onPress={() => { setQuery(''); setOpen(true); }}
+      style={({ pressed }) => [styles.trigger, { height: Math.max(v3Layout.minTouchTarget, logicalHeight ?? s(height)) }, pressed && authStyles.pressed]}>
+      <Text numberOfLines={1} style={[styles.triggerText, { fontSize }, !value && styles.placeholder]}>{value ?? '은행'}</Text>
+      <ChevronDown size={18} color={colors.sub} aria-hidden={true} />
+    </Pressable>
+    {open ? <BottomSheet visible title="은행·증권사 선택" onClose={() => setOpen(false)}>
+      <TextField label="은행·증권사 검색" value={query} onChangeText={setQuery} placeholder="이름으로 검색해 주세요" autoFocus />
+      <ScrollView style={{ maxHeight: window.height / 2 }} keyboardShouldPersistTaps="handled">
+        {options.length === 0 ? <Text style={authStyles.subtitle}>검색 결과가 없어요.</Text> : null}
+        {options.map((bank) => <Pressable key={bank} accessibilityRole="button" accessibilityLabel={bank}
+          accessibilityState={{ selected: bank === value }} onPress={() => { onChange(bank); setOpen(false); }}
+          style={({ pressed }) => [styles.option, bank === value && styles.selected, pressed && authStyles.pressed]}>
+          <Text style={[styles.optionText, bank === value && styles.selectedText]}>{bank}</Text>
+        </Pressable>)}
+      </ScrollView>
+    </BottomSheet> : null}
+  </>;
 }
 
 const styles = StyleSheet.create({
-  trigger: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    // "카카오페이" 처럼 5글자 은행명이 잘리지 않도록 여백을 최소로 잡는다
-    gap: s(2),
-    borderRadius: s(8),
-    backgroundColor: colors.card,
-    paddingHorizontal: s(4),
-  },
-  triggerText: {
-    flexShrink: 1,
-    fontFamily: fontFamily.bold,
-    fontSize: fs(6.5),
-    color: colors.textPrimary,
-  },
-  placeholder: {
-    fontFamily: fontFamily.regular,
-    color: '#5F5E5B',
-  },
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sheet: {
-    width: s(120),
-    maxHeight: s(200),
-    borderRadius: s(5),
-    backgroundColor: colors.card,
-    paddingHorizontal: s(10),
-    paddingVertical: s(8),
-    shadowColor: '#A9A9A9',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.25,
-    shadowRadius: s(4),
-    elevation: 4,
-  },
-  sheetTitle: {
-    marginBottom: s(4),
-    fontFamily: fontFamily.bold,
-    fontSize: fs(7),
-    lineHeight: fs(10),
-    color: colors.textPrimary,
-  },
-  option: {
-    height: s(18),
-    justifyContent: 'center',
-  },
-  optionDivided: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
-  },
-  optionText: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    lineHeight: fs(10),
-    color: '#999999',
-  },
-  optionSelected: {
-    fontFamily: fontFamily.bold,
-    color: colors.primary,
-  },
+  trigger: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderRadius: v3Radii.field, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, paddingHorizontal: 14 },
+  triggerText: { flexShrink: 1, fontFamily: fontFamily.body, color: colors.ink },
+  placeholder: { color: colors.sub },
+  option: { minHeight: v3Layout.rowHeight, paddingHorizontal: 14, justifyContent: 'center', borderBottomWidth: 1, borderBottomColor: colors.border },
+  optionText: { fontFamily: fontFamily.body, fontSize: 16, lineHeight: 24, color: colors.ink },
+  selected: { backgroundColor: colors.selectedBg },
+  selectedText: { fontFamily: fontFamily.bold, color: colors.selectedText },
 });

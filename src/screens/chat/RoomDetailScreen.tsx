@@ -1,313 +1,111 @@
-import { ChevronLeft } from 'lucide-react-native';
-import { useState } from 'react';
+import { CalendarDays, ChevronLeft, Info, MapPin, Plus, Trash2 } from 'lucide-react-native';
+import { useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-
-import { useTopInset } from '../../theme/insets';
-
 import { useAuth } from '../../auth/AuthProvider';
-import Avatar from '../../components/Avatar';
-import { DangerButton } from '../../components/ui/Button';
-import { meetingLine } from '../../lib/roomFormat';
-import { confirmAction, notify } from '../../lib/confirm';
+import DestructiveDialog from '../../components/ui/DestructiveDialog';
+import FailureCard from '../../components/ui/FailureCard';
+import InviteCodeBox from '../../components/ui/InviteCodeBox';
+import { meetingTimeLabel } from '../../components/ui/MeetingCard';
+import RoomMemberRow from '../../components/ui/RoomMemberRow';
 import { leaveRoom } from '../../lib/rooms';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useRoom } from '../../rooms/useMyRooms';
-import { fs, s } from '../../theme/scale';
-import { colors } from '../../theme/tokens';
+import { useTopInset } from '../../theme/insets';
+import { v3Layout } from '../../theme/scale';
+import { v3Colors as colors, v3FeedbackColors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 
+/** Map only known codes; never surface SQL, identifiers, or arbitrary backend text. */
+export function roomDeletionErrorMessage(error: unknown): string {
+  const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+  if (code === '42501') return '방장만 방을 없앨 수 있어요. 참여 정보를 확인해 주세요.';
+  if (code === 'PGRST301' || code === '28000') return '다시 로그인한 뒤 시도해 주세요.';
+  return '방을 없애지 못했어요. 잠시 후 다시 시도해 주세요.';
+}
+
+/** Phone 528:1525 / 561:1734. Room APIs and owner/settling restrictions are unchanged. */
 export default function RoomDetailScreen() {
-  /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
   const topInset = useTopInset();
   const { goBack, navigate, resetTo, current } = useNavigation();
   const { user } = useAuth();
   const params = current.params as { roomId?: string; title?: string } | undefined;
   const roomId = params?.roomId ?? null;
-
-  const { room } = useRoom(roomId);
+  const { room, status, reload } = useRoom(roomId);
   const title = params?.title ?? room?.title ?? '밥약';
-
-  const [copied, setCopied] = useState(false);
-  const [leaving, setLeaving] = useState(false);
-
   const members = room?.participants ?? [];
-
-  /*
-   * 나가기는 "방장이 방을 닫는" 행위다. 방장이 나가면 방이 통째로 사라지므로
-   * 다른 사람에게는 버튼을 보여 주지 않는다. 서버(leave_room)도 같은 조건으로
-   * 막지만, 누를 수 있게 두고 거절하면 왜 안 되는지가 전달되지 않는다.
-   */
   const isOwner = Boolean(user?.id && room?.ownerId && user.id === room.ownerId);
-  /* 돈이 오가는 중에 방이 사라지면 얼마를 보내야 하는지 확인할 자리가 없어진다 */
   const settling = room?.stage === 'settling';
-
-  /* expo-clipboard 를 아직 넣지 않아 실제 복사는 못 한다. 코드를 그대로 보여준다. */
-  const copyCode = () => setCopied(true);
-
-  const leave = () => {
-    if (!roomId || !user?.id) return;
-
-    /* 되돌릴 수 없고 남은 사람들에게서도 방이 사라진다 — 한 번 묻는다 */
-    confirmAction({
-      title: '방을 없앨까요?',
-      message: '메이트 모두에게서 방이 사라져요. 정산 내역은 남아 있어요.',
-      cancelLabel: '그대로 둘게요',
-      confirmLabel: '없애기',
-      destructive: true,
-      onConfirm: () => {
-        void (async () => {
-          setLeaving(true);
-          const error = await leaveRoom(roomId);
-          setLeaving(false);
-
-          if (error) {
-            /* Alert.alert 은 웹에서 빈 함수라, 거절 사유가 통째로 사라진다 */
-            notify('없애지 못했어요', error.message);
-            return;
-          }
-          /* 목록은 홈으로 합쳤다 */
-          resetTo('Home');
-        })();
-      },
-    });
+  const [deletionOpen, setDeletionOpen] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  const [deletionError, setDeletionError] = useState<string | null>(null);
+  const deleting = useRef(false);
+  const openChatSheet = (openSheet: 'menu' | 'members') => { if (roomId && room && (openSheet !== 'menu' || room.stage === 'place')) navigate('ChatRoom', { roomId, title, openSheet }); };
+  const confirmDeletion = async () => {
+    if (!roomId || !user?.id || deleting.current) return;
+    deleting.current = true;
+    setLeaving(true);
+    setDeletionError(null);
+    try {
+      const error = await leaveRoom(roomId);
+      if (error) { setDeletionError(roomDeletionErrorMessage(error)); return; }
+      setDeletionOpen(false);
+      // Existing success event: Home consumes this only after the real API succeeds.
+      resetTo('Home', { deletedRoomId: roomId, deletedRoomTitle: title });
+    } catch { setDeletionError('방을 없애지 못했어요. 잠시 후 다시 시도해 주세요.'); }
+    finally { deleting.current = false; setLeaving(false); }
   };
-
-  return (
-    <View style={styles.screen}>
-      {/* 상태바 자리. 배경을 칠하지 않아 화면 배경이 그대로 비친다 —
-          헤더와 같은 색으로 칠하면 둘이 한 덩어리로 보여서 헤더가
-          어디서 시작하는지 알 수 없다 */}
-      <View style={{ height: topInset }} />
-
-      <View style={styles.header}>
-        <Pressable onPress={goBack} hitSlop={s(8)}>
-          <ChevronLeft size={s(14)} color={colors.textPrimary} strokeWidth={2.5} />
-        </Pressable>
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {title}
-        </Text>
+  return <View style={styles.screen}>
+    <View style={{ height: topInset }} />
+    <View style={styles.header}><Pressable accessibilityRole="button" accessibilityLabel="뒤로" style={styles.iconButton} onPress={goBack}><ChevronLeft size={24} color={colors.ink} /></Pressable><Text style={styles.headerTitle}>방 상세정보</Text></View>
+    <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+      {status === 'error' ? <FailureCard title="방 정보를 불러오지 못했어요" reason="잠시 후 다시 시도해 주세요." icon={<Info size={26} color={colors.sub} />} onRetry={reload} /> : null}
+      <View style={styles.card}><InviteCodeBox code={room?.code ?? null} loading={!room && status !== 'error'} /></View>
+      <View style={[styles.card, styles.appointment]}>
+        <View style={styles.infoRow}><CalendarDays size={20} color={colors.sub} /><View style={styles.valueBox}><Text style={styles.label}>일정</Text><Text style={[styles.value, !room?.confirmedSlot?.trim() && styles.unset]}>{room?.confirmedSlot?.trim() ? meetingTimeLabel(room.confirmedSlot, room.stage) : '시간 미정'}</Text></View></View>
+        {/* TODO(서버 단계): confirmed_menu는 식당 이름이며 RoomSummary에 별도 메뉴가 없다. 메뉴 줄은 계약이 생기면 표시한다. */}
+        <View style={styles.infoRow}><MapPin size={20} color={colors.sub} /><View style={styles.valueBox}><Text style={styles.label}>장소</Text><Text style={[styles.value, !room?.locationName?.trim() && styles.unset]}>{room?.locationName?.trim() || '아직 정하지 않았어요'}</Text></View>
+          {room && room.stage === 'place' && !room.locationName?.trim() && roomId ? <Pressable accessibilityRole="button" accessibilityLabel="장소 정하기" style={styles.choose} onPress={() => openChatSheet('menu')}><Text style={styles.chooseText}>정하기</Text></Pressable> : null}
+        </View>
       </View>
-
-      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        <Text style={styles.title}>방 상세정보</Text>
-
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>초대 코드</Text>
-          <View style={styles.codeRow}>
-            <Text style={styles.code}>{room?.code ?? '••••••'}</Text>
-            <Pressable
-              style={styles.copyButton}
-              onPress={copyCode}
-              hitSlop={s(6)}>
-              <Text style={styles.copyText}>{copied ? '복사됨' : '복사'}</Text>
-            </Pressable>
-          </View>
-        </View>
-
-        <View style={[styles.card, styles.cardSpacing]}>
-          <View style={styles.placeHeader}>
-            <Text style={styles.placeTitle}>약속 장소</Text>
-            <Pressable hitSlop={s(6)} onPress={() => navigate('Origin')}>
-              <Text style={styles.changeText}>변경</Text>
-            </Pressable>
-          </View>
-          <Text style={styles.placeName}>{room?.locationName ?? '아직 정하지 않았어요'}</Text>
-          <Text style={styles.placeDetail}>
-            {room ? meetingLine(room.meetingDate, null) : ' '}
-          </Text>
-        </View>
-
-        <View style={[styles.card, styles.cardSpacing]}>
-          <View style={styles.placeHeader}>
-            <Text style={styles.placeTitle}>멤버 {members.length}명</Text>
-            <Pressable hitSlop={s(6)} onPress={copyCode}>
-              <Text style={styles.changeText}>＋ 초대</Text>
-            </Pressable>
-          </View>
-
-          {members.map((member) => {
-            const mine = member.profileId === user?.id;
-            return (
-              <View key={member.id} style={styles.memberRow}>
-                {/*
-                  * 올린 사진이 있으면 사진, 없으면 기본 캐릭터 — 채팅방·멤버 목록과
-                  * 같은 얼굴이다. 예전에는 avatar_color 칸에 이름 첫 글자를 넣어서
-                  * 사진이 한 번도 뜨지 않았고, 색이 진한 계정은 칸이 초록으로 보였다.
-                  */}
-                <Avatar
-                  name={member.name}
-                  url={member.avatarUrl}
-                  seed={member.profileId ?? member.id}
-                  size={s(20)}
-                  radius={s(5)}
-                />
-                <Text style={styles.memberName}>{member.name}</Text>
-                {/* 방장 개념이 없다 — 나와 남만 구분한다 */}
-                <Text style={[styles.memberRole, mine && styles.memberRoleOwner]}>
-                  {mine ? '나' : '메이트'}
-                </Text>
-              </View>
-            );
-          })}
-        </View>
-
-        {isOwner ? (
-          <>
-            <DangerButton
-              label={leaving ? '없애는 중' : '방 없애기'}
-              style={styles.leave}
-              disabled={leaving || settling}
-              onPress={leave}
-            />
-            <Text style={styles.leaveHint}>
-              {settling
-                ? '정산이 끝나면 없앨 수 있어요.'
-                : '없애면 메이트 모두에게서 방이 사라져요.'}
-            </Text>
-          </>
-        ) : (
-          <Text style={styles.leaveHint}>방은 방장만 없앨 수 있어요.</Text>
-        )}
-      </ScrollView>
-    </View>
-  );
+      <View style={[styles.card, styles.memberCard]}>
+        <View style={styles.memberHead}><Text style={styles.cardTitle}>{room ? '메이트 ' + members.length + '명' : '메이트'}</Text>{roomId && room ? <Pressable accessibilityRole="button" accessibilityLabel="메이트 초대" style={styles.invite} onPress={() => openChatSheet('members')}><Plus size={16} color={colors.selectedText} /><Text style={styles.chooseText}>초대</Text></Pressable> : null}</View>
+        {members.length ? members.map(member => <RoomMemberRow key={member.id} participant={member} myId={user?.id ?? null} ownerId={room?.ownerId ?? null} />) : <Text style={styles.hint}>{room || status === 'error' ? '참여 멤버를 불러오지 못했어요' : '메이트를 불러오는 중이에요'}</Text>}
+      </View>
+      {/* [결정] leave_room은 settling에서만 막으므로, 다른 단계에 정산 완료 조건을 안내하지 않는다. */}
+      {isOwner ? <>
+        <Pressable accessibilityRole="button" accessibilityLabel="방 없애기" accessibilityState={{ disabled: leaving || settling }} disabled={leaving || settling}
+          onPress={() => { setDeletionError(null); setDeletionOpen(true); }} style={[styles.delete, (leaving || settling) && styles.disabled]}>
+          <Trash2 size={18} color={v3FeedbackColors.error} /><Text style={styles.deleteText}>방 없애기</Text>
+        </Pressable>
+        <View style={styles.hintRow}><Info size={16} color={colors.sub} /><Text style={styles.hint}>{settling ? '정산이 끝나면 없앨 수 있어요.' : '방을 없애면 메이트 모두에게서 방이 사라져요. 정산 내역은 남아 있어요.'}</Text></View>
+      </> : room ? <Text style={styles.hint}>방은 방장만 없앨 수 있어요.</Text> : null}
+      {/* TODO(서버 단계): 메이트의 방 나가기 계약이 없으므로 버튼을 표시하지 않는다. */}
+    </ScrollView>
+    <DestructiveDialog visible={deletionOpen} busy={leaving} error={deletionError} onClose={() => setDeletionOpen(false)} onConfirm={() => void confirmDeletion()} />
+  </View>;
 }
-
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.surfaceSunken,
-  },
-  header: {
-    height: s(44),
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: s(10),
-    gap: s(8),
-    backgroundColor: colors.surface,
-  },
-  headerTitle: {
-    flex: 1,
-    fontFamily: fontFamily.bold,
-    fontSize: fs(9),
-    lineHeight: fs(13),
-    color: colors.textPrimary,
-  },
-  body: {
-    paddingHorizontal: s(12),
-    paddingTop: s(12),
-    paddingBottom: s(20),
-  },
-  title: {
-    fontFamily: fontFamily.bold,
-    fontSize: fs(12),
-    lineHeight: fs(16),
-    color: colors.textPrimary,
-  },
-  card: {
-    marginTop: s(7),
-    backgroundColor: colors.card,
-    borderRadius: s(10),
-    paddingHorizontal: s(9),
-    paddingVertical: s(8),
-  },
-  cardSpacing: {
-    marginTop: s(7),
-  },
-  cardLabel: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(9),
-    color: colors.textMuted,
-  },
-  codeRow: {
-    marginTop: s(4),
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  code: {
-    flex: 1,
-    fontFamily: fontFamily.extrabold,
-    fontSize: fs(11),
-    lineHeight: fs(15),
-    letterSpacing: fs(1),
-    color: colors.primary,
-  },
-  copyButton: {
-    paddingHorizontal: s(7),
-    paddingVertical: s(3),
-    borderRadius: s(6),
-    backgroundColor: colors.primarySoft,
-  },
-  copyText: {
-    fontFamily: fontFamily.bold,
-    fontSize: fs(6.5),
-    lineHeight: fs(9),
-    color: colors.primary,
-  },
-  placeHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  placeTitle: {
-    flex: 1,
-    fontFamily: fontFamily.bold,
-    fontSize: fs(8),
-    lineHeight: fs(11),
-    color: colors.textPrimary,
-  },
-  changeText: {
-    fontFamily: fontFamily.semibold,
-    fontSize: fs(6.5),
-    lineHeight: fs(9),
-    color: colors.primary,
-  },
-  placeName: {
-    marginTop: s(6),
-    fontFamily: fontFamily.semibold,
-    fontSize: fs(7.5),
-    lineHeight: fs(10),
-    color: colors.textPrimary,
-  },
-  placeDetail: {
-    marginTop: s(2),
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(9),
-    color: colors.textMuted,
-  },
-  memberRow: {
-    marginTop: s(7),
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  memberName: {
-    flex: 1,
-    marginLeft: s(6),
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    lineHeight: fs(10),
-    color: colors.textPrimary,
-  },
-  memberRole: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(9),
-    color: colors.textMuted,
-  },
-  memberRoleOwner: {
-    fontFamily: fontFamily.bold,
-    color: colors.primary,
-  },
-  leave: {
-    marginTop: s(12),
-  },
-  leaveHint: {
-    marginTop: s(6),
-    textAlign: 'center',
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(9),
-    color: colors.textMuted,
-  },
+  screen: { flex: 1, backgroundColor: colors.bg },
+  header: { minHeight: v3Layout.headerHeight, padding: 8, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  iconButton: { width: v3Layout.minTouchTarget, height: v3Layout.minTouchTarget, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { fontFamily: fontFamily.bold, fontSize: 17, lineHeight: 25, color: colors.ink },
+  body: { padding: 20, paddingTop: 4, gap: 12, paddingBottom: 40 },
+  card: { borderWidth: 1, borderColor: colors.border, borderRadius: 16, backgroundColor: colors.surface, padding: 16 },
+  appointment: { paddingLeft: 16, paddingRight: 8, paddingVertical: 8 },
+  infoRow: { minHeight: 56, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  valueBox: { flex: 1, minWidth: 0 },
+  label: { fontFamily: fontFamily.medium, fontSize: 12, lineHeight: 18, color: colors.sub },
+  value: { fontFamily: fontFamily.bold, fontSize: 15, lineHeight: 22, color: colors.ink },
+  unset: { fontFamily: fontFamily.body, color: colors.sub },
+  choose: { minHeight: v3Layout.minTouchTarget, minWidth: v3Layout.minTouchTarget, paddingHorizontal: 12, justifyContent: 'center', alignItems: 'center' },
+  chooseText: { fontFamily: fontFamily.bold, fontSize: 14, lineHeight: 20, color: colors.selectedText },
+  memberCard: { gap: 4 },
+  memberHead: { flexDirection: 'row', alignItems: 'center' },
+  cardTitle: { flex: 1, fontFamily: fontFamily.bold, fontSize: 15, lineHeight: 22, color: colors.ink },
+  invite: { minHeight: v3Layout.minTouchTarget, paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  delete: { minHeight: v3Layout.buttonHeight, borderWidth: 1.5, borderColor: v3FeedbackColors.error, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.surface },
+  deleteText: { fontFamily: fontFamily.bold, fontSize: 16, lineHeight: 24, color: v3FeedbackColors.error },
+  hintRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  hint: { flex: 1, fontFamily: fontFamily.body, fontSize: 13, lineHeight: 19, color: colors.sub },
+  disabled: { opacity: 0.4 },
 });

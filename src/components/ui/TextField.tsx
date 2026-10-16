@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { AccessibilityInfo, Platform, StyleProp, StyleSheet, Text, TextInput, TextInputProps, View, ViewStyle } from 'react-native';
 
 import { fs, s, v3Layout } from '../../theme/scale';
@@ -10,6 +10,8 @@ export type TextFieldProps = TextInputProps & {
   helper?: string;
   error?: string;
   containerStyle?: StyleProp<ViewStyle>;
+  inputAccessory?: ReactNode;
+  inputAction?: ReactNode;
 };
 
 /** Targets: 518:1264/1269/1274. Error takes precedence over focus. */
@@ -25,6 +27,8 @@ export default function TextField({
   accessibilityHint,
   editable = true,
   accessibilityState,
+  inputAccessory,
+  inputAction,
   ...rest
 }: TextFieldProps) {
   const [focused, setFocused] = useState(false);
@@ -40,10 +44,7 @@ export default function TextField({
     previousError.current = error;
   }, [error]);
 
-  return (
-    <View style={containerStyle}>
-      <Text nativeID={labelId} style={styles.label}>{label}</Text>
-      <TextInput
+  const input = <TextInput
         placeholderTextColor={colors.sub}
         {...rest}
         editable={editable}
@@ -62,7 +63,18 @@ export default function TextField({
           Boolean(error) && styles.errorInput,
           !editable && styles.disabled,
         ]}
-      />
+      />;
+
+  return (
+    <View style={containerStyle}>
+      <Text nativeID={labelId} style={styles.label}>{label}</Text>
+      {inputAccessory || inputAction ? <View style={styles.inputRow}>
+        <View style={styles.inputContainer}>
+          {input}
+          {inputAccessory ? <View style={styles.accessory}>{inputAccessory}</View> : null}
+        </View>
+        {inputAction}
+      </View> : input}
       {message ? (
         <Text
           nativeID={messageId}
@@ -94,6 +106,9 @@ export const fieldStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
+  inputRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  inputContainer: { flex: 1, minWidth: 0 },
+  accessory: { position: 'absolute', right: 4, top: 0, bottom: 0, justifyContent: 'center' },
   label: {
     marginBottom: 6,
     fontFamily: fontFamily.medium,

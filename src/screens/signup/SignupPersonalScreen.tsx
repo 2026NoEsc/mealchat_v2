@@ -1,405 +1,118 @@
+import { Check } from 'lucide-react-native';
 import { useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useSignupDraft } from '../../auth/SignupDraftProvider';
 import KeyboardSafeScreen from '../../components/KeyboardSafeScreen';
-import SignupHeader from '../../components/SignupHeader';
+import { AuthFooter, SignupStepHeader, authStyles } from '../../components/ui/AuthLayout';
 import BankSelect from '../../components/ui/BankSelect';
-import { PrimaryButton } from '../../components/ui/Button';
+import { PrimaryButton, SecondaryButton } from '../../components/ui/Button';
+import TextField from '../../components/ui/TextField';
 import { BIRTH_LENGTH, formatBirthInput, type BirthField } from '../../lib/birthDate';
-import { notify } from '../../lib/confirm';
 import { checkEmailAvailable, type EmailCheck } from '../../lib/email';
 import { isEmailShaped } from '../../lib/emailFormat';
 import { confirmProblem, passwordProblem } from '../../lib/password';
-import TextField, { fieldStyles } from '../../components/ui/TextField';
-import { useSignupDraft } from '../../auth/SignupDraftProvider';
 import { useNavigation } from '../../navigation/NavigationContext';
-import { fs, s, v3Layout } from '../../theme/scale';
-import { colors, v3Colors } from '../../theme/tokens';
+import { v3Layout } from '../../theme/scale';
+import { v3Colors as colors, v3Radii } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 
-/**
- * Figma 회원가입/개인정보 입력 (150:121) — 220 x 486
- * 닉네임 y115·입력 y126 / 이메일 y156·y167 / 비밀번호 y198·y209 /
- * 재확인 y240·y251 / 계좌번호 y283·행 y294 h19 / 생년월일 y322·행 y339 h23 / 버튼 y423
- */
+/** Phone 519:1262, duplicate-email state 599:4206. Optional private fields stay optional. */
 export default function SignupPersonalScreen() {
   const { navigate, goBack } = useNavigation();
   const insets = useSafeAreaInsets();
   const { draft, updateDraft } = useSignupDraft();
-
-  /*
-   * 이메일 중복 확인. 결과는 "확인한 그 이메일" 에만 해당하므로, 글자가 한 자라도
-   * 바뀌면 버린다. 안 그러면 다른 주소를 적고도 "사용 가능" 이 남아 있게 된다.
-   */
   const [emailCheck, setEmailCheck] = useState<EmailCheck | null>(null);
   const [checkedEmail, setCheckedEmail] = useState('');
   const [checking, setChecking] = useState(false);
-
+  const [attempted, setAttempted] = useState(false);
   const normalizedEmail = draft.email.trim().toLowerCase();
   const checkFresh = emailCheck !== null && checkedEmail === normalizedEmail;
   const emailOk = checkFresh && emailCheck?.status === 'available';
-
   const runEmailCheck = async () => {
     if (checking || !normalizedEmail) return;
-
     setChecking(true);
-    const result = await checkEmailAvailable(normalizedEmail);
-    setChecking(false);
-
-    setCheckedEmail(normalizedEmail);
-    setEmailCheck(result);
+    try {
+      const result = await checkEmailAvailable(normalizedEmail);
+      setCheckedEmail(normalizedEmail);
+      setEmailCheck(result);
+    } catch {
+      setCheckedEmail(normalizedEmail);
+      setEmailCheck({ status: 'failed', message: '잠시 후 다시 시도해 주세요.' });
+    } finally { setChecking(false); }
   };
-
-  /*
-   * 적는 동안 바로 보여 준다. 아직 손도 안 댄 칸에 빨간 글씨를 띄우면 혼내는
-   * 것처럼 보이므로, 뭔가 적은 뒤부터 알려 준다.
-   */
-  const passwordHint = draft.password ? passwordProblem(draft.password) : null;
-  const confirmHint = draft.passwordConfirm
-    ? confirmProblem(draft.password, draft.passwordConfirm)
-    : null;
-
+  const emailError = checkFresh && emailCheck && emailCheck.status !== 'available'
+    ? emailCheck.status === 'taken' ? '이미 가입된 이메일이에요. 다른 주소를 넣거나 로그인해 주세요.'
+      : emailCheck.status === 'invalid' ? '주소 형식을 확인해 주세요.' : '확인하지 못했어요. 잠시 후 다시 시도해 주세요.'
+    : attempted && !isEmailShaped(draft.email) ? '이메일 주소 형식을 확인해 주세요.'
+      : attempted && !emailOk ? '이메일 중복 확인을 해 주세요.' : undefined;
+  const passwordError = draft.password || attempted ? passwordProblem(draft.password) ?? undefined : undefined;
+  const confirmError = draft.passwordConfirm || attempted ? confirmProblem(draft.password, draft.passwordConfirm) ?? undefined : undefined;
   const continueSignup = () => {
-    if (!draft.nickname.trim() || !draft.email.trim()) {
-      notify('입력 확인', '닉네임과 이메일을 입력해 주세요.');
-      return;
-    }
-
-    /*
-     * 실제 가입 요청은 마지막 약관 화면에서 일어난다. 여기서 막지 않으면
-     * 캘린더·취향·약관을 다 지나온 뒤에야 비밀번호 때문에 거절당한다.
-     */
-    if (!isEmailShaped(draft.email)) {
-      notify('이메일을 확인해 주세요', '주소 형식이 맞는지 확인해 주세요.');
-      return;
-    }
-
-    /*
-     * 확인을 안 했거나, 확인한 뒤 주소를 고쳤으면 여기서 막는다. 통과시키면
-     * 마지막 약관 화면에서야 "이미 가입된 이메일" 로 거절당한다.
-     */
-    if (!emailOk) {
-      notify(
-        '이메일 중복 확인이 필요해요',
-        checkFresh && emailCheck?.status === 'taken'
-          ? '이미 가입된 이메일이에요. 다른 주소를 넣어 주세요.'
-          : '이메일 칸 옆 "중복 확인" 을 눌러 주세요.',
-      );
-      return;
-    }
-
-    const badPassword = passwordProblem(draft.password);
-    if (badPassword) {
-      notify('비밀번호를 확인해 주세요', badPassword);
-      return;
-    }
-
-    const badConfirm = confirmProblem(draft.password, draft.passwordConfirm);
-    if (badConfirm) {
-      notify('비밀번호를 확인해 주세요', badConfirm);
-      return;
-    }
-
+    setAttempted(true);
+    if (!draft.nickname.trim() || !isEmailShaped(draft.email) || !emailOk || passwordProblem(draft.password) || confirmProblem(draft.password, draft.passwordConfirm)) return;
     navigate('SignupCalendar');
   };
-
-  return (
-    <KeyboardSafeScreen style={[styles.screen, { paddingTop: insets.top }]}>
-      <SignupHeader title="개인정보 입력" step={1} stepLabel="개인정보 입력" onBack={goBack} />
-
-      <View style={styles.flex}>
-        <ScrollView
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}>
-          <TextField
-            label="닉네임"
-            value={draft.nickname}
-            onChangeText={(nickname) => updateDraft({ nickname })}
-            placeholder="예: 밀챗"
-            containerStyle={styles.firstField}
-          />
-          <View style={styles.emailRow}>
-            <TextField
-              label="이메일"
-              value={draft.email}
-              onChangeText={(email) => updateDraft({ email })}
-              placeholder="예: mealchat@example.com"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              containerStyle={styles.emailField}
-            />
-            <Pressable
-              style={({ pressed }) => [
-                styles.checkButton,
-                (checking || !normalizedEmail) && styles.checkButtonOff,
-                pressed && styles.checkButtonPressed,
-              ]}
-              disabled={checking || !normalizedEmail}
-              onPress={() => void runEmailCheck()}
-              accessibilityRole="button">
-              <Text style={styles.checkButtonText}>{checking ? '확인 중' : '중복 확인'}</Text>
-            </Pressable>
-          </View>
-          {checkFresh && emailCheck ? (
-            <Text
-              style={[styles.hint, emailCheck.status === 'available' && styles.hintOk]}>
-              {emailCheck.status === 'available'
-                ? '사용할 수 있는 이메일이에요.'
-                : emailCheck.status === 'taken'
-                  ? '이미 가입된 이메일이에요.'
-                  : emailCheck.status === 'invalid'
-                    ? '주소 형식을 확인해 주세요.'
-                    : `확인하지 못했어요. ${emailCheck.message}`}
-            </Text>
-          ) : null}
-          <TextField
-            label="비밀번호"
-            value={draft.password}
-            onChangeText={(password) => updateDraft({ password })}
-            placeholder="8자 이상"
-            secureTextEntry
-            containerStyle={styles.field}
-          />
-          {passwordHint ? <Text style={styles.hint}>{passwordHint}</Text> : null}
-          <TextField
-            label="비밀번호 재확인"
-            value={draft.passwordConfirm}
-            onChangeText={(passwordConfirm) => updateDraft({ passwordConfirm })}
-            placeholder="한 번 더 입력해 주세요"
-            secureTextEntry
-            containerStyle={styles.field}
-          />
-          {confirmHint ? (
-            <Text style={styles.hint}>{confirmHint}</Text>
-          ) : draft.passwordConfirm ? (
-            <Text style={[styles.hint, styles.hintOk]}>비밀번호가 일치해요.</Text>
-          ) : null}
-
-          <Text style={[styles.label, styles.accountLabel]}>계좌번호</Text>
-          <View style={styles.accountRow}>
-            <View style={styles.bankChip}>
-              <BankSelect value={draft.bank} onChange={(bank) => updateDraft({ bank })}
-                logicalHeight={v3Layout.fieldHeight} fontSize={16} />
-            </View>
-            <TextInput
-              style={styles.accountInput}
-              accessibilityLabel="계좌번호"
-              value={draft.account}
-              onChangeText={(account) => updateDraft({ account })}
-              placeholder="'-' 없이 숫자만"
-              placeholderTextColor={colors.placeholder}
-              keyboardType="number-pad"
-            />
-          </View>
-
-          <Text style={[styles.label, styles.birthLabel]}>생년월일</Text>
-          <View style={styles.birthRow}>
-            <BirthBox
-              field="year"
-              value={draft.birth.year}
-              unit="년"
-              placeholder="2003"
-              onChange={(year) => updateDraft({ birth: { ...draft.birth, year } })}
-            />
-            <BirthBox
-              field="month"
-              value={draft.birth.month}
-              unit="월"
-              placeholder="10"
-              onChange={(month) => updateDraft({ birth: { ...draft.birth, month } })}
-            />
-            <BirthBox
-              field="day"
-              value={draft.birth.day}
-              unit="일"
-              placeholder="29"
-              onChange={(day) => updateDraft({ birth: { ...draft.birth, day } })}
-            />
-          </View>
-
-          <PrimaryButton
-            label="다음"
-            showNext
-            style={styles.cta}
-            onPress={continueSignup}
-          />
-        </ScrollView>
+  return <KeyboardSafeScreen style={[authStyles.screen, { paddingTop: insets.top }]}>
+    <SignupStepHeader step={1} title="개인정보 입력" subtitle="닉네임과 이메일을 입력해 주세요. 계좌와 생년월일은 나중에 프로필에서 넣어도 돼요." onBack={goBack} />
+    <ScrollView style={authStyles.scroll} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+      <TextField label="닉네임" value={draft.nickname} onChangeText={(nickname) => updateDraft({ nickname })} placeholder="예: 밀챗"
+        error={attempted && !draft.nickname.trim() ? '닉네임을 입력해 주세요.' : undefined} />
+      <View>
+          <TextField label="이메일" value={draft.email} onChangeText={(email) => updateDraft({ email })}
+            placeholder="예: mealchat@example.com" keyboardType="email-address" autoCapitalize="none" autoCorrect={false}
+            error={emailError} inputAction={<SecondaryButton label="중복 확인" style={styles.emailButton} loading={checking} disabled={!normalizedEmail}
+              onPress={() => void runEmailCheck()} />} />
+        {emailOk ? <View style={styles.success} accessibilityLiveRegion="polite">
+          <Check size={16} color={colors.safeText} aria-hidden={true} />
+          <Text style={styles.successText}>사용할 수 있는 이메일이에요.</Text>
+        </View> : null}
       </View>
-    </KeyboardSafeScreen>
-  );
+      <TextField label="비밀번호" value={draft.password} secureTextEntry autoCapitalize="none" autoCorrect={false} onChangeText={(password) => updateDraft({ password })}
+        placeholder="8자 이상" helper="8자 이상" error={passwordError} autoComplete="new-password" />
+      <TextField label="비밀번호 재확인" value={draft.passwordConfirm} secureTextEntry autoCapitalize="none" autoCorrect={false} onChangeText={(passwordConfirm) => updateDraft({ passwordConfirm })}
+        placeholder="한 번 더 입력해 주세요" error={confirmError} helper={draft.passwordConfirm && !confirmError ? '비밀번호가 일치해요.' : undefined} autoComplete="new-password" />
+      <View style={styles.group}>
+        <Text style={authStyles.label}>계좌번호 (선택)</Text>
+        <View style={styles.row}>
+          <View style={styles.bank}><BankSelect value={draft.bank} onChange={(bank) => updateDraft({ bank })} logicalHeight={v3Layout.fieldHeight} /></View>
+          <TextInput accessibilityLabel="계좌번호" style={styles.accountInput} value={draft.account}
+            onChangeText={(account) => updateDraft({ account })} placeholder="'-' 없이 숫자만" placeholderTextColor={colors.sub} keyboardType="number-pad" />
+        </View>
+      </View>
+      {/* TODO(서버 단계): 예금주 직접 입력을 저장할 필드와 계약이 생기면 입력칸을 추가한다. */}
+      <View style={styles.group}>
+        <Text style={authStyles.label}>생년월일 (선택)</Text>
+        <View style={styles.row}>
+          {(['year', 'month', 'day'] as const).map((field, index) => <BirthBox key={field} field={field} unit={['년', '월', '일'][index]}
+            value={draft.birth[field]} onChange={(value) => updateDraft({ birth: { ...draft.birth, [field]: value } })} />)}
+        </View>
+      </View>
+    </ScrollView>
+    <AuthFooter><PrimaryButton label="다음" onPress={continueSignup} /></AuthFooter>
+  </KeyboardSafeScreen>;
 }
 
-function BirthBox({
-  field,
-  value,
-  unit,
-  placeholder,
-  onChange,
-}: {
-  field: BirthField;
-  value: string;
-  unit: string;
-  placeholder: string;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <View style={styles.birthBox}>
-      <TextInput
-        style={styles.birthValue}
-        accessibilityLabel={`생년월일 ${unit}`}
-        value={value}
-        onChangeText={(text) => onChange(formatBirthInput(field, text))}
-        placeholder={placeholder}
-        placeholderTextColor={colors.placeholder}
-        keyboardType="number-pad"
-        /* 숫자판을 띄워도 붙여넣기로는 글자가 들어온다 - 길이는 여기서도 막는다 */
-        maxLength={BIRTH_LENGTH[field]}
-      />
-      <Text style={styles.birthUnit}>{unit}</Text>
-    </View>
-  );
+function BirthBox({ field, value, unit, onChange }: { field: BirthField; value: string; unit: string; onChange: (value: string) => void }) {
+  return <View style={styles.birthBox}>
+    <TextInput accessibilityLabel={`생년월일 ${unit}`} style={styles.birthValue} value={value}
+      onChangeText={(text) => onChange(formatBirthInput(field, text))} placeholder={field === 'year' ? 'YYYY' : field === 'month' ? 'MM' : 'DD'}
+      placeholderTextColor={colors.sub} keyboardType="number-pad" maxLength={BIRTH_LENGTH[field]} />
+    <Text style={styles.birthUnit}>{unit}</Text>
+  </View>;
 }
 
 const styles = StyleSheet.create({
-  emailRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: s(4),
-  },
-  emailField: {
-    flex: 1,
-    marginTop: s(8),
-  },
-  /* 입력창과 같은 높이로 맞춰 한 줄로 보이게 한다 */
-  checkButton: {
-    height: v3Layout.fieldHeight,
-    paddingHorizontal: s(8),
-    borderRadius: s(9),
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkButtonOff: {
-    opacity: 0.4,
-  },
-  checkButtonPressed: {
-    opacity: 0.85,
-  },
-  checkButtonText: {
-    fontFamily: fontFamily.bold,
-    fontSize: fs(6.5),
-    color: v3Colors.onPrimary,
-  },
-  hint: {
-    marginTop: s(2),
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(10),
-    color: colors.danger,
-  },
-  hintOk: {
-    color: v3Colors.safeText,
-  },
-  screen: {
-    flex: 1,
-    backgroundColor: colors.surface,
-  },
-  flex: {
-    flex: 1,
-  },
-  content: {
-    paddingHorizontal: s(18),
-    paddingBottom: s(30),
-  },
-  firstField: {
-    // STEP 라벨 하단(y97) → 닉네임 라벨(y115)
-    marginTop: s(18),
-  },
-  field: {
-    // 입력창 하단 → 다음 라벨까지 7~8
-    marginTop: s(8),
-  },
-  label: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(10),
-    color: colors.textMuted,
-  },
-  accountLabel: {
-    marginTop: s(9),
-  },
-  accountRow: {
-    marginTop: s(1),
-    flexDirection: 'row',
-    gap: s(3),
-  },
-  bankChip: {
-    // A five-character bank name needs room at the form's 16-unit text size.
-    width: 112,
-  },
-  bankText: {
-    fontFamily: fontFamily.bold,
-    fontSize: fs(7),
-    color: colors.textPrimary,
-  },
-  accountInput: {
-    flex: 1,
-    minWidth: 0,
-    height: v3Layout.fieldHeight,
-    borderRadius: s(8),
-    backgroundColor: colors.card,
-    paddingHorizontal: s(8),
-    paddingVertical: 0,
-    fontFamily: fontFamily.body,
-    fontSize: 16,
-    color: colors.textPrimary,
-  },
-  birthLabel: {
-    // 계좌 행 하단(y313) → 생년월일 라벨(y322)
-    marginTop: s(9),
-  },
-  birthRow: {
-    // 라벨 하단(y332) → 행(y339)
-    marginTop: s(7),
-    flexDirection: 'row',
-    gap: s(9.5),
-  },
-  birthBox: {
-    ...fieldStyles.box,
-    height: v3Layout.fieldHeight,
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  birthValue: {
-    flex: 1,
-    // 웹에서 input 의 기본 min-width 때문에 축소되지 않아 명시한다
-    minWidth: 0,
-    fontFamily: fontFamily.bold,
-    fontSize: 16,
-    height: v3Layout.fieldHeight,
-    color: colors.textPrimary,
-    padding: 0,
-  },
-  birthUnit: {
-    fontFamily: fontFamily.body,
-    fontSize: 16,
-    color: colors.textMuted,
-  },
-  cta: {
-    // y423, 생년월일 행 하단(y362) 에서 61
-    marginTop: s(61),
-    marginHorizontal: s(-6),
-  },
+  body: { paddingHorizontal: 20, paddingBottom: 8, gap: 18 },
+  emailButton: { width: 96, height: v3Layout.fieldHeight, paddingHorizontal: 8 },
+  success: { marginTop: 6, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  successText: { fontFamily: fontFamily.medium, fontSize: 13, lineHeight: 20, color: colors.safeText },
+  group: { gap: 6 },
+  row: { flexDirection: 'row', gap: 8 },
+  bank: { width: 112 },
+  accountInput: { flex: 1, minWidth: 0, height: v3Layout.fieldHeight, borderRadius: v3Radii.field, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, paddingHorizontal: 14, paddingVertical: 0, fontFamily: fontFamily.body, fontSize: 16, color: colors.ink },
+  birthBox: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', height: v3Layout.fieldHeight, borderRadius: v3Radii.field, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, paddingHorizontal: 14 },
+  birthValue: { flex: 1, minWidth: 0, height: v3Layout.fieldHeight, padding: 0, fontFamily: fontFamily.body, fontSize: 16, color: colors.ink },
+  birthUnit: { fontFamily: fontFamily.body, fontSize: 14, lineHeight: 22, color: colors.sub },
 });

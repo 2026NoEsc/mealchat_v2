@@ -15,6 +15,7 @@ jest.mock('../src/navigation/AppNavigator', () => ({}));
 jest.mock('../src/navigation/NavigationContext', () => ({}));
 jest.mock('../src/screens/auth/NewPasswordScreen', () => ({}));
 jest.mock('../src/screens/auth/ReConsentScreen', () => ({}));
+jest.mock('../src/screens/settings/NotificationPermissionGate', () => ({ __esModule: true, default: ({ children }) => children }));
 
 const App = require('../App').default;
 const { useFonts } = require('expo-font');

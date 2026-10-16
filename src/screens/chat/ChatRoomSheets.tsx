@@ -2,6 +2,7 @@ import { Camera } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import {
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -9,9 +10,11 @@ import {
 } from 'react-native';
 
 import { useAuth } from '../../auth/AuthProvider';
-import Avatar from '../../components/Avatar';
 import BottomSheet from '../../components/BottomSheet';
-import { CompleteButton } from '../../components/ui/Button';
+import V3BottomSheet from '../../components/ui/BottomSheet';
+import { Button, CompleteButton } from '../../components/ui/Button';
+import InviteCodeBox from '../../components/ui/InviteCodeBox';
+import RoomMemberRow from '../../components/ui/RoomMemberRow';
 
 import { notify } from '../../lib/confirm';
 import { formatAmount } from '../../lib/format';
@@ -28,7 +31,7 @@ import {
 } from '../../lib/settlements';
 import { pickActiveSettlement } from '../../lib/settlementSummary';
 import { fs, s } from '../../theme/scale';
-import { colors } from '../../theme/tokens';
+import { colors, v3Colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 
 
@@ -484,153 +487,21 @@ const styles = StyleSheet.create({
 
 /* ------------------------------------------------------------------ 참여 멤버 */
 
-/**
- * Figma 채팅/멤버 패널 (553:768)
- *
- * 예전에는 브랜드 캐릭터 네 명과 초대코드 `VF4HLD` 가 그대로 박혀 있었다. Figma
- * 시안을 옮기면서 남은 값인데, 실제 방과 아무 상관이 없다. 초대 코드는 사람을
- * 불러들이는 유일한 통로라 가짜 코드를 보여 주면 아무도 들어오지 못한다.
- */
-export function MembersSheet({
-  visible,
-  participants,
-  code,
-  myId,
-  onClose,
-  onInvite,
-}: {
-  visible: boolean;
-  participants: RoomParticipant[];
-  code: string | null;
-  myId: string | null;
-  onClose: () => void;
-  onInvite: (code: string) => void;
+/** Phone 528:1482. Invitation keeps the existing plain-message behavior. */
+export function MembersSheet({ visible, participants, code, myId, ownerId = null, onClose, onInvite }: {
+  visible: boolean; participants: RoomParticipant[]; code: string | null; myId: string | null; ownerId?: string | null;
+  onClose: () => void; onInvite: (code: string) => void;
 }) {
-  return (
-    <BottomSheet
-      visible={visible}
-      title="참여 멤버"
-      subtitle={
-        code ? `멤버 ${participants.length}명 · 초대코드 ${code}` : `멤버 ${participants.length}명`
-      }
-      onClose={onClose}>
-      <View style={memberStyles.list}>
-        {participants.length === 0 ? (
-          <Text style={memberStyles.empty}>참여 멤버를 불러오지 못했어요</Text>
-        ) : (
-          participants.map((participant) => {
-            const mine = participant.profileId !== null && participant.profileId === myId;
-            return (
-              <View
-                key={participant.id}
-                style={[memberStyles.row, mine && memberStyles.rowMe]}>
-                {/*
-                  * url 을 안 넘겨서 올린 사진이 한 번도 뜨지 않았고, style 의
-                  * 12x14 가 size(26) 를 덮어써서 얼굴이 작게 눌려 있었다.
-                  * seed 는 사람을 가리키는 값이어야 이름이 같은 사람이 둘일 때
-                  * 기본 캐릭터가 겹치지 않는다 — 방·프로필과도 같은 얼굴이 된다.
-                  */}
-                <Avatar
-                  name={participant.name}
-                  url={participant.avatarUrl}
-                  seed={participant.profileId ?? participant.id}
-                  size={s(26)}
-                  radius={s(6.5)}
-                />
-
-                <View style={memberStyles.body}>
-                  <Text style={memberStyles.name}>
-                    {participant.name}
-                    {mine ? ' (나)' : ''}
-                  </Text>
-                </View>
-
-                {mine ? (
-                  <View style={memberStyles.badge}>
-                    <Text style={memberStyles.badgeText}>나</Text>
-                  </View>
-                ) : (
-                  <Text style={memberStyles.role}>메이트</Text>
-                )}
-              </View>
-            );
-          })
-        )}
-      </View>
-
-      {/* 코드가 없으면 알려 줄 것이 없으므로 버튼도 내린다 */}
-      {code ? (
-        <CompleteButton
-          label="＋ 메이트 초대"
-          style={memberStyles.cta}
-          onPress={() => onInvite(code)}
-        />
-      ) : null}
-    </BottomSheet>
-  );
+  return <V3BottomSheet visible={visible} title={'멤버 ' + participants.length + '명'} subtitle="초대 코드를 보내면 메이트가 바로 들어와요." onClose={onClose}>
+    <InviteCodeBox code={code} />
+    <ScrollView style={memberStyles.list} showsVerticalScrollIndicator={false}>
+      {participants.length === 0 ? <Text style={memberStyles.empty}>참여 멤버를 불러오지 못했어요</Text> : participants.map(participant =>
+        <RoomMemberRow key={participant.id} participant={participant} myId={myId} ownerId={ownerId} />)}
+    </ScrollView>
+    {code ? <Button variant="secondary" label="＋ 메이트 초대" onPress={() => onInvite(code)} /> : null}
+  </V3BottomSheet>;
 }
-
 const memberStyles = StyleSheet.create({
-  empty: {
-    paddingVertical: s(12),
-    textAlign: 'center',
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    lineHeight: fs(10),
-    color: colors.textMuted,
-  },
-  list: {
-    marginTop: s(10),
-    gap: s(5),
-  },
-  row: {
-    height: s(30),
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: s(7),
-    borderRadius: s(8),
-    backgroundColor: colors.surface,
-  },
-  rowMe: {
-    backgroundColor: TINT,
-    borderWidth: s(0.8),
-    borderColor: colors.primary,
-  },
-  body: {
-    flex: 1,
-    marginLeft: s(7),
-  },
-  name: {
-    fontFamily: fontFamily.semibold,
-    fontSize: fs(7),
-    lineHeight: fs(9),
-    color: colors.textPrimary,
-  },
-  status: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(5.5),
-    lineHeight: fs(7),
-    color: colors.textMuted,
-  },
-  badge: {
-    paddingHorizontal: s(5),
-    paddingVertical: s(2),
-    borderRadius: s(5),
-    backgroundColor: colors.primary,
-  },
-  badgeText: {
-    fontFamily: fontFamily.bold,
-    fontSize: fs(5.5),
-    lineHeight: fs(7),
-    color: colors.textOnAccent,
-  },
-  role: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(8),
-    color: colors.textMuted,
-  },
-  cta: {
-    marginTop: s(14),
-  },
+  list: { flexGrow: 0, flexShrink: 1 },
+  empty: { paddingVertical: 20, textAlign: 'center', fontFamily: fontFamily.body, fontSize: 14, lineHeight: 20, color: v3Colors.sub },
 });

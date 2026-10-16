@@ -1,102 +1,43 @@
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PrimaryButton } from '../../components/ui/Button';
+import { AuthFooter, authStyles, BrandWordmark } from '../../components/ui/AuthLayout';
+import { PrimaryButton, SecondaryButton } from '../../components/ui/Button';
 import { useNavigation } from '../../navigation/NavigationContext';
-import { fs, s } from '../../theme/scale';
-import { colors } from '../../theme/tokens';
+import { v3Layout } from '../../theme/scale';
+import { v3Colors as colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 
 const logo = require('../../../assets/brand/logo-main.png');
 
-/**
- * Figma 회원가입/시작 (150:125) — 220 x 486
- * 로고 x88 y111 40×40 / 타이틀 y166 / 서브 y186 / 버튼 x12 y238 197×28 / 안내 y276
- */
+/** Phone 519:1216. Footer stays visible while the hero can scroll on small phones. */
 export default function SignupStartScreen() {
-  const { navigate, replace } = useNavigation();
+  const { navigate } = useNavigation();
   const insets = useSafeAreaInsets();
-
-  return (
-    <View style={[styles.screen, { paddingTop: insets.top }]}>
-      <Image source={logo} style={styles.logo} resizeMode="contain" />
-
-      <Text style={styles.title}>
-        <Text style={styles.titleBrand}>MEALCHAT </Text>
-        시작하기
-      </Text>
-      <Text style={styles.sub}>&apos;앱 한 끼 먹자&apos; 실제로 이루어집니다</Text>
-
-      <PrimaryButton
-        label="가입하기"
-        showNext
-        style={styles.cta}
-        onPress={() => navigate('SignupPersonal')}
-      />
-
-      <View style={styles.helperRow}>
-        <Text style={styles.helper}>이미 계정이 있나요? </Text>
-        <Pressable onPress={() => replace('Login')}>
-          <Text style={styles.helperLink}>로그인</Text>
-        </Pressable>
+  return <View style={[authStyles.screen, { paddingTop: insets.top }]}>
+    <ScrollView style={authStyles.scroll} contentContainerStyle={styles.hero}>
+      <Image source={logo} style={styles.logo} resizeMode="contain" accessible={false} />
+      <BrandWordmark />
+      <Text style={styles.title}>‘밥 한 끼 먹자’가 진짜 약속이 되는 곳</Text>
+      <Text style={styles.subtitle}>일정 맞추기부터 메뉴, 정산까지 채팅방 하나로</Text>
+      {/* Figma blobs 340×190: 대응하는 기존 자산이 없어 생성하지 않고 공간을 유지한다. */}
+      <View style={styles.blobsSpace} accessible={false} />
+    </ScrollView>
+    <AuthFooter>
+      <View style={styles.actions}>
+        <PrimaryButton label="가입하기" onPress={() => navigate('SignupPersonal')} />
+        <SecondaryButton label="이미 계정이 있어요 · 로그인" style={styles.login} onPress={() => navigate('Login')} />
       </View>
-    </View>
-  );
+    </AuthFooter>
+  </View>;
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    paddingHorizontal: s(12),
-  },
-  logo: {
-    // y111 - 상태바 28
-    marginTop: s(83),
-    width: s(40),
-    height: s(40),
-  },
-  title: {
-    // 로고 하단(y151) → 타이틀(y166)
-    marginTop: s(15),
-    fontFamily: fontFamily.semibold,
-    fontSize: fs(12),
-    lineHeight: fs(16),
-    color: colors.primary,
-    textAlign: 'center',
-  },
-  titleBrand: {
-    fontFamily: fontFamily.wordmark,
-  },
-  sub: {
-    marginTop: s(6),
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    lineHeight: fs(10),
-    color: colors.textMuted,
-    textAlign: 'center',
-  },
-  cta: {
-    // y238, 서브 하단(y196) 에서 42
-    marginTop: s(42),
-    alignSelf: 'stretch',
-  },
-  helperRow: {
-    marginTop: s(10),
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  helper: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(10),
-    color: colors.textMuted,
-  },
-  helperLink: {
-    fontFamily: fontFamily.bold,
-    fontSize: fs(6.5),
-    lineHeight: fs(10),
-    color: colors.primary,
-  },
+  hero: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, gap: 16 },
+  logo: { width: 96, height: 96, borderRadius: 24 },
+  title: { fontFamily: fontFamily.medium, fontSize: 17, lineHeight: 26, color: colors.ink, textAlign: 'center' },
+  subtitle: { fontFamily: fontFamily.body, fontSize: 14, lineHeight: 22, color: colors.sub, textAlign: 'center' },
+  blobsSpace: { width: '100%', maxWidth: 340, height: 190, borderRadius: 16 },
+  actions: { gap: 10 },
+  login: { minHeight: v3Layout.minTouchTarget, paddingVertical: 8 },
 });

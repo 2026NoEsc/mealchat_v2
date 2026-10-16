@@ -1,53 +1,39 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ChevronRight, CheckSquare, Square } from 'lucide-react-native';
+import { Info } from 'lucide-react-native';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../auth/AuthProvider';
-import {
-  clearPendingSignupProfile,
-  persistPendingSignupProfile,
-} from '../../auth/pendingSignupProfile';
+import { clearPendingSignupProfile, persistPendingSignupProfile } from '../../auth/pendingSignupProfile';
 import { useSignupDraft } from '../../auth/SignupDraftProvider';
+import { AuthFooter, SignupStepHeader, authStyles } from '../../components/ui/AuthLayout';
+import { PrimaryButton } from '../../components/ui/Button';
+import TermsCard from '../../components/ui/TermsCard';
 import { notify } from '../../lib/confirm';
 import { authErrorMessage } from '../../lib/password';
 import { saveSignupPrivateProfile } from '../../lib/profile';
 import { useNavigation } from '../../navigation/NavigationContext';
-import { fs, s } from '../../theme/scale';
-import { colors } from '../../theme/tokens';
+import { v3Colors as colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
-import SignupIllustrationScreen from './SignupIllustrationScreen';
+import LegalDocumentSheet, { legalViewForTerm, type LegalView } from '../settings/LegalDocumentSheet';
+import { queueNotificationGuide } from '../settings/notificationPermission';
 
 const dudu = require('../../../assets/brand/dudu.png');
 
-const TERMS = [
-  { key: 'service', label: '[필수] 서비스 이용약관', required: true },
-  { key: 'privacy', label: '[필수] 개인정보 처리방침', required: true },
-  { key: 'marketing', label: '[선택] 마케팅 정보 수신', required: false },
-] as const;
-
-type TermKey = (typeof TERMS)[number]['key'];
-
-/**
- * Figma 회원가입/약관 동의 (150:126) — dudu x57 y174 107×78
- * 약관 행 y329 / y347 / y366, 구분선 y385, 전체 동의 y393
- */
+/** Phone 520:1285. The account creation and private-profile persistence contract is unchanged. */
 export default function SignupTermsScreen() {
   const { resetTo, goBack } = useNavigation();
   const { signUpWithEmail } = useAuth();
   const { draft, updateDraft, resetDraft } = useSignupDraft();
+  const insets = useSafeAreaInsets();
   const [submitting, setSubmitting] = useState(false);
-  const agreed: Record<TermKey, boolean> = draft.consents;
-
-  const allAgreed = TERMS.every((t) => agreed[t.key]);
-  const canSubmit = TERMS.filter((t) => t.required).every((t) => agreed[t.key]);
-
-  const toggleAll = () => {
-    const next = !allAgreed;
-    updateDraft({ consents: { service: next, privacy: next, marketing: next } });
-  };
+  const [legalView, setLegalView] = useState<LegalView | null>(null);
+  const agreed = draft.consents;
+  const canSubmit = agreed.service && agreed.privacy;
 
   const completeSignup = async () => {
+    if (submitting) return;
     if (!canSubmit) {
       notify('약관 동의', '필수 약관에 동의해 주세요.');
       return;
@@ -66,6 +52,7 @@ export default function SignupTermsScreen() {
         displayName: draft.nickname,
         marketingOptIn: agreed.marketing,
       });
+      if (!result.error && result.userId) await queueNotificationGuide(result.userId).catch(() => undefined);
 
       /*
        * 계좌·생년월일은 본인만 볼 수 있는 행에 들어가고 그 쓰기는 세션을 요구한다.
@@ -100,7 +87,7 @@ export default function SignupTermsScreen() {
       }
 
       if (result.error) {
-        notify('회원가입 실패', authErrorMessage(result.error.message));
+        notify('회원가입 실패', authErrorMessage(result.error));
         return;
       }
 
@@ -118,99 +105,36 @@ export default function SignupTermsScreen() {
       if (privateSaveFailed) {
         notify('일부 정보 미저장', '계좌와 생년월일은 프로필에서 다시 입력해 주세요.');
       }
-    } catch {
-      notify('회원가입 실패', '계정을 만들지 못했어요. 잠시 후 다시 시도해 주세요.');
+    } catch (error) {
+      notify('회원가입 실패', authErrorMessage(error));
     } finally {
       setSubmitting(false);
     }
   };
 
-  return (
-    <SignupIllustrationScreen
-      title="약관 동의"
-      step={4}
-      stepLabel="다왔어요!"
-      characterName="두두"
-      character={dudu}
-      characterBox={{ left: 41, top: 47, width: 107, height: 78 }}
-      description={['두두가 열심히 여러분들의', '의견을 두두두 알해줄거예요']}
-      ctaLabel={submitting ? '계정 만드는 중' : '회원가입 끝내기'}
-      onNext={() => void completeSignup()}
-      onBack={goBack}
-      submitting={submitting}>
-      <View style={styles.terms}>
-        {TERMS.map((term) => (
-          <Pressable
-            key={term.key}
-            style={styles.row}
-            onPress={() =>
-              updateDraft({
-                consents: { ...agreed, [term.key]: !agreed[term.key] },
-              })
-            }>
-            <Check checked={agreed[term.key]} />
-            <Text style={styles.label}>{term.label}</Text>
-            <ChevronRight size={s(8)} color={colors.textMuted} strokeWidth={2} />
-          </Pressable>
-        ))}
+  return <View style={[authStyles.screen, { paddingTop: insets.top }]}>
+    <SignupStepHeader step={4} title="거의 다 왔어요!" subtitle="서비스를 쓰려면 아래 약관에 동의해 주세요." onBack={goBack} />
+    <ScrollView style={authStyles.scroll} contentContainerStyle={styles.body}>
+      <View style={styles.dudu}>
+        <Image source={dudu} style={styles.character} resizeMode="contain" accessible={false} />
+        <Text style={styles.description}>두두가 여러분의 의견을 모아서 두두두 전해 줄게요.</Text>
       </View>
-
-      <View style={styles.divider} />
-
-      <Pressable style={styles.allRow} onPress={toggleAll}>
-        <Check checked={allAgreed} />
-        <Text style={styles.allLabel}>전체 동의</Text>
-      </Pressable>
-    </SignupIllustrationScreen>
-  );
-}
-
-function Check({ checked }: { checked: boolean }) {
-  return checked ? (
-    <CheckSquare size={s(10)} color={colors.textPrimary} strokeWidth={2} />
-  ) : (
-    <Square size={s(10)} color={colors.textMuted} strokeWidth={2} />
-  );
+      <TermsCard agreed={agreed} disabled={submitting} onChange={(consents) => updateDraft({ consents })} onView={(key) => setLegalView(legalViewForTerm(key))} />
+      <View style={styles.hint}>
+        <Info size={16} color={colors.sub} aria-hidden={true} />
+        <Text style={[authStyles.helper, styles.hintText]}>필수 약관에 모두 동의해야 가입할 수 있어요.</Text>
+      </View>
+    </ScrollView>
+    <AuthFooter><PrimaryButton label="회원가입 끝내기" loading={submitting} disabled={!canSubmit} onPress={() => void completeSignup()} /></AuthFooter>
+    <LegalDocumentSheet view={legalView} onClose={() => setLegalView(null)} />
+  </View>;
 }
 
 const styles = StyleSheet.create({
-  terms: {
-    // 카드 하단(y317) → 첫 행(y329)
-    marginTop: s(12),
-    gap: s(8),
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: s(6),
-    paddingLeft: s(3),
-  },
-  label: {
-    flex: 1,
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    lineHeight: fs(10),
-    color: colors.textPrimary,
-  },
-  divider: {
-    // y385
-    marginTop: s(9),
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.border,
-    marginHorizontal: s(3),
-  },
-  allRow: {
-    // y393
-    marginTop: s(8),
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: s(6),
-    paddingLeft: s(4),
-  },
-  allLabel: {
-    fontFamily: fontFamily.bold,
-    fontSize: fs(8),
-    lineHeight: fs(11),
-    color: colors.textPrimary,
-  },
+  body: { paddingHorizontal: 20, paddingBottom: 24, gap: 16 },
+  dudu: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16, gap: 14, borderRadius: 16, backgroundColor: colors.selectedBg },
+  character: { width: 72, height: 54 },
+  description: { flex: 1, fontFamily: fontFamily.medium, fontSize: 14, lineHeight: 22, color: colors.selectedText },
+  hint: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  hintText: { flex: 1 },
 });

@@ -4,6 +4,7 @@ import * as Linking from 'expo-linking';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Alert } from 'react-native';
 
+import { clearSettingsDraft } from '../lib/scheduleDraft';
 import { saveMyPrivateProfile } from '../lib/profile';
 import { supabase } from '../lib/supabase';
 import {
@@ -71,6 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let active = true;
+    let currentUserId: string | null = null;
     const redirectGuard = createAuthRedirectGuard();
 
     const showRedirectError = (message: string) => {
@@ -138,6 +140,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (active) {
+        currentUserId = restoredSession?.user?.id ?? null;
         setSession(restoredSession);
         setPasswordResetPending(restoredResetPending);
         setIsReady(true);
@@ -152,6 +155,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       data: { subscription: authSubscription },
     } = supabase.auth.onAuthStateChange((event, nextSession) => {
       if (!active) return;
+      const previousUserId = currentUserId;
+      currentUserId = nextSession?.user?.id ?? null;
       setSession(nextSession);
       // 웹은 URL 조각이 아니라 이벤트로 복구 흐름을 알려준다
       if (event === 'PASSWORD_RECOVERY') {
@@ -163,6 +168,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
       }
       if (event === 'SIGNED_OUT') {
+        // Expiration and external sign-outs bypass the public signOut callback.
+        if (previousUserId) void clearSettingsDraft(previousUserId).catch(() => undefined);
         setPasswordResetPending(false);
         void clearPasswordResetPending(AsyncStorage).catch(() => undefined);
       }
@@ -302,6 +309,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
     if (error) return error;
+    if (session?.user?.id) await clearSettingsDraft(session.user.id).catch(() => {});
 
     try {
       await clearPasswordResetPending(AsyncStorage);
@@ -312,7 +320,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         ? storageError
         : new Error('비밀번호 재설정 상태를 정리하지 못했습니다.');
     }
-  }, []);
+  }, [session?.user?.id]);
 
   /** 새 비밀번호를 정하지 않고 빠져나가면 링크로 얻은 세션을 그대로 두지 않는다 */
   const cancelPasswordReset = useCallback(async () => {

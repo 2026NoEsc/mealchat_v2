@@ -1,57 +1,24 @@
+import { Check } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Alert,
-  ScrollView,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 
-import { useTopInset } from '../../theme/insets';
-
-import AppHeader from '../../components/AppHeader';
 import AvailabilityGrid from '../../components/AvailabilityGrid';
-import PickedSlotChips from '../../components/PickedSlotChips';
-import SubmissionStatus from '../../components/SubmissionStatus';
-import { CompleteButton } from '../../components/ui/Button';
-import {
-  fetchRoomAvailability,
-  saveMyAvailability,
-  type AvailabilityStatus,
-} from '../../lib/availability';
-import { leaveRoom } from '../../lib/rooms';
-import { useNavigation } from '../../navigation/NavigationContext';
-import {
-  buildNextDays,
-  cellKey,
-  isPastCell,
-  toSlots,
-} from '../../lib/scheduleSlots';
-import { fs, s } from '../../theme/scale';
-import { colors } from '../../theme/tokens';
-import { fontFamily } from '../../theme/typography';
-import ScheduleStepHeader from './ScheduleStepHeader';
+import { Button } from '../../components/ui/Button';
+import { Chip } from '../../components/ui/Chip';
+import { fetchRoomAvailability, saveMyAvailability, type AvailabilityStatus } from '../../lib/availability';
 import type { MyLocation } from '../../lib/myLocation';
+import { leaveRoom } from '../../lib/rooms';
+import { buildNextDays, cellKey, isPastCell, toSlots } from '../../lib/scheduleSlots';
+import { useNavigation } from '../../navigation/NavigationContext';
+import { scheduleColors } from '../../theme/scheduleTokens';
+import { v3Colors as colors } from '../../theme/tokens';
+import { fontFamily } from '../../theme/typography';
+import ScheduleFrame from './ScheduleFrame';
 
-type Params = {
-  /** STEP 1 에서 만든 방 — 메이트의 응답이 여기에 쌓인다 */
-  roomId?: string;
-  name?: string;
-  invitees?: string[];
-  /** STEP 1 에서 잡은 내 위치 — 중간 지점 계산에 쓴다 */
-  origin?: MyLocation;
-};
-
-/**
- * STEP 2 — 언제 만날까요.
- *
- * 방은 STEP 1 에서 이미 만들어졌고, 여기서 각자 가능한 시간을 낸다. 남이 고른
- * 칸은 회색으로 겹쳐 보이되 누가 골랐는지는 오지 않는다 — 내가 언제를 고를지
- * 정하는 데 필요한 것은 "이 시간은 누군가 된다" 까지다.
- */
+type Params = { roomId?: string; name?: string; invitees?: string[]; origin?: MyLocation; originSource?: 'profile' | 'gps' | 'search' };
 
 export default function ScheduleTimeScreen() {
   /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
-  const topInset = useTopInset();
   const { navigate, goBackWith, current } = useNavigation();
 
   const params = current.params as Params | undefined;
@@ -120,7 +87,7 @@ export default function ScheduleTimeScreen() {
       return;
     }
 
-    navigate('ScheduleConfirmed', { roomId, name, invitees, origin });
+    navigate('ScheduleConfirmed', { roomId, name, invitees, origin, originSource: params?.originSource });
   };
 
   /*
@@ -133,173 +100,35 @@ export default function ScheduleTimeScreen() {
    */
   const goPrev = () => {
     if (roomId) void leaveRoom(roomId);
-    goBackWith({ name, invitees, origin });
+    goBackWith({ name, invitees, origin, originSource: params?.originSource });
   };
 
-  return (
-    <View style={styles.screen}>
-      <View
-        style={{
-          height: topInset,
-          backgroundColor: colors.surface,
-        }}
-      />
-
-      <AppHeader />
-
-      <ScrollView
-        contentContainerStyle={styles.body}
-        showsVerticalScrollIndicator={false}
-      >
-        <ScheduleStepHeader
-          step={2}
-          title="언제 만날까요?"
-          subtitle="가능한 시간을 탭해서 표시해 주세요"
-          onBack={goPrev}
-        />
-
-        <View style={styles.gridWrap}>
-          <AvailabilityGrid
-            days={days}
-            picked={picked}
-            others={othersCells}
-            onToggle={toggle}
-          />
-        </View>
-
-        <View style={styles.chipsWrap}>
-          <PickedSlotChips slots={slots} />
-        </View>
-
-        {status ? (
-          <View style={styles.chipsWrap}>
-            <SubmissionStatus members={status.members} />
-          </View>
-        ) : null}
-
-        <CompleteButton
-          label={saving ? '저장 중' : '선택 완료'}
-          showNext
-          disabled={saving || slots.length === 0 || !origin}
-          style={styles.cta}
-          onPress={() => void goNext()}
-        />
-      </ScrollView>
+  return <ScheduleFrame bodyGap={12} step={2} title="언제 만날까요?" subtitle="가능한 시간을 눌러서 표시해 주세요. 메이트가 제출한 가능한 시간도 함께 보여요." onBack={goPrev}
+    footer={<Button label="선택 완료" loading={saving} disabled={saving || slots.length === 0 || !origin} onPress={() => void goNext()} />}>
+    {/* TODO(서버 단계): 메이트 바쁜 시간 계약이 없어 기존 othersSlots(가능 시간)의 뜻을 유지한다. */}
+    <View style={styles.legend}>
+      <View style={styles.legendItem}><View style={[styles.swatch, styles.mine]}><Check size={10} strokeWidth={3} color={colors.onPrimary} /></View><Text style={styles.legendText}>내가 가능</Text></View>
+      <View style={styles.legendItem}><View style={[styles.swatch, styles.shared]}><View style={styles.mateDot} /><View style={styles.mateDot} /><View style={styles.mateDot} /></View><Text style={styles.legendText}>메이트 가능</Text></View>
+      <View style={styles.legendItem}><View style={[styles.swatch, styles.free]} /><Text style={styles.legendText}>비어 있음</Text></View>
     </View>
-  );
+    <AvailabilityGrid variant="v3" days={days} picked={picked} others={othersCells} onToggle={toggle} />
+    <View style={styles.summary}>
+      <Text style={styles.summaryText}>고른 시간 {slots.length}구간 · {picked.size}시간</Text>
+      {slots.map((slot) => <Chip key={slot.id} label={Number(slot.date.slice(8)) + '일 ' + Number(slot.startTime.slice(0, 2)) + '–' + Number(slot.endTime.slice(0, 2)) + '시'} selected onChange={() => setPicked((previous) => {
+        const next = new Set(previous);
+        for (let hour = Number(slot.startTime.slice(0, 2)); hour < Number(slot.endTime.slice(0, 2)); hour += 1) next.delete(cellKey(slot.date, hour));
+        return next;
+      })} />)}
+      {!slots.length ? <Text style={styles.legendText}>가능한 시간을 한 칸 이상 골라 주세요.</Text> : null}
+    </View>
+  </ScheduleFrame>;
 }
-
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.surfaceSunken,
-  },
-
-  body: {
-    paddingBottom: s(16),
-  },
-
-  gridWrap: {
-    marginTop: s(10),
-    marginHorizontal: s(11.5),
-  },
-
-  chipsWrap: {
-    marginTop: s(8),
-    marginHorizontal: s(11.5),
-  },
-
-  headRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: s(4),
-  },
-
-  gridRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: s(2),
-  },
-
-  hourLabel: {
-    width: s(14),
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(8),
-    color: colors.textMuted,
-  },
-
-  col: {
-    flex: 1,
-    paddingHorizontal: s(1.5),
-  },
-
-  headText: {
-    textAlign: 'center',
-    fontFamily: fontFamily.semibold,
-    fontSize: fs(5.5),
-    lineHeight: fs(8),
-    color: colors.textPrimary,
-  },
-
-  sunday: {
-    color: colors.primary,
-  },
-
-  cell: {
-    height: s(13),
-    borderRadius: s(4),
-    backgroundColor: colors.surface,
-  },
-
-  cellOn: {
-    backgroundColor: colors.primary,
-  },
-
-  cellDisabled: {
-    opacity: 0.25,
-  },
-
-  pickedTitle: {
-    marginTop: s(10),
-    marginLeft: s(11.5),
-    fontFamily: fontFamily.bold,
-    fontSize: fs(8),
-    lineHeight: fs(11),
-    color: colors.textPrimary,
-  },
-
-  chipRow: {
-    marginTop: s(5),
-    marginHorizontal: s(11.5),
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: s(4),
-  },
-
-  chip: {
-    paddingHorizontal: s(6),
-    paddingVertical: s(3),
-    borderRadius: s(5),
-    backgroundColor: colors.primarySoft,
-  },
-
-  chipText: {
-    fontFamily: fontFamily.semibold,
-    fontSize: fs(6),
-    lineHeight: fs(8),
-    color: colors.primary,
-  },
-
-  emptyText: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(9),
-    color: colors.textMuted,
-  },
-
-  cta: {
-    marginTop: s(14),
-    marginHorizontal: s(11.5),
-  },
+  legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 }, legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  swatch: { width: 14, height: 14, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
+  mateDot: { width: 2, height: 2, borderRadius: 1, backgroundColor: colors.ink },
+  mine: { backgroundColor: colors.primary }, shared: { backgroundColor: scheduleColors.busy, flexDirection: 'row', gap: 1 }, free: { backgroundColor: colors.mutedBg },
+  legendText: { fontFamily: fontFamily.medium, fontSize: 12, lineHeight: 17, color: colors.sub },
+  summary: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
+  summaryText: { fontFamily: fontFamily.bold, fontSize: 13, lineHeight: 19, color: colors.ink },
 });
