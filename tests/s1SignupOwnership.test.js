@@ -1,5 +1,6 @@
 const React = require('react');
 const { act, create } = require('react-test-renderer');
+jest.mock('expo-secure-store', () => require('./fixtures/secureStore')());
 jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
 jest.mock('expo-linking', () => ({ getInitialURL: jest.fn(async () => null), addEventListener: () => ({ remove: jest.fn() }), createURL: path => path }));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaProvider: ({ children }) => children, useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
@@ -35,8 +36,9 @@ function Seed() {
 }
 async function mount() { await act(async () => { renderer = create(React.createElement(AuthProvider, null, React.createElement(SignupDraftProvider, null, React.createElement(Seed)))); }); }
 async function submit() { await act(async () => renderer.root.findAll(node => node.props.accessibilityRole === 'button' && node.props.accessibilityLabel === '회원가입 끝내기' && node.props.onPress)[0].props.onPress()); }
-async function pendingEmpty() { expect(await storage.getItem(PENDING_SIGNUP_PROFILE_KEY)).toBeNull(); expect(await storage.getItem(PENDING_SIGNUP_CONSENTS_KEY)).toBeNull(); }
+async function pendingEmpty() { expect(await storage.getItem(PENDING_SIGNUP_PROFILE_KEY)).toBeNull(); expect(await readPendingSignupProfile(storage)).toBeNull(); expect(await storage.getItem(PENDING_SIGNUP_CONSENTS_KEY)).toBeNull(); }
 beforeEach(async () => {
+  require('expo-secure-store').reset();
   jest.clearAllMocks(); await storage.clear(); setConsentAccess(null, 'loading'); session = null;
   fixture = createS1Fixture(); consents.configureS1RpcTransport(fixture.rpc, isolatedCapabilityStorage());
   navigation = { goBack: jest.fn(), navigate: jest.fn(), resetTo: jest.fn() }; useNavigation.mockReturnValue(navigation);
@@ -78,6 +80,28 @@ it('binds confirmation-wait data only to the real returned id and keeps the same
   setConsentAccess('existing-user', 'accepted'); await completePendingProfile({ id: 'existing-user', email: draft.email });
   expect(saveMyPrivateProfile).not.toHaveBeenCalled(); expect(await readPendingSignupProfile(storage)).toBeNull();
 });
+it('discards a failed secure write, keeps account creation successful and asks for profile re-entry', async () => {
+  require('expo-secure-store').setItemAsync.mockRejectedValueOnce(Error('private Keychain failure'));
+  await mount(); await submit();
+  expect(navigation.resetTo).toHaveBeenCalledWith('Login');
+  expect(notify).toHaveBeenCalledWith('프로필 입력 필요', expect.stringContaining('프로필에서 계좌와 생년월일을 다시 입력'));
+  expect(notify).toHaveBeenCalledWith('이메일 확인 필요', '이메일의 확인 링크를 연 뒤 로그인해 주세요.');
+  expect(JSON.stringify(storage.setItem.mock.calls)).not.toContain(draft.account);
+  expect(JSON.stringify(notify.mock.calls)).not.toContain('private Keychain failure');
+  const user = response.data.user; await act(async () => { session = { user }; listener('SIGNED_IN', session); });
+  setConsentAccess(user.id, 'accepted'); await completePendingProfile(user);
+  expect(saveMyPrivateProfile).not.toHaveBeenCalled(); expect(await readPendingSignupProfile(storage)).toBeNull();
+  expect(notify.mock.calls.filter(([title]) => title === '프로필 입력 필요')).toHaveLength(1);
+});
+it.each(['new-user', 'fake-user'])('explains profile re-entry after a web confirmation-link reload for %s', async kind => {
+  jest.replaceProperty(require('react-native').Platform, 'OS', 'web');
+  if (kind === 'fake-user') response.data.user.identities = [];
+  await mount(); await submit();
+  expect(notify).toHaveBeenCalledWith('이메일 확인 필요',
+    '이메일의 확인 링크를 연 뒤 로그인해 주세요.\n로그인한 뒤 프로필에서 계좌·생년월일을 입력해 주세요.');
+  expect(navigation.resetTo).toHaveBeenCalledWith('Login');
+  expect(JSON.stringify(notify.mock.calls)).not.toContain('이미 가입');
+});
 it('never persists signup fields before the provider resolves', async () => {
   let finish; await mount(); supabase.auth.signUp.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
   await submit(); await pendingEmpty(); expect(storage.setItem.mock.calls.filter(([key]) => [PENDING_SIGNUP_PROFILE_KEY, PENDING_SIGNUP_CONSENTS_KEY].includes(key))).toHaveLength(0);
@@ -88,6 +112,7 @@ it('keeps immediate-session account/birth fields off AsyncStorage and saves them
   saveMyPrivateProfile.mockImplementation(async () => { expect(getConsentAccess()).toEqual({ userId: 'new-user', state: 'accepted' }); return null; });
   await mount(); await submit(); await pendingEmpty();
   expect(storage.setItem.mock.calls.filter(([key]) => [PENDING_SIGNUP_PROFILE_KEY, PENDING_SIGNUP_CONSENTS_KEY].includes(key))).toHaveLength(0);
+  expect(require('expo-secure-store').setItemAsync).not.toHaveBeenCalled();
   expect(saveMyPrivateProfile).toHaveBeenCalledWith('new-user', expect.objectContaining({ account: draft.account, birth: draft.birth, tastes: draft.tastes }));
 });
 it('discards a memory-only signup profile on logout rather than applying it to the next account', async () => {

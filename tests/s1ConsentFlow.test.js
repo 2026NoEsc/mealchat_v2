@@ -1,5 +1,6 @@
 const React = require('react');
 const { act, create } = require('react-test-renderer');
+jest.mock('expo-secure-store', () => require('./fixtures/secureStore')());
 const { AppState } = require('react-native');
 jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
 jest.mock('../src/auth/AuthProvider', () => ({ useAuth: jest.fn() }));
@@ -18,6 +19,7 @@ const { createS1Fixture, s1Manifest, s1Status } = require('./fixtures/s1');
 let renderer, gate, user, fixture, foreground;
 function Probe() { gate = useConsentGate(); return null; }
 beforeEach(async () => {
+  require('expo-secure-store').reset();
   saveMyPrivateProfile.mockReset().mockResolvedValue(null);
   jest.clearAllMocks(); await storage.clear(); setConsentAccess(null, 'loading');
   user = { id: 'self', email: 'fixture@example.test' }; useAuth.mockImplementation(() => ({ user }));
@@ -94,13 +96,23 @@ it.each(['wrong-id', 'wrong-email', 'expired', 'document-changed', 'already-chan
 });
 it('does not flush or remove B pending profile after an A storage read completes late', async () => {
   const { completePendingProfile } = require('../src/auth/completePendingProfile');
-  const pending = { email: user.email, userId: user.id, bank: null, account: '', birth: {}, tastes: {}, savedAt: Date.now() };
+  const { readPendingSignupProfile } = require('../src/auth/pendingSignupProfile');
+  const { SECURE_PENDING_PROFILE_KEY, PENDING_PROFILE_TICKET_KEY } = require('../src/auth/pendingProfileStorage');
+  const secure = require('expo-secure-store');
+  const pendingB = { email: 'other@example.test', userId: 'other', bank: 'fixture-bank', account: 'B-1234', birth: { year: '2001', month: '2', day: '3' }, tastes: {}, savedAt: Date.now() };
+  await persistPendingSignupProfile(storage, pendingB);
+  const encryptedB = await secure.getItemAsync(SECURE_PENDING_PROFILE_KEY);
+  const ticketB = await storage.getItem(PENDING_PROFILE_TICKET_KEY);
   let finish;
-  storage.getItem.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  secure.getItemAsync.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
   setConsentAccess('self', 'accepted'); const work = completePendingProfile(user);
-  setConsentAccess('other', 'accepted'); finish(JSON.stringify(pending)); await work;
+  for (let index = 0; index < 50 && !finish; index++) await Promise.resolve();
+  expect(finish).toEqual(expect.any(Function));
+  setConsentAccess('other', 'accepted'); finish(encryptedB); await work;
   expect(saveMyPrivateProfile).not.toHaveBeenCalled();
-  expect(storage.removeItem).not.toHaveBeenCalled();
+  expect(await secure.getItemAsync(SECURE_PENDING_PROFILE_KEY)).toBe(encryptedB);
+  expect(await storage.getItem(PENDING_PROFILE_TICKET_KEY)).toBe(ticketB);
+  expect(await readPendingSignupProfile(storage)).toEqual(pendingB);
 });
 it('deletes a pending personal profile immediately after its accepted save succeeds', async () => {
   const { completePendingProfile } = require('../src/auth/completePendingProfile');

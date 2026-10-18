@@ -1,5 +1,6 @@
 const React = require('react');
 const { act, create } = require('react-test-renderer');
+jest.mock('expo-secure-store', () => require('./fixtures/secureStore')());
 jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
 jest.mock('expo-linking', () => ({ getInitialURL: jest.fn(async () => null), addEventListener: () => ({ remove: jest.fn() }), createURL: path => path }));
 jest.mock('../src/lib/supabase', () => ({ supabase: { auth: {} }, createPasswordVerificationAuth: jest.fn() }));
@@ -15,6 +16,7 @@ const { clearSettingsDraft } = require('../src/lib/scheduleDraft');
 const cache = require('../src/lib/restaurantRecommendationCache');
 let verifier, user, renderer, authContext;
 beforeEach(() => {
+  require('expo-secure-store').reset();
   jest.clearAllMocks();
   user = { id: 'self', email: 'fixture@example.test', app_metadata: { providers: ['email'] } };
   supabase.auth = {

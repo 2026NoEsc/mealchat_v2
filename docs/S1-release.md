@@ -63,6 +63,8 @@ seed.sql은 config.toml의 [db.seed]에 연결되어 로컬 start/reset 뒤에 �
 
 아래 항목은 실제 대상·변경 값·검증 결과를 기록한다. 문서의 체크박스나 Develop 커밋 승인은 외부 상태 변경의 승인이 아니다.
 
+- [ ] **Android 보안 저장소 백업 제외:** prebuild/EAS 빌드 산출물에서 `fullBackupContent`·`dataExtractionRules`와 SecureStore SharedPreferences 제외 규칙을 확인한다(현재 로컬 `android/`에는 규칙 없음).
+
 - [ ] **별도 사용자 승인 필요 — M1~M7 운영 적용:** 확정 M7과 전체 SQL identity, 대상 프로젝트, 배포 창, 삭제 범위, 중간 실패 시 복구/forward fix 절차를 함께 승인받는다. 승인 전에는 실행하지 않는다.
 - [ ] **삭제 전 집계:** M3 적용 전에 아래 읽기 전용 SQL로 비어 있지 않은 `profile_private.tastes` 행 수만 집계한다. 대상·조회 시각·건수를 기록하고 삭제 범위 승인에 포함한다. 답의 값 자체를 조회하거나 로그/임시 archive에 복제하지 않는다.
 

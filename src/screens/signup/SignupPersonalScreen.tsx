@@ -4,6 +4,7 @@ import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useSignupDraft } from '../../auth/SignupDraftProvider';
+import { PENDING_PROFILE_ACCOUNT_MAX_LENGTH } from '../../auth/pendingSignupProfile';
 import KeyboardSafeScreen from '../../components/KeyboardSafeScreen';
 import { AuthFooter, SignupStepHeader, authStyles } from '../../components/ui/AuthLayout';
 import BankSelect from '../../components/ui/BankSelect';
@@ -78,7 +79,8 @@ export default function SignupPersonalScreen() {
         <View style={styles.row}>
           <View style={styles.bank}><BankSelect value={draft.bank} onChange={(bank) => updateDraft({ bank })} logicalHeight={v3Layout.fieldHeight} /></View>
           <TextInput accessibilityLabel="계좌번호" style={styles.accountInput} value={draft.account}
-            onChangeText={(account) => updateDraft({ account })} placeholder="'-' 없이 숫자만" placeholderTextColor={colors.sub} keyboardType="number-pad" />
+            onChangeText={(account) => updateDraft({ account: account.slice(0, PENDING_PROFILE_ACCOUNT_MAX_LENGTH) })}
+            maxLength={PENDING_PROFILE_ACCOUNT_MAX_LENGTH} placeholder="'-' 없이 숫자만" placeholderTextColor={colors.sub} keyboardType="number-pad" />
         </View>
       </View>
       {/* TODO(서버 단계): 예금주 직접 입력을 저장할 필드와 계약이 생기면 입력칸을 추가한다. */}

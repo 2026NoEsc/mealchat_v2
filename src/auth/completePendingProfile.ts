@@ -21,8 +21,7 @@ export function completePendingProfile(user: { id: string; email?: string }): Pr
   const existing = writes.get(user.id);
   if (existing) return existing;
   const write = (async () => {
-    const stored = await readPendingSignupProfile(AsyncStorage);
-    const pending = immediateProfile?.userId === user.id ? immediateProfile : stored;
+    const pending = immediateProfile?.userId === user.id ? immediateProfile : await readPendingSignupProfile(AsyncStorage);
     if (!pending || !hasConsentAccess(user.id)) return;
     if (!isPendingProfileFor(pending, user)) {
       if (pending === immediateProfile) immediateProfile = null;

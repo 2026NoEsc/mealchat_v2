@@ -22,7 +22,11 @@
       "expo-image-picker",
       "expo-location",
       "expo-notifications",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-secure-store",
+        { "configureAndroidBackup": true, "faceIDPermission": false }
+      ]
     ],
     "assetBundlePatterns": [
       "**/*"

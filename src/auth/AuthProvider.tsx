@@ -11,6 +11,7 @@ import { getConsentServerMode } from '../lib/consents';
 import { supabase } from '../lib/supabase';
 import { clearPendingSignupProfile, readPendingSignupProfile } from './pendingSignupProfile';
 import { clearPendingSignupConsents } from './pendingSignupConsents';
+import { forgetImmediateSignupProfile } from './completePendingProfile';
 import {
   authRedirectErrorMessage,
   classifyAuthRedirect,
@@ -175,6 +176,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
       }
       if (event === 'SIGNED_OUT') {
+        forgetImmediateSignupProfile();
         // Expiration and external sign-outs bypass the public signOut callback.
         if (previousUserId) void clearSettingsDraft(previousUserId).catch(() => undefined);
         setPasswordResetPending(false);
@@ -286,6 +288,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
     if (error) return error;
+    forgetImmediateSignupProfile();
     await clearPendingSignupProfile(AsyncStorage).catch(() => undefined);
     await clearPendingSignupConsents(AsyncStorage).catch(() => undefined);
     setRestaurantRecommendationUser(null);

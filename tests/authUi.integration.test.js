@@ -210,6 +210,14 @@ it('invalidates an email availability result after editing and lets optional fie
   expect(navigation.navigate).toHaveBeenCalledWith('SignupCalendar');
 });
 
+it('bounds account entry including oversized change events to the secure draft limit', async () => {
+  const { PENDING_PROFILE_ACCOUNT_MAX_LENGTH } = require('../src/auth/pendingSignupProfile');
+  const root = await render(SignupPersonalScreen, undefined, SignupDraftProvider);
+  expect(input(root, '계좌번호').props.maxLength).toBe(PENDING_PROFILE_ACCOUNT_MAX_LENGTH);
+  await act(async () => input(root, '계좌번호').props.onChangeText('9'.repeat(1000)));
+  expect(input(root, '계좌번호').props.value).toBe('9'.repeat(PENDING_PROFILE_ACCOUNT_MAX_LENGTH));
+});
+
 it.each([
   [0, 72],
   [300, 24],

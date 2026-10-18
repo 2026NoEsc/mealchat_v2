@@ -1,4 +1,9 @@
 import { PENDING_SIGNUP_CONSENTS_TTL_MS as PENDING_SIGNUP_PROFILE_TTL_MS } from './pendingSignupConsents';
+import { createPendingProfileStorage, type DraftMetadataStorage } from './pendingProfileStorage';
+import { notify } from '../lib/confirm';
+
+// Accommodates bank/virtual account numbers while bounding the secure envelope.
+export const PENDING_PROFILE_ACCOUNT_MAX_LENGTH = 32;
 
 /**
  * 가입 화면에서 받았지만 아직 서버에 못 넣은 값.
@@ -32,11 +37,23 @@ export type PendingSignupProfile = {
   savedAt: number;
 };
 
-export type PendingSignupProfileStorage = {
-  getItem: (key: string) => Promise<string | null>;
-  setItem: (key: string, value: string) => Promise<void>;
-  removeItem: (key: string) => Promise<void>;
-};
+export type PendingSignupProfileStorage = DraftMetadataStorage;
+const vaults = new WeakMap<PendingSignupProfileStorage, ReturnType<typeof createPendingProfileStorage>>();
+function vault(storage: PendingSignupProfileStorage) {
+  let value = vaults.get(storage);
+  if (!value) {
+    value = createPendingProfileStorage({ metadata: storage, legacyKey: PENDING_SIGNUP_PROFILE_KEY,
+      project: raw => JSON.stringify(parsePendingSignupProfile(raw)),
+      valid: (raw, now) => {
+        const pending = parsePendingSignupProfile(raw);
+        return Boolean(pending && Number.isFinite(pending.savedAt) && now >= pending.savedAt && now - pending.savedAt <= PENDING_SIGNUP_PROFILE_TTL_MS);
+      },
+      onDiscard: () => notify('프로필 입력 필요', '가입 대기 프로필을 보관하지 못했어요. 로그인한 뒤 프로필에서 계좌와 생년월일을 다시 입력해 주세요.'),
+    });
+    vaults.set(storage, value);
+  }
+  return value;
+}
 
 export function normalizeEmail(email: string | null | undefined): string {
   return (email ?? '').trim().toLowerCase();
@@ -102,23 +119,18 @@ export async function persistPendingSignupProfile(
 ): Promise<void> {
   const { email, userId, bank, account, birth, tastes } = value;
   if (!userId?.trim()) { await clearPendingSignupProfile(storage); return; }
-  await storage.setItem(PENDING_SIGNUP_PROFILE_KEY, JSON.stringify({ email, userId, bank, account, birth, tastes: foodOnly(tastes), savedAt: now }));
+  await vault(storage).write(JSON.stringify({ email, userId, bank, account, birth, tastes: foodOnly(tastes), savedAt: now }), now);
 }
 
 export async function readPendingSignupProfile(
   storage: PendingSignupProfileStorage,
   now = Date.now(),
 ): Promise<PendingSignupProfile | null> {
-  const raw = await storage.getItem(PENDING_SIGNUP_PROFILE_KEY);
-  const pending = parsePendingSignupProfile(raw);
-  if (raw && (!pending || !Number.isFinite(pending.savedAt) || now < pending.savedAt || now - pending.savedAt > PENDING_SIGNUP_PROFILE_TTL_MS)) {
-    await clearPendingSignupProfile(storage); return null;
-  }
-  return pending;
+  return parsePendingSignupProfile(await vault(storage).read(now));
 }
 
 export async function clearPendingSignupProfile(
   storage: PendingSignupProfileStorage,
 ): Promise<void> {
-  await storage.removeItem(PENDING_SIGNUP_PROFILE_KEY);
+  await vault(storage).clear();
 }

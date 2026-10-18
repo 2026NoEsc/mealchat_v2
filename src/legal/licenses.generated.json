@@ -55,6 +55,11 @@
     "license": "MIT"
   },
   {
+    "name": "expo-secure-store",
+    "version": "15.0.8",
+    "license": "MIT"
+  },
+  {
     "name": "expo-status-bar",
     "version": "3.0.9",
     "license": "MIT"

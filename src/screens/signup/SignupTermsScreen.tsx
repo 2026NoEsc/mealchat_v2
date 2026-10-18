@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Info } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../auth/AuthProvider';
@@ -25,6 +25,7 @@ import { v3Colors as colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 import LegalDocumentSheet, { legalViewForTerm, type LegalView } from '../settings/LegalDocumentSheet';
 import { queueNotificationGuide } from '../settings/notificationPermission';
+
 
 const dudu = require('../../../assets/brand/dudu.png');
 
@@ -99,7 +100,9 @@ export default function SignupTermsScreen() {
         }
         notify(
           '이메일 확인 필요',
-          '이메일의 확인 링크를 연 뒤 로그인해 주세요.',
+          Platform.OS === 'web'
+            ? '이메일의 확인 링크를 연 뒤 로그인해 주세요.\n로그인한 뒤 프로필에서 계좌·생년월일을 입력해 주세요.'
+            : '이메일의 확인 링크를 연 뒤 로그인해 주세요.',
         );
         resetTo('Login');
         resetDraft();
