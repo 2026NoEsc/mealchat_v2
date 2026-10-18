@@ -24,8 +24,11 @@ export type RouteName =
   | 'ProfileEdit'
   | 'PasswordChange'
   | 'Settings'
+  | 'OptionalConsents'
+  | 'AccountDeletion'
   | 'ServiceTerms'
   | 'PrivacyPolicy'
+  | 'PrivacyRevision'
   | 'AppInfo'
   | 'Settlements';
 
@@ -43,8 +46,10 @@ export const TAB_ROUTES: Record<TabKey, RouteName> = {
 
 export const ROUTE_TO_TAB: Partial<Record<RouteName, TabKey>> = {
   Settings: 'profile',
+  OptionalConsents: 'profile',
   ServiceTerms: 'profile',
   PrivacyPolicy: 'profile',
+  PrivacyRevision: 'profile',
   AppInfo: 'profile',
   // 프로필 하위 화면도 Figma 상 하단 탭이 유지된다 (프로필 탭 활성)
   Friends: 'profile',

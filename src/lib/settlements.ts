@@ -1,7 +1,14 @@
 import { supabase } from './supabase';
 import { settlementCompletionRpcInput } from './settlementCompletionContract';
+import { fetchConsentManifest, getConsentServerMode, requestS1 } from './consents';
+import { getConsentAccess, hasConsentAccess, registerSensitiveConsentClearer, setConsentAccess } from '../consents/access';
+import { consentError } from '../consents/contracts';
 
 export { canEditSettlement, settlementMutationErrorMessage } from './settlementAccess';
+
+function closeRequiredConsent(error: unknown, owner: string | null) {
+  if ((error as { code?: string } | null)?.code === 'S1001' && getConsentAccess().userId === owner) setConsentAccess(owner, 'required');
+}
 
 export type SettlementMember = {
   id: string;
@@ -19,9 +26,6 @@ export type Settlement = {
   title: string;
   totalAmount: number;
   splitCount: number;
-  bankName: string;
-  accountNumber: string;
-  accountHolder: string;
   createdAt: string;
   members: SettlementMember[];
 };
@@ -40,16 +44,13 @@ type BillRow = {
   title: string;
   total_amount: number;
   split_count: number;
-  bank_name: string;
-  account_number: string;
-  account_holder: string;
   created_at: string;
   rooms: { title: string } | { title: string }[] | null;
   dutch_pay_members: MemberRow[] | null;
 };
 
 const SELECT =
-  'id, room_id, creator_id, title, total_amount, split_count, bank_name, account_number, account_holder, ' +
+  'id, room_id, creator_id, title, total_amount, split_count, ' +
   'created_at, rooms(title), dutch_pay_members(id, profile_id, name, is_completed)';
 
 function toSettlement(row: BillRow): Settlement {
@@ -64,9 +65,6 @@ function toSettlement(row: BillRow): Settlement {
     title: row.title,
     totalAmount: row.total_amount,
     splitCount: row.split_count,
-    bankName: row.bank_name,
-    accountNumber: row.account_number,
-    accountHolder: row.account_holder,
     createdAt: row.created_at,
     members: (row.dutch_pay_members ?? []).map((member) => ({
       id: member.id,
@@ -113,18 +111,21 @@ export async function createRoomSettlement(input: {
   accountNumber?: string | null;
   accountHolder?: string | null;
 }): Promise<{ billId: string | null; error: Error | null }> {
-  const { data, error } = await supabase.rpc('create_room_settlement_v2', {
-    target_room: input.roomId,
-    bill_title: input.title,
-    amount: input.amount,
-    // 빈/누락 계좌값은 진행 중 정산의 기존 계좌 정보를 지우지 않는다.
-    bank_name: input.bankName ?? null,
-    account_number: input.accountNumber ?? null,
-    account_holder: input.accountHolder ?? null,
-  });
-
-  if (error) return { billId: null, error };
-  return { billId: typeof data === 'string' ? data : null, error: null };
+  const owner = getConsentAccess().userId;
+  try {
+    const { data, error } = await supabase.rpc('create_room_settlement_v2', {
+      target_room: input.roomId,
+      bill_title: input.title,
+      amount: input.amount,
+      // 빈/누락 계좌값은 진행 중 정산의 기존 계좌 정보를 지우지 않는다.
+      bank_name: input.bankName ?? null,
+      account_number: input.accountNumber ?? null,
+      account_holder: input.accountHolder ?? null,
+    });
+    closeRequiredConsent(error, owner);
+    if (error) return { billId: null, error };
+    return { billId: typeof data === 'string' ? data : null, error: null };
+  } finally { invalidateSettlementPayments(); }
 }
 
 /** 송금 완료 표시. 본인 행이거나, 정산을 만든 사람이 대신 표시할 수 있다. */
@@ -133,17 +134,65 @@ export async function setSettlementCompleted(
   completed: boolean,
 ): Promise<Error | null> {
   const rpc = settlementCompletionRpcInput(memberId, completed);
-  const { error } = await supabase.rpc(rpc.functionName, rpc.args);
-  return error;
+  const owner = getConsentAccess().userId;
+  try {
+    const { error } = await supabase.rpc(rpc.functionName, rpc.args);
+    closeRequiredConsent(error, owner);
+    return error;
+  } finally { invalidateSettlementPayments(); }
+}
+
+export type SettlementPayment = {
+  billId: string; status: 'open' | 'completed' | 'unavailable';
+  details: { bankName: string; accountNumber: string; accountHolder: string } | null;
+};
+const paymentListeners = new Set<() => void>();
+export function invalidateSettlementPayments() { for (const listener of paymentListeners) { try { listener(); } catch { /* One unmounted view cannot keep another account snapshot alive. */ } } }
+export function subscribeSettlementPayments(listener: () => void) { paymentListeners.add(listener); return () => { paymentListeners.delete(listener); }; }
+registerSensitiveConsentClearer(invalidateSettlementPayments);
+
+/** No bill-list/notification account snapshots. Only an explicitly confirmed legacy server
+ * may use the previous SELECT contract; missing detail RPCs on S1 never downgrade it.
+ */
+export async function fetchSettlementPaymentDetails(billId: string): Promise<{ data: SettlementPayment | null; error: Error | null }> {
+  const owner = getConsentAccess().userId;
+  if (!hasConsentAccess(owner)) return { data: null, error: consentError('S1001') };
+  if (getConsentServerMode() === 'unknown') {
+    const manifest = await fetchConsentManifest();
+    if (manifest.error) return { data: null, error: manifest.error };
+  }
+  if (!hasConsentAccess(owner)) return { data: null, error: consentError('S1001') };
+  if (getConsentServerMode() === 'legacy') {
+    try {
+      const { data, error } = await supabase.from('dutch_pay_bills')
+        .select('id, bank_name, account_number, account_holder, dutch_pay_members(is_completed)').eq('id', billId)
+        .maybeSingle<{ id: string; bank_name: string; account_number: string; account_holder: string; dutch_pay_members: { is_completed: boolean }[] | null }>();
+      if (error || !data || data.id !== billId || !hasConsentAccess(owner)) return { data: null, error: consentError('P0002') };
+      const members = data.dutch_pay_members ?? [];
+      if (members.length && members.every(member => member.is_completed)) return { data: { billId, status: 'completed', details: null }, error: null };
+      if (!members.length || !data.bank_name?.trim() || !data.account_number?.trim()) return { data: { billId, status: 'unavailable', details: null }, error: null };
+      return { data: { billId, status: 'open', details: { bankName: data.bank_name, accountNumber: data.account_number, accountHolder: data.account_holder ?? '' } }, error: null };
+    } catch { return { data: null, error: consentError() }; }
+  }
+  const result = await requestS1('get_settlement_payment_details', { p_bill_id: billId }, value => {
+    const response = value as { bill_id: string; status: string; payment_details: { bank_name: string; account_number: string; account_holder: string } | null; hidden_reason: string | null; server_time: string };
+    if (!response || response.bill_id !== billId || !['open', 'completed', 'unavailable'].includes(response.status)
+      || typeof response.server_time !== 'string' || !/(Z|\+00:00)$/.test(response.server_time) || !Number.isFinite(Date.parse(response.server_time))) throw consentError();
+    const details = response.payment_details;
+    if (response.status === 'open') {
+      if (response.hidden_reason !== null || !details || ![details.bank_name, details.account_number].every(item => typeof item === 'string' && item.trim()) || typeof details.account_holder !== 'string') throw consentError();
+    } else if (details !== null || response.hidden_reason !== response.status) throw consentError();
+    return { billId, status: response.status, details: details ? { bankName: details.bank_name, accountNumber: details.account_number, accountHolder: details.account_holder } : null } as SettlementPayment;
+  });
+  return hasConsentAccess(owner) ? result : { data: null, error: consentError('S1001') };
 }
 
 export type RoomNotification = {
   id: string;
-  roomId: string;
+  roomId: string | null;
   title: string;
   message: string;
-  bankName: string;
-  accountNumber: string;
+  settlementId?: string | null;
   amount: number;
   createdAt: string;
 };
@@ -155,17 +204,16 @@ export async function fetchMyNotifications(): Promise<{
 }> {
   const { data, error } = await supabase
     .from('notifications')
-    .select('id, room_id, title, message, bank_name, account_number, amount, created_at')
+    .select('id, room_id, settlement_id, title, message, amount, created_at')
     .order('created_at', { ascending: false })
     .limit(30)
     .returns<
       {
         id: string;
-        room_id: string;
+        room_id: string | null;
         title: string;
         message: string;
-        bank_name: string;
-        account_number: string;
+        settlement_id: string | null;
         amount: number;
         created_at: string;
       }[]
@@ -179,8 +227,7 @@ export async function fetchMyNotifications(): Promise<{
       roomId: row.room_id,
       title: row.title,
       message: row.message,
-      bankName: row.bank_name,
-      accountNumber: row.account_number,
+      settlementId: row.settlement_id,
       amount: row.amount,
       createdAt: row.created_at,
     })),

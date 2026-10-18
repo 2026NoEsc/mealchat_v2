@@ -1,3 +1,5 @@
+import { PENDING_SIGNUP_CONSENTS_TTL_MS as PENDING_SIGNUP_PROFILE_TTL_MS } from './pendingSignupConsents';
+
 /**
  * 가입 화면에서 받았지만 아직 서버에 못 넣은 값.
  *
@@ -14,11 +16,14 @@
 export const PENDING_SIGNUP_PROFILE_KEY = 'mealchat.auth.pending-signup-profile.v1';
 
 /** 이 기간이 지나면 버린다 */
-export const PENDING_SIGNUP_PROFILE_TTL_MS = 3 * 24 * 60 * 60 * 1000;
+export { PENDING_SIGNUP_CONSENTS_TTL_MS as PENDING_SIGNUP_PROFILE_TTL_MS } from './pendingSignupConsents';
+const FOOD_KEYS = ['korean', 'meat', 'seafood', 'western', 'chinese', 'japanese'];
+const foodOnly = (tastes: Record<string, unknown>) => Object.fromEntries(Object.entries(tastes).filter(([key, picked]) => FOOD_KEYS.includes(key) && typeof picked === 'boolean')) as Record<string, boolean>;
 
 export type PendingSignupProfile = {
   /** 이 값이 누구 것인지 가리는 기준. 다른 계정으로 로그인하면 옮기지 않는다 */
   email: string;
+  userId: string;
   bank: string | null;
   account: string;
   birth: { year: string; month: string; day: string };
@@ -52,13 +57,14 @@ export function parsePendingSignupProfile(raw: string | null): PendingSignupProf
 
     const value = parsed as Record<string, unknown>;
     const email = typeof value.email === 'string' ? value.email : '';
-    if (!email.trim()) return null;
+    if (!email.trim() || typeof value.userId !== 'string' || !value.userId.trim()) return null;
 
     const birth = (value.birth ?? {}) as Record<string, unknown>;
     const tastes = (value.tastes ?? {}) as Record<string, unknown>;
 
     return {
       email,
+      userId: value.userId,
       bank: typeof value.bank === 'string' ? value.bank : null,
       account: typeof value.account === 'string' ? value.account : '',
       birth: {
@@ -66,9 +72,7 @@ export function parsePendingSignupProfile(raw: string | null): PendingSignupProf
         month: typeof birth.month === 'string' ? birth.month : '',
         day: typeof birth.day === 'string' ? birth.day : '',
       },
-      tastes: Object.fromEntries(
-        Object.entries(tastes).filter(([, picked]) => typeof picked === 'boolean'),
-      ) as Record<string, boolean>,
+      tastes: foodOnly(tastes),
       savedAt: typeof value.savedAt === 'number' ? value.savedAt : 0,
     };
   } catch {
@@ -79,16 +83,16 @@ export function parsePendingSignupProfile(raw: string | null): PendingSignupProf
 /** 지금 로그인한 사람에게 옮겨 담아도 되는 값인지 */
 export function isPendingProfileFor(
   pending: PendingSignupProfile | null,
-  email: string | null | undefined,
+  user: { id: string; email?: string | null },
   now: number = Date.now(),
 ): boolean {
-  if (!pending) return false;
+  if (!pending?.userId || pending.userId !== user.id) return false;
 
   const owner = normalizeEmail(pending.email);
-  const signedIn = normalizeEmail(email);
+  const signedIn = normalizeEmail(user.email);
   if (!owner || !signedIn || owner !== signedIn) return false;
 
-  return now - pending.savedAt <= PENDING_SIGNUP_PROFILE_TTL_MS;
+  return now >= pending.savedAt && now - pending.savedAt <= PENDING_SIGNUP_PROFILE_TTL_MS;
 }
 
 export async function persistPendingSignupProfile(
@@ -96,13 +100,21 @@ export async function persistPendingSignupProfile(
   value: Omit<PendingSignupProfile, 'savedAt'>,
   now: number = Date.now(),
 ): Promise<void> {
-  await storage.setItem(PENDING_SIGNUP_PROFILE_KEY, JSON.stringify({ ...value, savedAt: now }));
+  const { email, userId, bank, account, birth, tastes } = value;
+  if (!userId?.trim()) { await clearPendingSignupProfile(storage); return; }
+  await storage.setItem(PENDING_SIGNUP_PROFILE_KEY, JSON.stringify({ email, userId, bank, account, birth, tastes: foodOnly(tastes), savedAt: now }));
 }
 
 export async function readPendingSignupProfile(
   storage: PendingSignupProfileStorage,
+  now = Date.now(),
 ): Promise<PendingSignupProfile | null> {
-  return parsePendingSignupProfile(await storage.getItem(PENDING_SIGNUP_PROFILE_KEY));
+  const raw = await storage.getItem(PENDING_SIGNUP_PROFILE_KEY);
+  const pending = parsePendingSignupProfile(raw);
+  if (raw && (!pending || !Number.isFinite(pending.savedAt) || now < pending.savedAt || now - pending.savedAt > PENDING_SIGNUP_PROFILE_TTL_MS)) {
+    await clearPendingSignupProfile(storage); return null;
+  }
+  return pending;
 }
 
 export async function clearPendingSignupProfile(

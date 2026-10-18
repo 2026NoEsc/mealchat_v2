@@ -2,12 +2,15 @@ import type { Session, User } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Linking from 'expo-linking';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Alert } from 'react-native';
+import { Alert, AppState } from 'react-native';
 
 import { clearSettingsDraft } from '../lib/scheduleDraft';
 import { setRestaurantRecommendationUser } from '../lib/restaurantRecommendationCache';
-import { saveMyPrivateProfile } from '../lib/profile';
+import { setConsentAccess } from '../consents/access';
+import { getConsentServerMode } from '../lib/consents';
 import { supabase } from '../lib/supabase';
+import { clearPendingSignupProfile, readPendingSignupProfile } from './pendingSignupProfile';
+import { clearPendingSignupConsents } from './pendingSignupConsents';
 import {
   authRedirectErrorMessage,
   classifyAuthRedirect,
@@ -18,11 +21,6 @@ import {
   persistPasswordResetPending,
   readPasswordResetPending,
 } from './passwordResetState';
-import {
-  clearPendingSignupProfile,
-  isPendingProfileFor,
-  readPendingSignupProfile,
-} from './pendingSignupProfile';
 
 type SignUpResult = {
   confirmationRequired: boolean;
@@ -42,8 +40,8 @@ type AuthValue = {
     email: string;
     password: string;
     displayName: string;
-    /** 선택 동의. 필수 동의는 계정 생성 자체가 증거이므로 서버가 기록한다 */
-    marketingOptIn: boolean;
+    /** 레거시 가입 트리거에만 전달한다. S1에서는 별도 동의 RPC를 사용한다. */
+    marketingOptIn?: boolean;
   }) => Promise<SignUpResult>;
   sendPasswordReset: (email: string) => Promise<Error | null>;
   updatePassword: (password: string) => Promise<Error | null>;
@@ -72,6 +70,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [passwordResetPending, setPasswordResetPending] = useState(false);
 
   useEffect(() => {
+    void readPendingSignupProfile(AsyncStorage).catch(() => undefined);
+    const pendingCleanup = AppState.addEventListener('change', state => {
+      if (state === 'active') void readPendingSignupProfile(AsyncStorage).catch(() => undefined);
+    });
     let active = true;
     let currentUserId: string | null = null;
     const redirectGuard = createAuthRedirectGuard();
@@ -142,6 +144,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (active) {
         currentUserId = restoredSession?.user?.id ?? null;
+        setConsentAccess(currentUserId, 'loading');
         setRestaurantRecommendationUser(currentUserId);
         setSession(restoredSession);
         setPasswordResetPending(restoredResetPending);
@@ -159,6 +162,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!active) return;
       const previousUserId = currentUserId;
       currentUserId = nextSession?.user?.id ?? null;
+      if (previousUserId !== currentUserId) setConsentAccess(currentUserId, 'loading');
       setRestaurantRecommendationUser(currentUserId);
       setSession(nextSession);
       // 웹은 URL 조각이 아니라 이벤트로 복구 흐름을 알려준다
@@ -175,6 +179,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (previousUserId) void clearSettingsDraft(previousUserId).catch(() => undefined);
         setPasswordResetPending(false);
         void clearPasswordResetPending(AsyncStorage).catch(() => undefined);
+        void clearPendingSignupProfile(AsyncStorage).catch(() => undefined);
+        void clearPendingSignupConsents(AsyncStorage).catch(() => undefined);
       }
     });
 
@@ -184,46 +190,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       active = false;
+      pendingCleanup.remove();
       authSubscription.unsubscribe();
       linkSubscription.remove();
     };
   }, []);
 
-  /*
-   * 가입 화면에서 받아 둔 계좌·생년월일·취향을 로그인하는 순간 옮겨 담는다.
-   *
-   * 이메일 확인을 켜 두면 가입 직후에는 세션이 없어 그때는 쓸 수 없다. 예전에는
-   * 그대로 버려서, 메일을 확인하고 처음 로그인하면 적어 넣은 값이 하나도 없었다.
-   *
-   * 맡겨 둔 값의 주인(이메일)이 지금 로그인한 사람과 같을 때만 옮긴다 - 한 기기에서
-   * 다른 계정으로 로그인했는데 남의 계좌가 들어가면 안 된다.
-   */
-  useEffect(() => {
-    const userId = session?.user?.id;
-    const email = session?.user?.email;
-    if (!userId) return;
-
-    let active = true;
-
-    void (async () => {
-      const pending = await readPendingSignupProfile(AsyncStorage).catch(() => null);
-      if (!active || !pending || !isPendingProfileFor(pending, email)) return;
-
-      const error = await saveMyPrivateProfile(userId, {
-        bank: pending.bank,
-        account: pending.account,
-        birth: pending.birth,
-        tastes: pending.tastes,
-      });
-
-      /* 못 넣었으면 남겨 둔다 - 지우면 값이 영영 사라진다. 다음 로그인에 다시 해 본다 */
-      if (!error) await clearPendingSignupProfile(AsyncStorage).catch(() => undefined);
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, [session?.user?.id, session?.user?.email]);
+  // Signup personal fields are flushed only by the accepted consent gate (completePendingProfile).
 
   const signInWithEmail = useCallback(async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({
@@ -255,7 +228,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       email: string;
       password: string;
       displayName: string;
-      marketingOptIn: boolean;
+      marketingOptIn?: boolean;
     }) => {
       const { data, error } = await supabase.auth.signUp({
         email: email.trim().toLowerCase(),
@@ -265,14 +238,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
            * private.handle_new_user 트리거가 읽는 값이다.
            * 약관 버전과 동의 시각은 서버가 정하므로 여기서 보내지 않는다.
            */
-          data: { name: displayName.trim(), marketing_opt_in: marketingOptIn },
+          // Legacy trigger consumes this choice; S1 never treats metadata as consent.
+          data: { name: displayName.trim(), ...(getConsentServerMode() === 'legacy' ? { marketing_opt_in: marketingOptIn === true } : {}) },
           emailRedirectTo: redirectUrl(CALLBACK_PATH),
         },
       });
 
       return {
         confirmationRequired: !data.session,
-        userId: data.user?.id ?? null,
+        userId: data.user?.identities?.length === 0 ? null : data.user?.id ?? null,
         error,
       };
     },
@@ -312,6 +286,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
     if (error) return error;
+    await clearPendingSignupProfile(AsyncStorage).catch(() => undefined);
+    await clearPendingSignupConsents(AsyncStorage).catch(() => undefined);
     setRestaurantRecommendationUser(null);
     if (session?.user?.id) await clearSettingsDraft(session.user.id).catch(() => {});
 

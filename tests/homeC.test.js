@@ -11,7 +11,7 @@ jest.mock('../src/navigation/NavigationContext', () => ({ useNavigation: jest.fn
 jest.mock('../src/rooms/useMyRooms', () => ({ useMyRooms: jest.fn(), useMySettlements: jest.fn() }));
 jest.mock('../src/lib/rooms', () => ({ joinRoomByCode: jest.fn(), fetchMyRooms: jest.fn(), fetchMySettlements: jest.fn() }));
 jest.mock('../src/lifecycle/AppLifecycleContext', () => ({ useForegroundRefreshToken: jest.fn(() => 0) }));
-jest.mock('../src/lib/settlements', () => ({ ...jest.requireActual('../src/lib/settlementAccess'), fetchMySettlementsDetailed: jest.fn(), setSettlementCompleted: jest.fn(), fetchMyNotifications: jest.fn(), fetchNotificationsReadAt: jest.fn(), markNotificationsRead: jest.fn() }));
+jest.mock('../src/lib/settlements', () => ({ ...jest.requireActual('../src/lib/settlementAccess'), fetchMySettlementsDetailed: jest.fn(), setSettlementCompleted: jest.fn(), fetchMyNotifications: jest.fn(), fetchNotificationsReadAt: jest.fn(), markNotificationsRead: jest.fn(), fetchSettlementPaymentDetails: jest.fn(), subscribeSettlementPayments: () => () => {} }));
 const HomeScreen = require('../src/screens/HomeScreen').default;
 const NotificationPanel = require('../src/components/NotificationPanel').default;
 const CopyButton = require('../src/components/ui/CopyButton').default;
@@ -56,6 +56,7 @@ beforeEach(() => {
   useNavigation.mockReturnValue(navigation);
   useMyRooms.mockReturnValue({ rooms: [room], status: 'ready', reload }); useMySettlements.mockReturnValue([]);
   fetchMySettlementsDetailed.mockResolvedValue({ data: [bill], error: null }); setSettlementCompleted.mockResolvedValue(null);
+  require('../src/lib/settlements').fetchSettlementPaymentDetails.mockResolvedValue({ data: { billId: bill.id, status: 'open', details: { bankName: bill.bankName, accountNumber: bill.accountNumber, accountHolder: bill.accountHolder } }, error: null });
 });
 afterEach(async () => { if (renderer) await act(async () => renderer.unmount()); renderer = undefined; jest.restoreAllMocks(); jest.useRealTimers(); });
 it('hides the settlement nudge for zero and shows the actual positive count', async () => {
@@ -144,6 +145,16 @@ it('keeps payment and member actions tied to existing data and only the current 
 });
 it('retries a settlement fetch rejection through the actual load path', async () => {
   fetchMySettlementsDetailed.mockRejectedValueOnce(new Error('offline')); const root = await render(SettlementsScreen); expect(text(root)).toContain('정산을 불러오지 못했어요'); await press(root, '다시 시도'); expect(fetchMySettlementsDetailed).toHaveBeenCalledTimes(2); expect(text(root)).toContain('회사 팀 점심');
+});
+it.each(['S1005', 'SETTLEMENT_DISCLOSURE_CLOSED'])('shows the closed undo %s through the cross-platform dialog', async code => {
+  const notify = jest.spyOn(require('../src/lib/confirm'), 'notify').mockImplementation(() => {});
+  fetchMySettlementsDetailed.mockResolvedValue({ data: [{ ...bill, members: bill.members.map(member => ({ ...member, isCompleted: member.profileId === 'me' })) }], error: null });
+  setSettlementCompleted.mockResolvedValue({ code, message: 'private server detail' });
+  const root = await render(SettlementsScreen);
+  await press(root, '나야나 (나), 완료');
+  expect(setSettlementCompleted).toHaveBeenCalledWith('mine', false);
+  expect(notify).toHaveBeenCalledWith('변경 실패', '끝난 정산은 되돌릴 수 없어요. 새 정산을 요청해 주세요.');
+  expect(JSON.stringify(notify.mock.calls)).not.toContain('private server detail');
 });
 
 it('keeps settlement cards and the same accessible member control during a successful toggle refetch', async () => {
@@ -258,6 +269,13 @@ it('routes real provider notifications and closes only actionable rows', async (
   await act(async () => root.findByType(NotificationPanel).props.onPressNotice(notices[2]));
   expect(navigation.navigate).toHaveBeenCalledTimes(2); expect(root.findAllByType(NotificationPanel)).toHaveLength(1);
   await press(root, '알림 닫기'); expect(root.findAllByType(NotificationPanel)).toHaveLength(0);
+});
+it('opens a bill-linked notification after its room disappears without requiring account fields', async () => {
+  const notice = { ...notices[1], roomId: null, settlementId: 'bill' };
+  fetchMyNotifications.mockResolvedValue({ data: [notice], error: null });
+  const root = await render(ProviderScene); await act(async () => notificationContext.open());
+  await press(root, noticeLabel(notice, true));
+  expect(navigation.navigate).toHaveBeenCalledWith('Settlements'); expect(root.findAllByType(NotificationPanel)).toHaveLength(0);
 });
 it.each(['success', 'error', 'reject'])('optimistically marks provider notifications read and handles %s', async mode => {
   let resolve, reject;

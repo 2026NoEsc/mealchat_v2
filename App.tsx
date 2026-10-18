@@ -12,6 +12,7 @@ import { NotificationsProvider } from './src/components/NotificationsProvider';
 import StartupLoading from './src/components/ui/StartupLoading';
 import Toast, { useToast } from './src/components/ui/Toast';
 import { useConsentGate } from './src/consents/useConsentGate';
+import { consentErrorMessage } from './src/consents/contracts';
 import { AppLifecycleProvider } from './src/lifecycle/AppLifecycleContext';
 import AppNavigator from './src/navigation/AppNavigator';
 import { NavigationProvider } from './src/navigation/NavigationContext';
@@ -19,6 +20,7 @@ import NewPasswordScreen from './src/screens/auth/NewPasswordScreen';
 import ReConsentScreen from './src/screens/auth/ReConsentScreen';
 import { v3Layout } from './src/theme/scale';
 import NotificationPermissionGate from './src/screens/settings/NotificationPermissionGate';
+import PrivacyNoticeBanner from './src/screens/settings/PrivacyNoticeBanner';
 
 export default function App() {
   const [slowStartup, setSlowStartup] = useState(false);
@@ -94,13 +96,10 @@ function AppRoot({ loadingVisible }: { loadingVisible: boolean }) {
   return withFeedback(<AppBody session={session} anonymousEntry={resetCanceled ? 'Login' : 'SignupStart'} />);
 }
 
-/**
- * 동의 기록이 생기기 전에 가입한 사용자에게 현재 약관 동의를 받는다.
- * 확인에 실패하면 막지 않는다 — 자세한 이유는 useConsentGate 에 적혀 있다.
- */
+/** No authenticated data providers mount until current required consent is confirmed. */
 function ConsentGate({ loadingVisible }: { loadingVisible: boolean }) {
   const { session } = useAuth();
-  const { needsConsent, checked, markConsented } = useConsentGate();
+  const { checked, markConsented, state, manifest, status, reload, signupReview, error, legacy } = useConsentGate();
 
   // 동의 RPC가 아직 끝나지 않았으면 authenticated navigator/provider를 마운트하지
   // 않는다. 이전 계정의 stale 검사 결과로 본문이 보이는 것도 막는다.
@@ -108,11 +107,11 @@ function ConsentGate({ loadingVisible }: { loadingVisible: boolean }) {
     return <StartupLoading visible={loadingVisible} />;
   }
 
-  if (needsConsent) {
+  if (state !== 'accepted') {
     return (
       <>
         <StatusBar style="dark" />
-        <ReConsentScreen onDone={markConsented} />
+        <ReConsentScreen onDone={markConsented} manifest={manifest} status={status} gateError={state === 'error'} gateErrorMessage={consentErrorMessage(error)} onRetry={reload} signupReview={signupReview} legacy={legacy} />
       </>
     );
   }
@@ -128,7 +127,10 @@ function AppBody({ session, anonymousEntry = 'SignupStart' }: { session: Session
           {/* 알림 패널이 하단 탭까지 덮어야 하므로 네비게이터 바깥에 둔다 */}
           <NotificationsProvider>
             <StatusBar style="dark" />
-            <AppNavigator />
+            <View style={{ flex: 1 }}>
+              {session ? <PrivacyNoticeBanner key={session.user.id} /> : null}
+              <AppNavigator />
+            </View>
           </NotificationsProvider>
         </NavigationProvider>
       </AppLifecycleProvider>

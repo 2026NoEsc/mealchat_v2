@@ -28,6 +28,9 @@ import SettingsScreen from '../screens/settings/SettingsScreen';
 import ServiceTermsScreen from '../screens/settings/ServiceTermsScreen';
 import PrivacyPolicyScreen from '../screens/settings/PrivacyPolicyScreen';
 import AppInfoScreen from '../screens/settings/AppInfoScreen';
+import OptionalConsentsScreen from '../screens/settings/OptionalConsentsScreen';
+import PrivacyRevisionScreen from '../screens/settings/PrivacyRevisionScreen';
+import AccountDeletionScreen from '../screens/settings/AccountDeletionScreen';
 import { colors } from '../theme/tokens';
 import { useNavigation } from './NavigationContext';
 import { ROUTE_TO_TAB, TAB_ROUTES, type RouteName } from './routes';
@@ -51,10 +54,16 @@ function renderScreen(name: RouteName) {
   switch (name) {
     case 'Settings':
       return <SettingsScreen />;
+    case 'OptionalConsents':
+      return <OptionalConsentsScreen />;
+    case 'AccountDeletion':
+      return <AccountDeletionRoute />;
     case 'ServiceTerms':
       return <ServiceTermsScreen />;
     case 'PrivacyPolicy':
       return <PrivacyPolicyScreen />;
+    case 'PrivacyRevision':
+      return <PrivacyRevisionScreen />;
     case 'AppInfo':
       return <AppInfoScreen />;
     case 'Login':
@@ -104,6 +113,11 @@ function renderScreen(name: RouteName) {
     case 'PasswordChange':
       return <PasswordChangeScreen />;
   }
+}
+
+function AccountDeletionRoute() {
+  const { goBack } = useNavigation();
+  return <AccountDeletionScreen onBack={goBack} />;
 }
 
 const styles = StyleSheet.create({

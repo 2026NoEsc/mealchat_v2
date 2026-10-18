@@ -1,0 +1,26 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+select no_plan();
+select ok(not exists(select 1 from supabase_migrations.schema_migrations where version='20261017100000'),'local S1 is activated without the held M7 migration');
+select is((select count(*) from public.consent_documents where is_current and version like '%local-dev%'),4::bigint,'all four current local documents have explicit local-dev versions');
+select is((select count(*) from public.terms_versions where is_current),1::bigint,'seed selects exactly one bundle');
+set local role anon;
+select is(public.get_consent_manifest()->>'bundle_version','mealchat-local-dev-r2','anonymous app bootstrap detects a complete local S1 manifest');
+select is((public.get_consent_manifest()->>'contract_version')::integer,1,'local manifest retains the S1 app contract');
+reset role;
+insert into auth.users(id,aud,role,email,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
+values('96000001-0000-4000-8000-000000000001','authenticated','authenticated','local-seed-test@example.invalid','{}','{"name":"Local seed signup","health":true,"marketing_opt_in":true}',clock_timestamp(),clock_timestamp());
+select ok(not exists(select 1 from public.profile_consents where profile_id='96000001-0000-4000-8000-000000000001'),'local seed never manufactures user assent');
+set local role authenticated;
+select set_config('request.jwt.claims','{"sub":"96000001-0000-4000-8000-000000000001","role":"authenticated"}',true);
+select is(public.get_my_consent_status()->'required'->>'status','required','new local signup enters the S1 gate instead of S1006');
+select is((select count(*) from public.public_profiles),0::bigint,'local pending user remains isolated');
+select public.complete_signup_consents(gen_random_uuid(),public.get_consent_manifest()->>'bundle_version',(select jsonb_object_agg(k,jsonb_build_object('version',v->>'version','content_hash',v->>'content_hash')) from jsonb_each(public.get_consent_manifest()->'documents') e(k,v)),'{"service":true,"privacy":true,"health":false,"marketing":false}');
+select is(public.get_my_consent_status()->'required'->>'status','accepted','local-dev documents support complete S1 signup');
+select is(public.get_my_consent_status()->'health'->>'status','declined','local optional health refusal is retained');
+select is(public.get_my_consent_status()->'marketing'->>'sending_enabled','false','local marketing never enables delivery');
+select ok((select count(*)>0 from public.public_profiles),'ordinary app data opens after explicit local signup');
+reset role;
+select * from finish();
+rollback;

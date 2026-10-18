@@ -87,16 +87,29 @@ HTTP 예외는 개발 빌드 + 정확히 `1`인 opt-in + 승인된 호스트를 
 
 사설 IP로 연결할 때는 같은 네트워크의 다른 기기로 평문 토큰이 오갈 수 있으니 로컬 테스트 계정만 사용하세요.
 
-### 4-2. 마이그레이션 적용
+### 4-2. 마이그레이션과 로컬 S1 seed 적용
 
-```bash
-npx supabase db reset       # 로컬 DB를 지우고 supabase/migrations/* 를 순서대로 전부 적용
-```
+연결 대상이 폐기 가능한 로컬 컨테이너인지 먼저 확인하세요. 다음 명령은 로컬 DB 데이터를 지우고 저장소의 migrations와 seed를 차례로 적용합니다.
 
-- `db reset`은 로컬 DB만 지웁니다. 원격에는 영향이 없습니다.
-- `supabase/migrations/`에 있는 파일이 기준입니다(현재 34개).
-- `supabase/deferred_migrations/`와 `supabase/deferred_tests/`는 적용하지 않습니다. 보류된 항목입니다.
-- 새 마이그레이션을 추가했다면 `db reset`으로 처음부터 다시 적용해 오류가 없는지 확인하세요.
+~~~bash
+npx supabase db reset --local
+~~~
+
+- M1~M6 적용 후 config.toml의 [db.seed] enabled=true, sql_paths=["./seed.sql"]에 따라 supabase/seed.sql이 실행됩니다. 별도 M7 주입 플래그가 필요하지 않습니다.
+- seed는 네 문서와 번들 version에 local-dev를 표시하며, 로컬 가입·재동의 등 S1 모드 검증용입니다. 동의를 자동 생성하지 않으므로 새 로컬 계정은 앱에서 명시적으로 약관에 동의해야 합니다.
+- 배포 전 M7은 supabase/release/20261017100000_s1_activate_terms.sql에 보관합니다. 미확정 파일은 migrations에 넣지 않습니다. 최종 값 확정·이동·배포 검사는 [S1-release.md](S1-release.md)를 따릅니다.
+- --no-seed로 reset하면 M7도 없는 현재 개발 상태에서는 문서가 없어 S1006으로 닫힙니다. 일반 앱 확인에는 seed를 생략하지 마세요.
+- 일반 원격 push에는 로컬 seed가 포함되지 않습니다. 운영 --include-seed, --linked reset, 원격 --db-url은 사용하지 마세요.
+- supabase/deferred_migrations/와 supabase/deferred_tests/는 적용하지 않는 보류 항목입니다. 기존 로컬 데이터가 필요하면 reset 전에 별도로 보관하세요.
+
+현재 저장소의 개발/배포 경계를 읽기 전용으로 확인할 수 있습니다.
+
+~~~bash
+node supabase/release/check.mjs --development
+npm run quality
+~~~
+
+M7이 보류되어 있으면 개발 검사는 통과하면서 배포는 BLOCKED 상태임을 표시합니다. quality에는 M7 존재를 강제하는 검사를 넣지 않습니다. 운영 배포 검사인 npm run release:check는 확정 M7이 없으므로 실패하는 것이 정상입니다. 개발 quality 통과만으로 서버 migration을 운영에 적용하지 마세요.
 
 ### 4-3. Edge Function 로컬 실행
 

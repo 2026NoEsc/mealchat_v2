@@ -49,7 +49,7 @@ export default function NotificationPanel({ notices, allRead, readAt, onClose, o
         {visible.length === 0 ? <Text style={styles.empty}>{filter === '메이트' ? '아직 메이트 알림이 없어요' : notices.length === 0 ? '아직 알림이 없어요' : '이 분류에는 알림이 없어요'}</Text> : visible.map((notice) => {
           const unread = !allRead && (readAt === undefined || hasUnreadNotices([notice], readAt));
           const Icon = noticeKind(notice) === '정산' ? Receipt : CalendarDays;
-          const actionable = Boolean(onPressNotice && notice.roomId?.trim());
+          const actionable = Boolean(onPressNotice && (notice.roomId?.trim() || notice.settlementId));
           const label = [unread ? '안 읽음' : '읽음', notice.title, notice.message, ...(notice.amount > 0 ? [formatAmount(notice.amount)] : []), relativeTime(notice.createdAt)].join(', ');
           const body = <>
             {unread ? <View pointerEvents="none" style={styles.unreadBackground} /> : null}

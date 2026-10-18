@@ -64,6 +64,7 @@ enabled = true
 schema_paths = []
 
 [db.seed]
+# Local-only S1 local-dev activation; never include this seed in a remote push.
 # If enabled, seeds the database after migrations during a db reset.
 enabled = true
 # Specifies an ordered list of seed files to load during db reset.

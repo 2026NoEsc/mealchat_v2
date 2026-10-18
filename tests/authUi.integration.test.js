@@ -15,22 +15,25 @@ jest.mock('react-native-safe-area-context', () => {
 jest.mock('../src/theme/keyboard', () => ({ useKeyboardOverlap: jest.fn() }));
 jest.mock('../src/auth/AuthProvider', () => ({ useAuth: jest.fn() }));
 jest.mock('../src/navigation/NavigationContext', () => ({ useNavigation: jest.fn() }));
-jest.mock('../src/lib/consents', () => ({ recordTermsConsent: jest.fn() }));
+jest.mock('../src/lib/consents', () => ({
+  invalidateConsentServerMode: jest.fn(),
+  fetchConsentManifest: jest.fn(async () => ({ data: require('./fixtures/s1').s1Manifest, error: null })),
+  recordRequiredConsents: jest.fn(async () => ({ data: require('./fixtures/s1').s1Status(true), error: null })),
+  completeSignupConsents: jest.fn(async () => ({ data: require('./fixtures/s1').s1Status(true), error: null })),
+  setOptionalConsent: jest.fn(),
+}));
 jest.mock('../src/lib/email', () => ({ checkEmailAvailable: jest.fn() }));
 jest.mock('../src/screens/settings/notificationPermission', () => ({ queueNotificationGuide: jest.fn(async () => undefined) }));
-jest.mock('../src/lib/profile', () => ({ saveSignupPrivateProfile: jest.fn(async () => null) }));
+jest.mock('../src/lib/profile', () => ({ saveMyPrivateProfile: jest.fn(async () => null) }));
 jest.mock('../src/lib/confirm', () => ({ notify: jest.fn() }));
-jest.mock('../src/auth/pendingSignupProfile', () => ({
-  clearPendingSignupProfile: jest.fn(async () => undefined), persistPendingSignupProfile: jest.fn(async () => undefined),
-}));
 
 const { useAuth } = require('../src/auth/AuthProvider');
 const { useNavigation } = require('../src/navigation/NavigationContext');
-const { recordTermsConsent } = require('../src/lib/consents');
+const { recordRequiredConsents: recordTermsConsent, completeSignupConsents } = require('../src/lib/consents');
 const { checkEmailAvailable } = require('../src/lib/email');
 const { SignupDraftProvider, useSignupDraft } = require('../src/auth/SignupDraftProvider');
 const { useKeyboardOverlap } = require('../src/theme/keyboard');
-const { saveSignupPrivateProfile } = require('../src/lib/profile');
+const { saveMyPrivateProfile: saveSignupPrivateProfile } = require('../src/lib/profile');
 const { notify } = require('../src/lib/confirm');
 const { PrimaryButton, SecondaryButton, TextButton } = require('../src/components/ui/Button');
 const { Checkbox } = require('../src/components/ui/Checkbox');
@@ -160,7 +163,7 @@ it('requires eight matching password characters and uses the existing completion
 });
 
 it('records reconsent only after both required choices and calls onDone only after success', async () => {
-  recordTermsConsent.mockResolvedValue(new Error('fixture failure'));
+  recordTermsConsent.mockResolvedValue({ data: null, error: new Error('fixture failure') });
   const onDone = jest.fn();
   const root = await render(ReConsentScreen, { onDone });
   expect(root.findByType(PrimaryButton).props.disabled).toBe(true);
@@ -169,12 +172,12 @@ it('records reconsent only after both required choices and calls onDone only aft
   for (const index of [1, 2]) await act(async () => root.findAllByType(Checkbox)[index].props.onChange(true));
   expect(root.findByType(PrimaryButton).props.disabled).toBe(false);
   await act(async () => root.findByType(PrimaryButton).props.onPress());
-  expect(recordTermsConsent).toHaveBeenCalledWith(false);
+  expect(recordTermsConsent).toHaveBeenCalledWith(expect.objectContaining({ p_choices: { service: true, privacy: true } }));
   expect(onDone).not.toHaveBeenCalled();
-  recordTermsConsent.mockResolvedValue(null);
+  recordTermsConsent.mockResolvedValue({ data: require('./fixtures/s1').s1Status(true), error: null });
   await act(async () => root.findByType(PrimaryButton).props.onPress());
   expect(onDone).toHaveBeenCalledTimes(1);
-  await act(async () => root.findByType(TextButton).props.onPress());
+  await act(async () => action(root, '나중에 하기 (로그아웃)').props.onPress());
   expect(auth.signOut).toHaveBeenCalledTimes(1);
 });
 
@@ -326,9 +329,9 @@ it.each([false, true])('keeps reconsent on screen after signOut fails, thrown=%s
   else auth.signOut.mockResolvedValue(new Error('provider-private-fixture'));
   const onDone = jest.fn();
   const root = await render(ReConsentScreen, { onDone });
-  await act(async () => root.findByType(TextButton).props.onPress());
+  await act(async () => action(root, '나중에 하기 (로그아웃)').props.onPress());
   expect(onDone).not.toHaveBeenCalled();
-  expect(root.findByType(TextButton).props.disabled).toBe(false);
+  expect(action(root, '나중에 하기 (로그아웃)').props.disabled).toBe(false);
   expect(JSON.stringify(renderer.toJSON())).toContain('로그아웃하지 못했어요. 잠시 후 다시 시도해 주세요.');
   expect(JSON.stringify(renderer.toJSON())).not.toContain('provider-private-fixture');
 });
@@ -352,15 +355,14 @@ it.each([false, true])('blocks signup until both required terms are chosen and p
   await act(async () => root.findAllByType(Checkbox)[1].props.onChange(true));
   expect(root.findByType(PrimaryButton).props.disabled).toBe(true);
   await act(async () => root.findAllByType(Checkbox)[2].props.onChange(true));
-  if (marketing) await act(async () => root.findAllByType(Checkbox)[3].props.onChange(true));
+  if (marketing) await act(async () => root.findAllByType(Checkbox)[4].props.onChange(true));
   expect(root.findByType(PrimaryButton).props.disabled).toBe(false);
   await act(async () => root.findByType(PrimaryButton).props.onPress());
   expect(auth.signUpWithEmail).toHaveBeenCalledWith({
-    email: 'fixture@example.test', password: '12345678', displayName: '밀챗', marketingOptIn: marketing,
+    email: 'fixture@example.test', password: '12345678', displayName: '밀챗',
   });
-  expect(saveSignupPrivateProfile).toHaveBeenCalledWith('fixture', {
-    bank: null, account: '', birth: { year: '', month: '', day: '' }, tastes: {},
-  });
+  expect(completeSignupConsents).toHaveBeenCalledWith(expect.objectContaining({ p_choices: { service: true, privacy: true, health: false, marketing } }));
+  expect(saveSignupPrivateProfile).toHaveBeenCalledWith('fixture', expect.objectContaining({ bank: null, account: '', birth: { year: '', month: '', day: '' }, tastes: {} }));
 });
 
 it('lays out the password toggle in the input box and the email action below its label without label-height offsets', async () => {
@@ -401,7 +403,7 @@ it.each([
   expect(JSON.stringify(notify.mock.calls)).not.toContain('provider-private-fixture');
   auth.signUpWithEmail.mockResolvedValue({ error: null, confirmationRequired: false, userId: 'fixture' });
   await act(async () => root.findByType(PrimaryButton).props.onPress());
-  expect(auth.signUpWithEmail).toHaveBeenLastCalledWith({ email: 'fixture@example.test', password: '12345678', displayName: '밀챗', marketingOptIn: false });
+  expect(auth.signUpWithEmail).toHaveBeenLastCalledWith({ email: 'fixture@example.test', password: '12345678', displayName: '밀챗' });
 });
 
 it('maps a thrown signup AuthApiError by its code as well', async () => {

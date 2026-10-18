@@ -111,11 +111,11 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
             allRead={!unread}
             readAt={readAt}
             onPressNotice={(notice) => {
-              if (!notice.roomId?.trim()) return;
+              if (!notice.roomId?.trim() && !notice.settlementId) return;
               close();
-              if (notice.amount > 0) navigate('Settlements');
+              if (notice.settlementId || notice.amount > 0) navigate('Settlements');
               else navigate('ChatRoom', { roomId: notice.roomId });
-              // TODO(서버 단계): settlement_id 조회·전달과 알림 종류 계약이 필요하다. 금액 0 알림의 기존 ChatRoom 이동은 유지한다.
+              // Accounts never come from notifications; the destination reads bill-scoped payment details.
             }}
             onClose={close}
             onMarkAllRead={markAllRead}

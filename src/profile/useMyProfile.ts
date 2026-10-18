@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { getConsentAccess, hasConsentAccess, subscribeConsentAccess } from '../consents/access';
 
 import { useAuth } from '../auth/AuthProvider';
 import { useForegroundRefreshToken } from '../lifecycle/AppLifecycleContext';
@@ -18,21 +19,25 @@ type State =
 export function useMyProfile() {
   const { user } = useAuth();
   const userId = user?.id ?? null;
+  const access = useSyncExternalStore(subscribeConsentAccess, getConsentAccess, getConsentAccess);
   const foregroundRefreshToken = useForegroundRefreshToken();
 
   const [state, setState] = useState<State>({ status: 'loading', bundle: null, error: null });
+  const [ownerId, setOwnerId] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
 
   const reload = useCallback(() => setReloadToken((token) => token + 1), []);
 
   useEffect(() => {
-    if (!userId) {
+    if (!userId || !hasConsentAccess(userId)) {
       setState({ status: 'loading', bundle: null, error: null });
+      setOwnerId(null);
       return;
     }
 
     let active = true;
     setState({ status: 'loading', bundle: null, error: null });
+    setOwnerId(null);
 
     void fetchMyProfile(userId)
       .then(({ data, error }) => {
@@ -46,6 +51,7 @@ export function useMyProfile() {
           return;
         }
         setState({ status: 'ready', bundle: data, error: null });
+        setOwnerId(userId);
       })
       .catch((cause: unknown) => {
         if (!active) return;
@@ -59,7 +65,7 @@ export function useMyProfile() {
     return () => {
       active = false;
     };
-  }, [userId, reloadToken, foregroundRefreshToken]);
+  }, [userId, access, reloadToken, foregroundRefreshToken]);
 
-  return { ...state, userId, reload };
+  return hasConsentAccess(userId) && (state.status !== 'ready' || ownerId === userId) ? { ...state, userId, reload } : { status: 'loading' as const, bundle: null, error: null, userId, reload };
 }

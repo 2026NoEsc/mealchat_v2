@@ -1,5 +1,7 @@
 jest.mock('../src/auth/AuthProvider', () => ({ useAuth: jest.fn() }));
+jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
 jest.mock('../src/lib/consents', () => ({ fetchConsentStatus: jest.fn() }));
+jest.mock('../src/lib/profile', () => ({ saveMyPrivateProfile: jest.fn() }));
 
 import { isConsentCheckCompleteForUser } from '../src/consents/useConsentGate';
 import {

@@ -5,12 +5,11 @@ import type { LegalDocument } from '../../legal/terms';
 import { v3Colors as colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 
-export default function LegalDocumentBody({ document, initialSection }: { document: LegalDocument; initialSection?: string }) {
+export default function LegalDocumentBody({ document, initialSection, metadataLabel }: { document: Pick<LegalDocument, 'id' | 'title' | 'sections'> & Partial<Pick<LegalDocument, 'effectiveDate' | 'edition'>>; initialSection?: string; metadataLabel?: string }) {
   const scroll = useRef<ScrollView>(null);
   const positioned = useRef(false);
-  // TODO(서버 단계): 이전 판 원문이 제공되면 이전 판 보기를 연결한다.
   return <ScrollView ref={scroll} testID={`legal-${document.id}`} contentContainerStyle={styles.body}>
-    <View style={styles.meta}><Text style={styles.metaText}>시행일 {document.effectiveDate} · {document.edition}판</Text></View>
+    <View style={styles.meta}><Text style={styles.metaText}>{metadataLabel ?? `시행일 ${document.effectiveDate} · ${document.edition}판`}</Text></View>
     {document.sections.map((section) => <View key={section.id} testID={`legal-section-${section.id}`} style={styles.section}
       onLayout={(event) => {
         if (initialSection === section.id && !positioned.current) {

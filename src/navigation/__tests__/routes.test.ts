@@ -16,8 +16,10 @@ describe('navigation route mappings', () => {
   it('maps every root route to the expected active tab', () => {
     expect(ROUTE_TO_TAB).toEqual({
       Settings: 'profile',
+      OptionalConsents: 'profile',
       ServiceTerms: 'profile',
       PrivacyPolicy: 'profile',
+      PrivacyRevision: 'profile',
       AppInfo: 'profile',
       // 예전 경로로 들어와도 홈 탭이 켜져 있어야 한다
       Chat: 'home',

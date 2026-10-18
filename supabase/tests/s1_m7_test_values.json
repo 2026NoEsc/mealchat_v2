@@ -1,0 +1,7 @@
+{
+  "version": "privacy-2020-01-01-v2",
+  "edition": 2,
+  "effective_from": "2019-12-31T15:00:00Z",
+  "content_hash": "8bda837fc8deb26645ab4ee15619344fef35cd166579e113edea6fef1c6cc3bf",
+  "canonical_content": "{\"id\":\"privacy\",\"title\":\"Synthetic privacy activation - NEVER publish\",\"effectiveDate\":\"2020년 1월 1일\",\"edition\":2,\"sections\":[{\"id\":\"test\",\"title\":\"Local test only\",\"paragraphs\":[\"Synthetic data for local M7 verification. Not a legal document.\"]}]}\n"
+}

@@ -24,7 +24,8 @@
     "security:audit": "node scripts/check-dependency-audit.mjs",
     "test": "jest",
     "test:watch": "jest --watch",
-    "quality": "npm run security:assets && npm run ts:check && npm run lint && npm test -- --ci --runInBand && expo install --check && npm run security:audit"
+    "release:check": "node supabase/release/check.mjs --release",
+    "quality": "node supabase/release/check.mjs --development && node --test supabase/tests/s1_release_gate.test.mjs && npm run security:assets && npm run ts:check && npm run lint && npm test -- --ci --runInBand && expo install --check && npm run security:audit"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",

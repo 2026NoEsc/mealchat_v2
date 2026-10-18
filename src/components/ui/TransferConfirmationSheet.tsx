@@ -8,6 +8,9 @@ import { fontFamily } from '../../theme/typography';
 
 export function settlementUiError(error: unknown): string {
   const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+  if (code === 'S1005' || code === 'SETTLEMENT_DISCLOSURE_CLOSED') return '끝난 정산은 되돌릴 수 없어요. 새 정산을 요청해 주세요.';
+  if (code === 'S1001') return '현재 약관에 동의한 뒤 다시 이용해 주세요.';
+  if (code === 'P0002') return '이 정산의 계좌를 볼 수 없어요.';
   return code === '42501' ? '정산 내용은 만든 사람만 수정할 수 있어요.' : '정산을 변경하지 못했어요. 잠시 후 다시 시도해 주세요.';
 }
 type ConfirmationProps = {

@@ -138,3 +138,52 @@ it('creates isolated clients without persistent sessions, URL login, auto refres
   for (const option of options) expect(option).toMatchObject({ persistSession: false, autoRefreshToken: false, detectSessionInUrl: false });
   expect(options[0].storageKey).not.toBe(options[1].storageKey);
 });
+
+it('does not auto-save a pending signup profile when restoring an unconfirmed-consent session', async () => {
+  const storage = require('@react-native-async-storage/async-storage');
+  const { persistPendingSignupProfile } = require('../src/auth/pendingSignupProfile');
+  const { saveMyPrivateProfile } = require('../src/lib/profile');
+  await persistPendingSignupProfile(storage, { email: user.email, userId: user.id, bank: null, account: '', birth: { year: '', month: '', day: '' }, tastes: {} });
+  function Probe() { authContext = useAuth(); return null; }
+  await act(async () => { renderer = create(React.createElement(AuthProvider, null, React.createElement(Probe))); });
+  expect(authContext.user.id).toBe('self');
+  expect(saveMyPrivateProfile).not.toHaveBeenCalled();
+  await storage.clear();
+});
+it.each(['event', 'explicit'])('removes pending account, birth and consent data on %s logout', async path => {
+  const storage = require('@react-native-async-storage/async-storage');
+  const { persistPendingSignupProfile, PENDING_SIGNUP_PROFILE_KEY } = require('../src/auth/pendingSignupProfile');
+  const { PENDING_SIGNUP_CONSENTS_KEY } = require('../src/auth/pendingSignupConsents');
+  await persistPendingSignupProfile(storage, { email: user.email, userId: user.id, bank: '은행', account: '1234', birth: { year: '2000', month: '1', day: '1' }, tastes: {} });
+  await storage.setItem(PENDING_SIGNUP_CONSENTS_KEY, '{}');
+  let changed;
+  supabase.auth.onAuthStateChange.mockImplementation(callback => { changed = callback; return { data: { subscription: { unsubscribe: jest.fn() } } }; });
+  supabase.auth.signOut.mockResolvedValue({ error: null });
+  function Probe() { authContext = useAuth(); return null; }
+  await act(async () => { renderer = create(React.createElement(AuthProvider, null, React.createElement(Probe))); });
+  await act(async () => { if (path === 'event') changed('SIGNED_OUT', null); else await authContext.signOut(); });
+  expect(await storage.getItem(PENDING_SIGNUP_PROFILE_KEY)).toBeNull(); expect(await storage.getItem(PENDING_SIGNUP_CONSENTS_KEY)).toBeNull();
+});
+
+it('keeps optional consent choices and health data out of Auth signup metadata', async () => {
+  supabase.auth.signUp = jest.fn(async () => ({ data: { user, session: null }, error: null }));
+  function Probe() { authContext = useAuth(); return null; }
+  await act(async () => { renderer = create(React.createElement(AuthProvider, null, React.createElement(Probe))); });
+  await act(async () => authContext.signUpWithEmail({ email: user.email, password: 'fixture-password', displayName: '테스트', marketingOptIn: true }));
+  expect(supabase.auth.signUp).toHaveBeenCalledWith(expect.objectContaining({ options: { data: { name: '테스트' }, emailRedirectTo: 'auth/callback' } }));
+});
+
+it('preserves only the legacy marketing metadata choice after an explicit missing-function probe', async () => {
+  const { configureS1RpcTransport, fetchConsentManifest } = require('../src/lib/consents');
+  const { setConsentAccess } = require('../src/consents/access');
+  setConsentAccess(user.id, 'loading');
+  configureS1RpcTransport(async () => ({ data: null, error: { code: 'PGRST202' } }), require('./fixtures/s1').isolatedCapabilityStorage());
+  try {
+    await fetchConsentManifest();
+    supabase.auth.signUp = jest.fn(async () => ({ data: { user, session: null }, error: null }));
+    function Probe() { authContext = useAuth(); return null; }
+    await act(async () => { renderer = create(React.createElement(AuthProvider, null, React.createElement(Probe))); });
+    await act(async () => authContext.signUpWithEmail({ email: user.email, password: 'fixture-password', displayName: '테스트', marketingOptIn: true }));
+    expect(supabase.auth.signUp.mock.calls[0][0].options.data).toEqual({ name: '테스트', marketing_opt_in: true });
+  } finally { configureS1RpcTransport(); }
+});

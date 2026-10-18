@@ -1,262 +1,104 @@
 param(
-  [string]$DockerExe = 'C:\Users\PC\AppData\Local\Programs\DockerDesktop\resources\bin\docker.exe',
-  [string]$Container = 'supabase_db_mealchat_v2'
+  [string]$DockerExe = 'docker',
+  [string]$Container = 'supabase_db_mealchat_s1_a_20261017'
 )
 
 $ErrorActionPreference = 'Stop'
-
-$userA = 'a1a1a1a1-0000-0000-0000-0000000000a1'
-$userB = 'b2b2b2b2-0000-0000-0000-0000000000b2'
-$roomV1 = 'a1a1a1a1-1111-1111-1111-111111111111'
-$roomV2 = 'a1a1a1a1-2222-2222-2222-222222222222'
-
-function Invoke-LocalPsql {
-  param([Parameter(Mandatory = $true)][string]$Sql)
-
-  # Keep SQL off the PowerShell/Docker command line. Otherwise JSON literals in
-  # request.jwt.claims can lose their quotes before psql receives the command.
-  $lines = @(
-    $Sql | & $DockerExe exec -i $Container psql -U postgres -d postgres -X `
-      -v ON_ERROR_STOP=1 -Atq -f - 2>&1
-  )
-  $exitCode = $LASTEXITCODE
-  if ($exitCode -ne 0) {
-    throw ($lines -join "`n")
-  }
-  return ($lines -join "`n").Trim()
+$OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+# This test deliberately refuses the ordinary development/remote databases.
+if ($Container -ne 'supabase_db_mealchat_s1_a_20261017') {
+  throw 'Only the disposable S1-A local container is accepted.'
 }
-
-function Find-Uuid {
-  param([Parameter(Mandatory = $true)][string]$Output)
-
-  $match = [regex]::Match(
-    $Output,
-    '(?im)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-  )
-  if (-not $match.Success) {
-    throw "Expected a UUID result, received: $Output"
-  }
-  return $match.Value.ToLowerInvariant()
+$endpoint = & $DockerExe context inspect --format '{{.Endpoints.docker.Host}}'
+if ($LASTEXITCODE -ne 0 -or $endpoint -notmatch '^(npipe|unix)://') {
+  throw 'A local Docker endpoint is required.'
 }
+$identity = & $DockerExe inspect --format '{{.Name}} {{json .NetworkSettings.Ports}}' $Container
+if ($LASTEXITCODE -ne 0 -or $identity -notmatch '55322') {
+  throw 'The disposable local database must use host port 55322.'
+}
+Write-Output "Local target: $endpoint / $identity"
 
-$cleanupSql = @"
-delete from public.rooms where id in ('$roomV1'::uuid, '$roomV2'::uuid);
-delete from auth.users where id in ('$userA'::uuid, '$userB'::uuid);
-"@
-
-try {
-  $additiveMigrationPresent = Invoke-LocalPsql -Sql @"
-  select exists (
-    select 1
-    from supabase_migrations.schema_migrations
+# Synthetic legal documents and accepted users are transaction-local test data,
+# not M7 seeds. A failed psql session also rolls everything back on disconnect.
+$fixturePath = Join-Path $PSScriptRoot '../supabase/tests/s1_fixture.sql'
+$fixture = Get-Content -LiteralPath $fixturePath -Raw -Encoding UTF8
+$sql = @'
+begin;
+do $$ begin
+  if not exists(
+    select 1 from supabase_migrations.schema_migrations
     where version = '20260823072701'
-  )::text;
-"@
-  if ($additiveMigrationPresent -ne 'true') {
-    throw 'Additive compatibility test requires migration 20260823072701 in local migration history.'
-  }
+  ) then
+    raise exception 'S1 compatibility test requires additive settlement hardening.';
+  end if;
+  if not exists(select 1 from supabase_migrations.schema_migrations where version='20261017095000') then
+    raise exception 'S1 compatibility test requires migrations through M6.';
+  end if;
+end; $$;
+set local s1.tap='off';
+'@ + [Environment]::NewLine + $fixture + [Environment]::NewLine + @'
+-- v1/v2 signatures remain callable; forced admission and all direct notification
+-- inserts are closed. Check catalog ACL and actual authenticated execution.
+select pg_temp.check(has_function_privilege('authenticated','public.create_room_settlement(uuid,text,integer,text,text,text)','EXECUTE'),'settlement v1 remains executable');
+select pg_temp.check(has_function_privilege('authenticated','public.create_room_settlement_v2(uuid,text,integer,text,text,text)','EXECUTE'),'settlement v2 remains executable');
+select pg_temp.check(not has_function_privilege('authenticated','public.invite_friend_to_room(uuid,uuid)','EXECUTE'),'forced invite denied to authenticated');
+select pg_temp.check(not has_function_privilege('anon','public.invite_friend_to_room(uuid,uuid)','EXECUTE'),'forced invite denied to anon');
+select pg_temp.check(not exists(select 1 from pg_proc p cross join lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a where p.oid='public.invite_friend_to_room(uuid,uuid)'::regprocedure and a.grantee=0 and a.privilege_type='EXECUTE'),'forced invite denied to PUBLIC');
+select pg_temp.check(has_function_privilege('authenticated','public.post_room_system_message(uuid,text)','EXECUTE'),'member system message RPC remains executable');
+select pg_temp.check(not has_column_privilege('authenticated','public.notifications','room_id','INSERT'),'legacy notification direct insert closed');
+select pg_temp.check(not has_column_privilege('authenticated','public.notifications','settlement_id','INSERT'),'linked notification direct insert closed');
+select pg_temp.check(not has_table_privilege('authenticated','public.rooms','UPDATE'),'room direct update closed');
+select pg_temp.check(not has_table_privilege('authenticated','public.dutch_pay_bills','INSERT'),'bill direct insert closed');
 
-  Invoke-LocalPsql -Sql $cleanupSql | Out-Null
-
-  Invoke-LocalPsql -Sql @"
-insert into auth.users (
-  id, aud, role, email, raw_app_meta_data, raw_user_meta_data, created_at, updated_at
-)
+insert into public.rooms(id,code,title,meeting_date,expires_at,owner_id)
 values
-  ('$userA', 'authenticated', 'authenticated', 'additive-a@example.invalid',
-   '{}'::jsonb, '{"name":"Additive A"}'::jsonb, now(), now()),
-  ('$userB', 'authenticated', 'authenticated', 'additive-b@example.invalid',
-   '{}'::jsonb, '{"name":"Additive B"}'::jsonb, now(), now());
-
-insert into public.rooms (
-  id, code, title, meeting_date, expires_at, owner_id,
-  is_confirmed, confirmed_slot, color, location_name
-)
+ ('a1a1a1a1-1111-1111-1111-111111111111','ADDITV01','Additive v1',current_date+1,clock_timestamp()+interval '7 days','10000001-0000-4000-8000-000000000001'),
+ ('a1a1a1a1-2222-2222-2222-222222222222','ADDITV02','Additive v2',current_date+1,clock_timestamp()+interval '7 days','10000001-0000-4000-8000-000000000001');
+insert into public.participants(room_id,profile_id,name)
 values
-  ('$roomV1', 'ADDITV01', 'Additive v1', current_date + 1,
-   now() + interval '7 days', '$userA', false, null, '#23A455', 'Test location'),
-  ('$roomV2', 'ADDITV02', 'Additive v2', current_date + 1,
-   now() + interval '7 days', '$userA', false, null, '#23A455', 'Test location');
-
-insert into public.participants (room_id, profile_id, name, avatar_color)
-values
-  ('$roomV1', '$userB', 'Additive B', '#3366FF'),
-  ('$roomV2', '$userB', 'Additive B', '#3366FF');
-"@ | Out-Null
-
-  $privileges = Invoke-LocalPsql -Sql @"
-select json_build_object(
-  'v1_execute', has_function_privilege(
-    'authenticated',
-    'public.create_room_settlement(uuid,text,integer,text,text,text)',
-    'EXECUTE'
-  ),
-  'v2_execute', has_function_privilege(
-    'authenticated',
-    'public.create_room_settlement_v2(uuid,text,integer,text,text,text)',
-    'EXECUTE'
-  ),
-  'forced_invite_execute', has_function_privilege(
-    'authenticated', 'public.invite_friend_to_room(uuid,uuid)', 'EXECUTE'
-  ),
-  'generic_system_execute', has_function_privilege(
-    'authenticated', 'public.post_room_system_message(uuid,text)', 'EXECUTE'
-  ),
-  'legacy_notification_insert', has_column_privilege(
-    'authenticated', 'public.notifications', 'room_id', 'INSERT'
-  ),
-  'linked_notification_insert', has_column_privilege(
-    'authenticated', 'public.notifications', 'settlement_id', 'INSERT'
-  ),
-  'room_update', has_table_privilege('authenticated', 'public.rooms', 'UPDATE'),
-  'bill_insert', has_table_privilege(
-    'authenticated', 'public.dutch_pay_bills', 'INSERT'
-  )
-)::text;
-"@ | ConvertFrom-Json
-
-  if (
-    -not $privileges.v1_execute -or
-    -not $privileges.v2_execute -or
-    -not $privileges.forced_invite_execute -or
-    -not $privileges.generic_system_execute -or
-    -not $privileges.legacy_notification_insert -or
-    $privileges.linked_notification_insert -or
-    $privileges.room_update -or
-    $privileges.bill_insert
-  ) {
-    throw 'Additive privilege boundary does not match the compatibility contract.'
-  }
-
-  $v1Sql = @"
-begin;
+ ('a1a1a1a1-1111-1111-1111-111111111111','10000002-0000-4000-8000-000000000002','Additive B'),
+ ('a1a1a1a1-2222-2222-2222-222222222222','10000002-0000-4000-8000-000000000002','Additive B');
 set local role authenticated;
-set local "request.jwt.claim.sub" = '$userA';
-set local "request.jwt.claims" = '{"sub":"$userA","role":"authenticated"}';
-select public.create_room_settlement(
-  '$roomV1'::uuid, 'Legacy dinner', 20000,
-  'Test bank', '100-200', 'Additive A'
-);
-commit;
-"@
-  $v1Bill = Find-Uuid -Output (Invoke-LocalPsql -Sql $v1Sql)
-  $v1Retry = Find-Uuid -Output (Invoke-LocalPsql -Sql $v1Sql)
-  if ($v1Bill -ne $v1Retry) {
-    throw 'Settlement v1 retry returned a different active bill.'
-  }
-
-  Invoke-LocalPsql -Sql @"
-begin;
+select pg_temp.as_user('10000001-0000-4000-8000-000000000001');
+-- Fixture A follows H unilaterally; pending invitation elsewhere grants no membership.
+select pg_temp.check(pg_temp.sqlstate_of($q$select public.invite_friend_to_room('a1a1a1a1-1111-1111-1111-111111111111','10000008-0000-4000-8000-000000000008')$q$)='42501','one-way follow cannot force admission');
+select pg_temp.check(not exists(select 1 from public.participants where room_id='a1a1a1a1-1111-1111-1111-111111111111' and profile_id='10000008-0000-4000-8000-000000000008'),'denied forced invite creates no participant');
+select pg_temp.check(public.get_visible_profile('10000008-0000-4000-8000-000000000008')->>'relationship'='identity_only','denied forced invite preserves identity_only');
+insert into pg_temp.s1_ids values('compat-v1',public.create_room_settlement('a1a1a1a1-1111-1111-1111-111111111111','Legacy dinner',20000,'Test bank','100-200','Additive A'));
+select pg_temp.check(public.create_room_settlement('a1a1a1a1-1111-1111-1111-111111111111','Legacy dinner',20000,'Test bank','100-200','Additive A')=(select v from pg_temp.s1_ids where k='compat-v1'),'v1 retry reuses active bill');
+select pg_temp.check(pg_temp.sqlstate_of($q$insert into public.notifications(room_id,title,message,bank_name,account_number,amount) values('a1a1a1a1-1111-1111-1111-111111111111','Legacy notification','Legacy notification','Test bank','100-200',10000)$q$)='42501','legacy notification insert returns 42501');
+select pg_temp.check(public.post_room_system_message('a1a1a1a1-1111-1111-1111-111111111111','Legacy system message') is not null,'member system message RPC succeeds');
+reset role;
+-- Historical unlinked data may still exist; only the trusted fixture owner writes it.
+insert into public.notifications(room_id,title,message,amount)
+values('a1a1a1a1-1111-1111-1111-111111111111','Historical notification','Historical notification',10000);
 set local role authenticated;
-set local "request.jwt.claim.sub" = '$userA';
-set local "request.jwt.claims" = '{"sub":"$userA","role":"authenticated"}';
-insert into public.notifications (
-  room_id, title, message, bank_name, account_number, amount
-)
-values (
-  '$roomV1'::uuid, 'Legacy notification', 'Legacy notification',
-  'Test bank', '100-200', 10000
-);
-select public.post_room_system_message('$roomV1'::uuid, 'Legacy system message');
-commit;
-"@ | Out-Null
+select pg_temp.check((select count(*)=1 from public.notifications where room_id='a1a1a1a1-1111-1111-1111-111111111111'),'v1 hides historical unlinked notifications');
+select pg_temp.check((select count(*)=1 from public.notifications where settlement_id=(select v from pg_temp.s1_ids where k='compat-v1')),'v1 emits one visible linked notification');
+select pg_temp.check((select count(*)=0 from public.messages where room_id='a1a1a1a1-1111-1111-1111-111111111111' and event_key like 'settlement-created:%'),'v1 emits no v2 fixed event');
+select pg_temp.check((select count(*)=1 from public.messages where room_id='a1a1a1a1-1111-1111-1111-111111111111' and kind='system' and event_key is null),'v1 member system message remains available');
+select pg_temp.check((select count(*)=2 from public.dutch_pay_members where bill_id=(select v from pg_temp.s1_ids where k='compat-v1')),'v1 fixes two recipients');
+insert into pg_temp.s1_ids values('compat-v2',public.create_room_settlement_v2('a1a1a1a1-2222-2222-2222-222222222222','Current dinner',30000,'Test bank','300-400','Additive A'));
+select pg_temp.check((select count(*)=1 from public.dutch_pay_bills where id=(select v from pg_temp.s1_ids where k='compat-v2')),'v2 creates one bill');
+select pg_temp.check((select count(*)=2 from public.dutch_pay_members where bill_id=(select v from pg_temp.s1_ids where k='compat-v2')),'v2 fixes two recipients');
+select pg_temp.check((select count(*)=1 from public.notifications where settlement_id=(select v from pg_temp.s1_ids where k='compat-v2')),'v2 emits one linked notification');
+select pg_temp.check((select count(*)=1 from public.messages where room_id='a1a1a1a1-2222-2222-2222-222222222222' and event_key like 'settlement-created:%'),'v2 emits one fixed event');
+rollback;
+'@
 
-  $v1Visible = Invoke-LocalPsql -Sql @"
-begin;
-set local role authenticated;
-set local "request.jwt.claim.sub" = '$userA';
-set local "request.jwt.claims" = '{"sub":"$userA","role":"authenticated"}';
-select json_build_object(
-  'visible_notifications', (
-    select count(*) from public.notifications where room_id = '$roomV1'::uuid
-  ),
-  'linked_notifications', (
-    select count(*) from public.notifications where settlement_id = '$v1Bill'::uuid
-  ),
-  'fixed_events', (
-    select count(*) from public.messages
-    where room_id = '$roomV1'::uuid and event_key like 'settlement-created:%'
-  ),
-  'legacy_system_messages', (
-    select count(*) from public.messages
-    where room_id = '$roomV1'::uuid and kind = 'system' and event_key is null
-  )
-)::text;
-commit;
-"@ | ConvertFrom-Json
-
-  $v1Total = Invoke-LocalPsql -Sql @"
-select json_build_object(
-  'total_notifications', (
-    select count(*) from public.notifications where room_id = '$roomV1'::uuid
-  ),
-  'members', (
-    select count(*) from public.dutch_pay_members where bill_id = '$v1Bill'::uuid
-  )
-)::text;
-"@ | ConvertFrom-Json
-
-  if (
-    $v1Visible.visible_notifications -ne 1 -or
-    $v1Visible.linked_notifications -ne 1 -or
-    $v1Visible.fixed_events -ne 0 -or
-    $v1Visible.legacy_system_messages -ne 1 -or
-    $v1Total.total_notifications -ne 2 -or
-    $v1Total.members -ne 2
-  ) {
-    throw 'Settlement v1 additive behavior is not compatible or leaks legacy notification data.'
-  }
-
-  $v2Bill = Find-Uuid -Output (Invoke-LocalPsql -Sql @"
-begin;
-set local role authenticated;
-set local "request.jwt.claim.sub" = '$userA';
-set local "request.jwt.claims" = '{"sub":"$userA","role":"authenticated"}';
-select public.create_room_settlement_v2(
-  '$roomV2'::uuid, 'Current dinner', 30000,
-  'Test bank', '300-400', 'Additive A'
-);
-commit;
-"@)
-
-  $v2State = Invoke-LocalPsql -Sql @"
-select json_build_object(
-  'bills', (
-    select count(*) from public.dutch_pay_bills where id = '$v2Bill'::uuid
-  ),
-  'members', (
-    select count(*) from public.dutch_pay_members where bill_id = '$v2Bill'::uuid
-  ),
-  'linked_notifications', (
-    select count(*) from public.notifications where settlement_id = '$v2Bill'::uuid
-  ),
-  'fixed_events', (
-    select count(*) from public.messages
-    where room_id = '$roomV2'::uuid and event_key like 'settlement-created:%'
-  )
-)::text;
-"@ | ConvertFrom-Json
-
-  if (
-    $v2State.bills -ne 1 -or
-    $v2State.members -ne 2 -or
-    $v2State.linked_notifications -ne 1 -or
-    $v2State.fixed_events -ne 1
-  ) {
-    throw 'Settlement v2 additive behavior is incomplete or duplicated.'
-  }
-
-  [pscustomobject]@{
-    Phase = '20260823072701 additive'
-    V1LinkedVisibleNotifications = $v1Visible.linked_notifications
-    V1LegacyVisibleNotifications = $v1Visible.visible_notifications - $v1Visible.linked_notifications
-    V1LegacySystemMessages = $v1Visible.legacy_system_messages
-    V2LinkedNotifications = $v2State.linked_notifications
-    V2FixedEvents = $v2State.fixed_events
-    SensitiveDirectWritesClosed = $true
-    Result = 'PASS'
-  } | Format-List
-}
-finally {
-  Invoke-LocalPsql -Sql $cleanupSql | Out-Null
-}
+$previousErrorAction = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+$lines = @($sql | & $DockerExe exec -i $Container psql -U postgres -d postgres -X -Atq -v ON_ERROR_STOP=1 -f - 2>&1)
+$exitCode = $LASTEXITCODE
+$ErrorActionPreference = $previousErrorAction
+if ($exitCode -ne 0) { throw ($lines -join [Environment]::NewLine) }
+$checks = @($lines | Where-Object { $_ -match '^ok - ' })
+if ($checks.Count -ne 26) { throw "Expected 26 fixture/compatibility checks, got $($checks.Count)." }
+[pscustomobject]@{
+  Phase = 'S1 v1/v2 compatibility and closed privilege boundary'
+  Checks = $checks.Count
+  SensitiveDirectWritesClosed = $true
+  FixtureRolledBack = $true
+  Result = 'PASS'
+} | Format-List

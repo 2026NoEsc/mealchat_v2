@@ -13,9 +13,17 @@ jest.mock('../src/profile/useMyProfile', () => ({ useMyProfile: jest.fn() }));
 jest.mock('../src/components/NotificationsProvider', () => ({ useNotifications: () => ({ hasUnread: false, open: jest.fn() }) }));
 jest.mock('../src/lib/confirm', () => ({ notify: jest.fn() }));
 jest.mock('../src/lib/friends', () => ({ fetchMyFriends: jest.fn(async () => ({ data: [], error: null })) }));
-jest.mock('../src/lib/profile', () => ({ saveSignupPrivateProfile: jest.fn(async () => null) }));
-jest.mock('../src/lib/consents', () => ({ recordTermsConsent: jest.fn(async () => null) }));
-jest.mock('../src/auth/pendingSignupProfile', () => ({ clearPendingSignupProfile: jest.fn(async () => undefined), persistPendingSignupProfile: jest.fn(async () => undefined) }));
+jest.mock('../src/lib/profile', () => ({ saveMyPrivateProfile: jest.fn(async () => null) }));
+jest.mock('../src/lib/consents', () => ({
+  getConsentServerMode: jest.fn(() => 's1'),
+  getConsentServerModeSnapshot: jest.fn(() => 's1'),
+  subscribeConsentServerMode: jest.fn(() => () => {}),
+  invalidateConsentServerMode: jest.fn(),
+  fetchConsentManifest: jest.fn(async () => ({ data: require('./fixtures/s1').s1Manifest, error: null })),
+  recordRequiredConsents: jest.fn(async () => ({ data: require('./fixtures/s1').s1Status(true), error: null })),
+  completeSignupConsents: jest.fn(async () => ({ data: require('./fixtures/s1').s1Status(true), error: null })),
+  setOptionalConsent: jest.fn(),
+}));
 
 const AsyncStorage = require('@react-native-async-storage/async-storage');
 const Notifications = require('expo-notifications');
@@ -71,13 +79,13 @@ const output = () => JSON.stringify(renderer.toJSON());
 it('routes the settings information rows to local screens and keeps their profile tab mappings', async () => {
   const root = await render(SettingsScreen);
   const rows = root.findAllByType(ListRow);
-  expect(rows.map((row) => row.props.title)).toEqual(['서비스 이용약관', '개인정보 처리방침', '오픈소스 라이선스', '앱 버전', '로그아웃']);
+  expect(rows.map((row) => row.props.title)).toEqual(['서비스 이용약관', '개인정보 처리방침', '오픈소스 라이선스', '앱 버전', '선택 동의', '로그아웃', '계정 삭제']);
   for (const row of rows.slice(0, 4)) await act(async () => row.props.onPress());
   expect(navigation.navigate.mock.calls).toEqual([['ServiceTerms'], ['PrivacyPolicy'], ['AppInfo'], ['AppInfo']]);
   for (const route of ['Settings', 'ServiceTerms', 'PrivacyPolicy', 'AppInfo']) expect(ROUTE_TO_TAB[route]).toBe('profile');
   expect(rows[3].props.value).toBe(require('../app.json').expo.version);
   expect(output()).not.toContain('최신');
-  expect(output()).not.toContain('계정 삭제');
+  expect(output()).toContain('계정 삭제');
   expect(output()).not.toContain('문의하기');
 });
 
@@ -128,6 +136,26 @@ it('positions the marketing link at the privacy retention section', async () => 
   expect(scrollTo).toHaveBeenCalledWith({ y: 410, animated: false });
 });
 
+it('shows current server canonical text on settings pages when the bundled hash differs', async () => {
+  const { canonicalLegalDocument } = require('../src/legal/canonical');
+  const manifest = JSON.parse(JSON.stringify(require('./fixtures/s1').s1Manifest));
+  manifest.documents.service = { ...manifest.documents.service, content_hash: 'a'.repeat(64), canonical_content: canonicalLegalDocument({ ...terms, title: '서버의 현재 약관' }) };
+  require('../src/lib/consents').fetchConsentManifest.mockResolvedValueOnce({ data: manifest, error: null });
+  await render(ServiceTermsScreen);
+  expect(output()).toContain('서버의 현재 약관');
+});
+it('opens preserved v1 from a newer server privacy document without replacing its original text', async () => {
+  const { canonicalLegalDocument } = require('../src/legal/canonical');
+  const manifest = JSON.parse(JSON.stringify(require('./fixtures/s1').s1Manifest));
+  manifest.documents.privacy = { ...manifest.documents.privacy, edition: 2, version: 'privacy-test-v2', content_hash: 'b'.repeat(64), canonical_content: canonicalLegalDocument({ ...privacy, edition: 2, title: '서버의 개정 방침' }) };
+  require('../src/lib/consents').fetchConsentManifest.mockResolvedValueOnce({ data: manifest, error: null });
+  const root = await render(PrivacyPolicyScreen); expect(output()).toContain('서버의 개정 방침');
+  await act(async () => action(root, '이전 판 보기 · 1판').props.onPress());
+  expect(root.findByType(LegalDocumentBody).props.document).toBe(privacy);
+  await act(async () => action(root, '현재 판 보기').props.onPress());
+  expect(root.findByType(LegalDocumentBody).props.document.edition).toBe(2);
+});
+
 it('renders the actual configured app version and generated licenses without an update badge', async () => {
   const root = await render(AppInfoScreen);
   expect(root.findAll((node) => typeof node.type === 'string' && node.props.testID === 'license-row')).toHaveLength(licenses.length);
@@ -141,12 +169,13 @@ it.each([SignupTermsScreen, ReConsentScreen])('opens all legal views without cha
   const root = await render(Wrapped);
   const checks = root.findAllByType(Checkbox);
   await act(async () => checks[1].props.onChange(true));
-  for (const [index, document, section] of [[1, 'terms', undefined], [2, 'privacy', undefined], [3, 'privacy', 'retention']]) {
+  const views = Screen === SignupTermsScreen ? [[1, 'terms'], [2, 'privacy'], [3, 'health'], [4, 'marketing']] : [[1, 'terms'], [2, 'privacy']];
+  for (const [index, document] of views) {
     const label = root.findAllByType(Checkbox)[index].props.label + ' 보기';
     const button = action(root, label);
     expect(StyleSheet.flatten(button.props.style({ pressed: false }))).toMatchObject({ width: 44, height: 44 });
     await act(async () => button.props.onPress());
-    expect(root.findByType(LegalDocumentSheet).props.view).toEqual({ document, ...(section ? { section } : {}) });
+    expect(root.findAllByType(LegalDocumentSheet).find(sheet => sheet.props.view).props.view).toEqual(expect.objectContaining({ document }));
     await act(async () => action(root, '닫기').props.onPress());
     expect(root.findAllByType(Checkbox)[1].props.checked).toBe(true);
   }

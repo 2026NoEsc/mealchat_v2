@@ -12,7 +12,7 @@ const record = (name: string, args?: unknown) => calls.push({ name, args });
 if (scene === 'invite-missing-code') fixtureRoom.code = '';
 fixtureRoom.stage = 'confirmed'; fixtureRoom.isConfirmed = true; fixtureRoom.locationName = '돼지집 서면점';
 let hasAccount = scene !== 'settlement-no-account';
-export const fixtureBill: Settlement = { id: 'bill', roomId: 'room', creatorId: scene === 'more-requester' || scene === 'settlement-existing' ? 'me' : 'mate', roomTitle: '오늘 저녁팟', title: '식사 정산', totalAmount: 52000, splitCount: 4, bankName: '카카오뱅크', accountNumber: '3333-01-2345678', accountHolder: '모아', createdAt: '2026-09-25T00:00:00Z', members: fixtureRoom.participants.map((person, index) => ({ id: 'member-' + person.profileId, profileId: person.profileId, name: person.name, isCompleted: scene === 'more-requester' || scene === 'settlement-existing' ? person.profileId === 'me' : index === 1 })) };
+export const fixtureBill: Settlement = { id: 'bill', roomId: 'room', creatorId: scene === 'more-requester' || scene === 'settlement-existing' ? 'me' : 'mate', roomTitle: '오늘 저녁팟', title: '식사 정산', totalAmount: 52000, splitCount: 4, createdAt: '2026-09-25T00:00:00Z', members: fixtureRoom.participants.map((person, index) => ({ id: 'member-' + person.profileId, profileId: person.profileId, name: person.name, isCompleted: scene === 'more-requester' || scene === 'settlement-existing' ? person.profileId === 'me' : index === 1 })) };
 export function useMyProfile() {
   const reload = useCallback(() => { record('reloadProfile'); }, []);
   return { status: 'ready', bundle: { profile: { name: '나야나' }, privateProfile: { bankName: hasAccount ? '카카오뱅크' : null, accountNumber: hasAccount ? scene === 'settlement-short-account' ? '123' : '3333-01-2345678' : null } }, reload };
@@ -22,6 +22,8 @@ export async function fetchRoomSettlements() { record('fetchRoomSettlements'); r
 export async function fetchMySettlementsDetailed() { record('fetchMySettlementsDetailed'); return { data: [fixtureBill], error: null }; }
 export async function createRoomSettlement(input: unknown) { record('createRoomSettlement', input); return { billId: 'fixture-created', error: null }; }
 export async function setSettlementCompleted(id: string, completed: boolean) { record('setSettlementCompleted', { id, completed }); const member = fixtureBill.members.find(item => item.id === id); if (member) member.isCompleted = completed; return null; }
+export const subscribeSettlementPayments = () => () => {};
+export async function fetchSettlementPaymentDetails(billId: string) { return { data: { billId, status: 'open' as const, details: { bankName: '카카오뱅크', accountNumber: '3333-01-2345678', accountHolder: '모아' } }, error: null }; }
 
 // Consecutive short messages exercise visual spacing independently of touch bounds.
 const groupedMessages: RoomMessage[] = ['첫 번째', '두 번째', '세 번째', '네 번째'].map((text, index) => ({ id: 'group-' + index, roomId: 'room', senderId: index < 2 ? 'me' : 'mate', senderName: index < 2 ? '나야나' : '모아', senderColor: '', kind: 'user', text, createdAt: '2026-09-25T10:03:00Z' }));

@@ -1,7 +1,5 @@
-import { terms } from '../../legal/terms';
-import LegalDocumentBody from './LegalDocumentBody';
-import SettingsFrame from './SettingsFrame';
+import CurrentLegalScreen from './CurrentLegalScreen';
 
 export default function ServiceTermsScreen() {
-  return <SettingsFrame title={terms.title}><LegalDocumentBody document={terms} /></SettingsFrame>;
+  return <CurrentLegalScreen kind="service" />;
 }

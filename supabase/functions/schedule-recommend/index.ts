@@ -1,3 +1,4 @@
+import { checkRequiredConsent, checkRoomPermission } from "./consentGate.ts";
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "@supabase/server";
 import {
@@ -116,6 +117,47 @@ export default {
     { auth: "user" },
     async (req, ctx) => {
       try {
+        /*
+         * withSupabase가 검증한 raw JWT는 jwtClaims에 있고, userClaims는 정규화된
+         * 사용자 객체다. 둘을 같은 사용자로 대조해야 userClaims를 JWT처럼 읽거나
+         * 다른 주체의 방을 admin client로 읽는 실수를 피할 수 있다.
+         */
+        const requestContext = ctx as unknown as {
+          jwtClaims?: unknown;
+          userClaims?: { id?: unknown };
+        };
+        const jwtValidation = validateUserClaims(
+          requestContext.jwtClaims,
+          Deno.env.get("SUPABASE_URL"),
+        );
+
+        if (!jwtValidation.ok) {
+          return Response.json(
+            { error: jwtValidation.error },
+            { status: jwtValidation.status },
+          );
+        }
+
+        const callerId = requestContext.userClaims?.id;
+        if (
+          typeof callerId !== "string" ||
+          callerId !== jwtValidation.data.userId
+        ) {
+          return Response.json(
+            {
+              error: "Authenticated user claim does not match the token",
+            },
+            {
+              status: 401,
+            },
+          );
+        }
+
+        const consentFailure = await checkRequiredConsent(
+          Deno.env.get("SUPABASE_URL"), Deno.env.get("SUPABASE_ANON_KEY"),
+          req.headers.get("Authorization"),
+        );
+        if (consentFailure) return consentFailure;
         const apiKey =
           Deno.env.get(
             "GEMINI_API_KEY",
@@ -208,41 +250,11 @@ export default {
         const requestBody =
           validation.data;
 
-        /*
-         * withSupabase가 검증한 raw JWT는 jwtClaims에 있고, userClaims는 정규화된
-         * 사용자 객체다. 둘을 같은 사용자로 대조해야 userClaims를 JWT처럼 읽거나
-         * 다른 주체의 방을 admin client로 읽는 실수를 피할 수 있다.
-         */
-        const requestContext = ctx as unknown as {
-          jwtClaims?: unknown;
-          userClaims?: { id?: unknown };
-        };
-        const jwtValidation = validateUserClaims(
-          requestContext.jwtClaims,
-          Deno.env.get("SUPABASE_URL"),
+        const roomPermissionFailure = await checkRoomPermission(
+          Deno.env.get("SUPABASE_URL"), Deno.env.get("SUPABASE_ANON_KEY"),
+          req.headers.get("Authorization"), requestBody.roomId,
         );
-
-        if (!jwtValidation.ok) {
-          return Response.json(
-            { error: jwtValidation.error },
-            { status: jwtValidation.status },
-          );
-        }
-
-        const callerId = requestContext.userClaims?.id;
-        if (
-          typeof callerId !== "string" ||
-          callerId !== jwtValidation.data.userId
-        ) {
-          return Response.json(
-            {
-              error: "Authenticated user claim does not match the token",
-            },
-            {
-              status: 401,
-            },
-          );
-        }
+        if (roomPermissionFailure) return roomPermissionFailure;
 
         /*
          * 후보 시간대를 서버가 만든다.
@@ -521,18 +533,13 @@ export default {
             weather,
           ),
         );
-      } catch (error) {
-        console.error(
-          "schedule-recommend error:",
-          error,
-        );
+      } catch {
+        console.error("schedule-recommend failed");
 
         return Response.json(
           {
             error:
-              error instanceof Error
-                ? error.message
-                : "Unknown server error",
+              "Recommendation unavailable",
           },
           {
             status: 500,

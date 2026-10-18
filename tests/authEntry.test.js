@@ -16,15 +16,16 @@ jest.mock('../src/auth/SignupDraftProvider', () => ({
 }));
 jest.mock('../src/components/DialogHost', () => () => null);
 jest.mock('../src/components/NotificationsProvider', () => ({
-  NotificationsProvider: ({ children }) => children,
+  NotificationsProvider: jest.fn(({ children }) => children),
 }));
-jest.mock('../src/consents/useConsentGate', () => ({ useConsentGate: jest.fn() }));
+jest.mock('../src/consents/useConsentGate', () => ({ useConsentGate: jest.fn(), useConsentServerMode: jest.fn(() => 's1') }));
 jest.mock('../src/lifecycle/AppLifecycleContext', () => ({
   AppLifecycleProvider: ({ children }) => children,
 }));
 jest.mock('../src/navigation/AppNavigator', () => () => 'navigator');
 jest.mock('../src/navigation/NavigationContext', () => ({
   NavigationProvider: jest.fn(({ children }) => children),
+  useNavigation: () => ({ current: { name: 'Home' }, navigate: jest.fn() }),
 }));
 jest.mock('../src/screens/auth/NewPasswordScreen', () => () => 'password-reset');
 jest.mock('../src/screens/auth/ReConsentScreen', () => () => 'consent-required');
@@ -42,7 +43,7 @@ let renderer;
 beforeEach(() => {
   jest.clearAllMocks();
   useFonts.mockReturnValue([true, null]);
-  useConsentGate.mockReturnValue({ checked: true, needsConsent: false, markConsented: jest.fn() });
+  useConsentGate.mockReturnValue({ state: 'accepted', checked: true, needsConsent: false, markConsented: jest.fn() });
 });
 
 afterEach(async () => {
@@ -66,6 +67,25 @@ it('waits for auth restoration before mounting navigation', async () => {
   expect(NavigationProvider).not.toHaveBeenCalled();
 });
 
+it.each(['loading', 'required', 'error'])('does not mount authenticated data providers behind the %s gate', async state => {
+  useAuth.mockReturnValue({ isReady: true, session: { user: { id: 'fixture-user' } }, passwordResetPending: false });
+  useConsentGate.mockReturnValue({ state, checked: state !== 'loading', needsConsent: state !== 'loading', markConsented: jest.fn() });
+  await act(async () => { renderer = create(React.createElement(App)); });
+  expect(NavigationProvider).not.toHaveBeenCalled();
+  expect(require('../src/components/NotificationsProvider').NotificationsProvider).not.toHaveBeenCalled();
+});
+
+it('unmounts the authenticated app when accepted consent becomes required/error', async () => {
+  useAuth.mockReturnValue({ isReady: true, session: { user: { id: 'fixture-user' } }, passwordResetPending: false });
+  await act(async () => { renderer = create(React.createElement(App)); });
+  expect(JSON.stringify(renderer.toJSON())).toContain('navigator');
+  for (const state of ['required', 'error']) {
+    useConsentGate.mockReturnValue({ state, checked: true, needsConsent: true, markConsented: jest.fn() });
+    await act(async () => renderer.update(React.createElement(App)));
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('navigator');
+  }
+});
+
 it('keeps a password recovery session on the reset screen', async () => {
   useAuth.mockReturnValue({ isReady: true, session: { user: { id: 'fixture-user' } }, passwordResetPending: true });
   await act(async () => { renderer = create(React.createElement(App)); });
@@ -87,7 +107,7 @@ it.each([
   [true, true, true],
 ])('keeps navigation behind the consent gate checked=%s needsConsent=%s', async (checked, needsConsent, showsConsent) => {
   useAuth.mockReturnValue({ isReady: true, session: { user: { id: 'fixture-user' } }, passwordResetPending: false });
-  useConsentGate.mockReturnValue({ checked, needsConsent, markConsented: jest.fn() });
+  useConsentGate.mockReturnValue({ state: !checked ? 'loading' : needsConsent ? 'required' : 'accepted', checked, needsConsent, markConsented: jest.fn() });
   await act(async () => { renderer = create(React.createElement(App)); });
   expect(NavigationProvider).not.toHaveBeenCalled();
   expect(JSON.stringify(renderer.toJSON()).includes('consent-required')).toBe(showsConsent);

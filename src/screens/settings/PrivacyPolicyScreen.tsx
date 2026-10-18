@@ -1,11 +1,7 @@
-import { privacy } from '../../legal/privacy';
 import { useNavigation } from '../../navigation/NavigationContext';
-import LegalDocumentBody from './LegalDocumentBody';
-import SettingsFrame from './SettingsFrame';
+import CurrentLegalScreen from './CurrentLegalScreen';
 
 export default function PrivacyPolicyScreen() {
   const { current } = useNavigation();
-  return <SettingsFrame title={privacy.title}>
-    <LegalDocumentBody document={privacy} initialSection={current.params?.section === 'retention' ? 'retention' : undefined} />
-  </SettingsFrame>;
+  return <CurrentLegalScreen kind="privacy" initialSection={current.params?.section === 'retention' ? 'retention' : undefined} />;
 }

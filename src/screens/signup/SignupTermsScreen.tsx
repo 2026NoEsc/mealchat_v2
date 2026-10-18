@@ -1,18 +1,25 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Info } from 'lucide-react-native';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../auth/AuthProvider';
 import { clearPendingSignupProfile, persistPendingSignupProfile } from '../../auth/pendingSignupProfile';
+import { clearPendingSignupConsents, persistPendingSignupConsents } from '../../auth/pendingSignupConsents';
+import { completePendingProfile, forgetImmediateSignupProfile, rememberImmediateSignupProfile } from '../../auth/completePendingProfile';
 import { useSignupDraft } from '../../auth/SignupDraftProvider';
 import { AuthFooter, SignupStepHeader, authStyles } from '../../components/ui/AuthLayout';
-import { PrimaryButton } from '../../components/ui/Button';
+import { PrimaryButton, TextButton } from '../../components/ui/Button';
 import TermsCard from '../../components/ui/TermsCard';
 import { notify } from '../../lib/confirm';
 import { authErrorMessage } from '../../lib/password';
-import { saveSignupPrivateProfile } from '../../lib/profile';
+import { completeSignupConsents } from '../../lib/consents';
+import { consentErrorMessage, newConsentRequestId, type ConsentSubmission } from '../../consents/contracts';
+import { getConsentAccess, setConsentAccess } from '../../consents/access';
+import { useConsentManifest } from '../../consents/useConsentManifest';
+import { changedConsentKinds, consentDocumentIdentity } from '../../consents/documentIdentity';
+import { consentSubmission, manifestDocument } from '../../legal/manifest';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { v3Colors as colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
@@ -29,11 +36,25 @@ export default function SignupTermsScreen() {
   const insets = useSafeAreaInsets();
   const [submitting, setSubmitting] = useState(false);
   const [legalView, setLegalView] = useState<LegalView | null>(null);
+  const { manifest, legacy, loading, reload } = useConsentManifest();
+  const locked = useRef(false), mounted = useRef(true);
+  const request = useRef<{ key: string; submission: ConsentSubmission } | null>(null);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const agreed = draft.consents;
-  const canSubmit = agreed.service && agreed.privacy;
+  const identity = consentDocumentIdentity(manifest, legacy);
+  useEffect(() => {
+    if (!identity) return;
+    if (draft.consentIdentity && draft.consentIdentity !== identity) {
+      request.current = null; setLegalView(null);
+      const consents = { ...draft.consents };
+      for (const kind of changedConsentKinds(draft.consentIdentity, identity)) consents[kind] = false;
+      updateDraft({ consents, consentIdentity: identity });
+    } else if (!draft.consentIdentity) updateDraft({ consentIdentity: identity });
+  }, [identity, draft.consentIdentity, draft.consents, updateDraft]);
+  const canSubmit = agreed.service && agreed.privacy && Boolean(identity) && (!draft.consentIdentity || draft.consentIdentity === identity);
 
   const completeSignup = async () => {
-    if (submitting) return;
+    if (locked.current || (!manifest && !legacy)) return;
     if (!canSubmit) {
       notify('약관 동의', '필수 약관에 동의해 주세요.');
       return;
@@ -44,71 +65,69 @@ export default function SignupTermsScreen() {
       return;
     }
 
+    locked.current = true;
     setSubmitting(true);
+    const clearPending = () => Promise.all([clearPendingSignupConsents(AsyncStorage), clearPendingSignupProfile(AsyncStorage)]);
     try {
+      // Never leave a failed attempt's personal data or consent choices for the next login.
+      await clearPending(); forgetImmediateSignupProfile();
+      const savedAt = Date.now();
+      if (manifest && !legacy) {
+        const key = JSON.stringify([manifest.bundle_version, manifest.documents, agreed]);
+        if (request.current?.key !== key) request.current = { key, submission: consentSubmission(manifest, agreed, newConsentRequestId()) };
+      }
       const result = await signUpWithEmail({
         email: draft.email,
         password: draft.password,
         displayName: draft.nickname,
-        marketingOptIn: agreed.marketing,
+        ...(legacy ? { marketingOptIn: agreed.marketing } : {}),
       });
-      if (!result.error && result.userId) await queueNotificationGuide(result.userId).catch(() => undefined);
-
-      /*
-       * 계좌·생년월일은 본인만 볼 수 있는 행에 들어가고 그 쓰기는 세션을 요구한다.
-       * 이메일 확인이 켜져 있으면 이 시점에 세션이 없으므로 저장할 수 없다.
-       * 사용자 메타데이터로 넘기는 방법도 있지만 그건 JWT 에 실려 나가므로 쓰지 않는다.
-       */
-      const privateProfile = {
-        bank: draft.bank,
-        account: draft.account,
-        birth: draft.birth,
-        tastes: draft.tastes,
-      };
-
-      let privateSaveFailed = false;
-      if (!result.error) {
-        if (!result.confirmationRequired && result.userId) {
-          const saveError = await saveSignupPrivateProfile(result.userId, privateProfile);
-          privateSaveFailed = Boolean(saveError);
-          /* 들어갔으면 기기에 남은 것을 지운다 - 계좌번호를 놔둘 이유가 없다 */
-          if (!saveError) await clearPendingSignupProfile(AsyncStorage).catch(() => undefined);
-        } else {
-          /*
-           * 세션이 아직 없어 지금은 쓸 수 없다. 버리면 메일을 확인하고 처음
-           * 로그인했을 때 적어 넣은 값이 하나도 없다 - 기기에 맡겨 뒀다가
-           * 로그인하는 순간 AuthProvider 가 옮겨 담는다.
-           */
-          await persistPendingSignupProfile(AsyncStorage, {
-            email: draft.email,
-            ...privateProfile,
-          }).catch(() => undefined);
-        }
-      }
-
       if (result.error) {
+        await clearPending();
         notify('회원가입 실패', authErrorMessage(result.error));
         return;
       }
 
-      resetDraft();
-
-      if (result.confirmationRequired) {
+      if (result.userId) await queueNotificationGuide(result.userId).catch(() => undefined);
+      const profile = result.userId ? { email: draft.email, userId: result.userId, bank: draft.bank, account: draft.account, birth: draft.birth, tastes: draft.tastes, savedAt } : null;
+      if (result.confirmationRequired || !profile) {
+        // Obfuscated existing-user replies have no bindable id and leave no pending data.
+        // The visible email-confirmation outcome is identical for new and existing addresses.
+        if (profile) {
+          if (manifest && !legacy && request.current) await persistPendingSignupConsents(AsyncStorage, { email: draft.email, userId: profile.userId, savedAt, submission: request.current.submission });
+          await persistPendingSignupProfile(AsyncStorage, profile, savedAt);
+        }
         notify(
           '이메일 확인 필요',
-          '이메일의 확인 링크를 연 뒤 로그인해 주세요.\n적어 주신 계좌·생년월일·취향은 로그인하면 그대로 들어가요.',
+          '이메일의 확인 링크를 연 뒤 로그인해 주세요.',
         );
         resetTo('Login');
+        resetDraft();
         return;
       }
 
-      if (privateSaveFailed) {
-        notify('일부 정보 미저장', '계좌와 생년월일은 프로필에서 다시 입력해 주세요.');
+      if (getConsentAccess().userId && getConsentAccess().userId !== profile.userId) return;
+      rememberImmediateSignupProfile(profile);
+      // Pre-S1 signup trigger owns legacy consent; the accepted gate drains the memory draft.
+      if (legacy) { await completePendingProfile({ id: profile.userId, email: draft.email }); resetDraft(); return; }
+      if (!request.current) return;
+      const completed = await completeSignupConsents(request.current.submission);
+      if (getConsentAccess().userId && getConsentAccess().userId !== profile.userId) return;
+      if (completed.error || completed.data?.required.status !== 'accepted') {
+        notify('동의 저장 실패', consentErrorMessage(completed.error));
+        if ((completed.error as { code?: string } | null)?.code === 'S1002' && mounted.current) {
+          request.current = null; updateDraft({ consents: { service: false, privacy: false, health: false, marketing: false } }); reload();
+        }
+        return;
       }
+      if (result.userId) { setConsentAccess(result.userId, 'accepted'); await completePendingProfile({ id: result.userId, email: draft.email }); }
+      resetDraft();
     } catch (error) {
+      await clearPending().catch(() => undefined); forgetImmediateSignupProfile();
       notify('회원가입 실패', authErrorMessage(error));
     } finally {
-      setSubmitting(false);
+      locked.current = false;
+      if (mounted.current) setSubmitting(false);
     }
   };
 
@@ -119,7 +138,9 @@ export default function SignupTermsScreen() {
         <Image source={dudu} style={styles.character} resizeMode="contain" accessible={false} />
         <Text style={styles.description}>두두가 여러분의 의견을 모아서 두두두 전해 줄게요.</Text>
       </View>
-      <TermsCard agreed={agreed} disabled={submitting} onChange={(consents) => updateDraft({ consents })} onView={(key) => setLegalView(legalViewForTerm(key))} />
+      {!manifest && !legacy ? <><Text accessibilityLiveRegion="polite" style={authStyles.helper}>{loading ? '약관을 불러오고 있어요' : '약관을 불러오지 못했어요. 다시 확인해 주세요.'}</Text><TextButton label="약관 다시 불러오기" onPress={reload} /></> : null}
+      <TermsCard agreed={agreed} includeHealth={!legacy} disabled={submitting || (!manifest && !legacy)} onChange={(consents) => updateDraft({ consents: { ...consents, health: consents.health === true } })}
+        onView={(key) => setLegalView({ ...legalViewForTerm(key), ...(manifest ? { content: manifestDocument(manifest, key) } : { fallback: !legacy }) })} />
       <View style={styles.hint}>
         <Info size={16} color={colors.sub} aria-hidden={true} />
         <Text style={[authStyles.helper, styles.hintText]}>필수 약관에 모두 동의해야 가입할 수 있어요.</Text>

@@ -1,18 +1,19 @@
-jest.mock('../src/lib/supabase', () => ({ supabase: { from: jest.fn() } }));
+jest.mock('../src/lib/supabase', () => ({ supabase: { from: jest.fn(), auth: { getSession: jest.fn(async () => ({ data: { session: { user: { id: 'my-id' } } }, error: null })) } } }));
 
 import { saveMyGender } from '../src/lib/profile';
 import { supabase } from '../src/lib/supabase';
+import { setConsentAccess } from '../src/consents/access';
 
 const mockFrom = supabase.from as jest.Mock;
 
 describe('프로필 성별 저장', () => {
-  beforeEach(() => mockFrom.mockReset());
+  beforeEach(() => { mockFrom.mockReset(); setConsentAccess('my-id', 'accepted'); });
 
   it('최신 데이터를 읽고 다른 키를 유지하며 성별을 저장한다', async () => {
     const read = { select: jest.fn(), eq: jest.fn(), single: jest.fn() };
     read.select.mockReturnValue(read);
     read.eq.mockReturnValue(read);
-    read.single.mockResolvedValue({ data: { personal_data: { custom: 'kept', gender: 'male' }, updated_at: '2026-09-24T00:00:00Z' }, error: null });
+    read.single.mockResolvedValue({ data: { personal_data: { bio: 'kept', gender: 'male' }, updated_at: '2026-09-24T00:00:00Z' }, error: null });
     const write = { update: jest.fn(), eq: jest.fn(), select: jest.fn(), maybeSingle: jest.fn() };
     write.update.mockReturnValue(write);
     write.eq.mockReturnValue(write);
@@ -22,7 +23,7 @@ describe('프로필 성별 저장', () => {
 
     await expect(saveMyGender('my-id', 'female', 'male')).resolves.toBeNull();
     expect(mockFrom).toHaveBeenCalledWith('profile_private');
-    expect(write.update).toHaveBeenCalledWith({ personal_data: { custom: 'kept', gender: 'female' } });
+    expect(write.update).toHaveBeenCalledWith({ personal_data: { bio: 'kept', gender: 'female' } });
     expect(write.eq).toHaveBeenCalledWith('updated_at', '2026-09-24T00:00:00Z');
   });
 

@@ -19,6 +19,7 @@ jest.mock('../src/lib/profile', () => ({
   updateMyName: jest.fn(async () => null), saveMyPrivateProfile: jest.fn(async () => null),
   saveMyGender: jest.fn(async () => null), saveStartLocation: jest.fn(async () => null),
   savePrivacySettings: jest.fn(async () => null),
+  fetchProfileVisibility: jest.fn(), setProfileVisibility: jest.fn(),
 }));
 jest.mock('../src/lib/avatar', () => ({ uploadAvatar: jest.fn(), removeAvatar: jest.fn(async () => null) }));
 jest.mock('../src/lib/friends', () => ({ fetchMyFriends: jest.fn(), searchProfilesByTag: jest.fn(), addFriend: jest.fn(), removeFriend: jest.fn() }));
@@ -59,6 +60,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   verifyCurrentPassword.mockResolvedValue(null);
   Object.values(api).forEach((method) => method.mockResolvedValue(null));
+  api.fetchProfileVisibility.mockResolvedValue({ data: { settings: { birthdate: 'public', gender: 'public', bio: 'private', bank_account: 'private', origin: 'private' }, revision: '2' }, error: null });
+  api.setProfileVisibility.mockResolvedValue({ data: { settings: { birthdate: 'private', gender: 'public', bio: 'private', bank_account: 'private', origin: 'private' }, revision: '3' }, error: null });
   jest.spyOn(AccessibilityInfo, 'isScreenReaderEnabled').mockResolvedValue(false);
   jest.spyOn(AccessibilityInfo, 'addEventListener').mockReturnValue({ remove: jest.fn() });
   bundle = {
@@ -254,11 +257,11 @@ it('selects an origin result, saves its coordinates, and clears stale coordinate
   expect(api.saveStartLocation).toHaveBeenLastCalledWith('self', '직접 입력한 주소', null);
 });
 
-it('preserves immediate privacy writes and existing birth/account keys', async () => {
+it('writes one canonical privacy field with its current server revision', async () => {
   const root = await render(PrivacyScreen);
   await act(async () => root.findAllByType(Switch)[0].props.onChange(false));
-  expect(api.savePrivacySettings).toHaveBeenCalledWith('self', { birth: 'private', gender: 'public', bio: 'private', account: 'private', origin: 'public' });
-  expect(profileState.reload).toHaveBeenCalled();
+  expect(api.setProfileVisibility).toHaveBeenCalledWith('birthdate', 'private', '2');
+  expect(api.savePrivacySettings).not.toHaveBeenCalled();
 });
 
 it('uses actual data and a three-item completion denominator without unavailable menu entries', async () => {
@@ -389,22 +392,22 @@ it('makes the last-only Undo rule explicit for consecutive deletions and keeps s
 
 it.each(['returned', 'thrown'])('blocks duplicate privacy writes and rolls back a failed save (%s error)', async (kind) => {
   let complete, fail;
-  api.savePrivacySettings.mockImplementationOnce(() => new Promise((resolve, reject) => { complete = resolve; fail = reject; }));
+  api.setProfileVisibility.mockImplementationOnce(() => new Promise((resolve, reject) => { complete = resolve; fail = reject; }));
   const root = await render(PrivacyScreen);
   const first = root.findAllByType(Switch)[0].props.onChange;
   await act(async () => { first(false); first(false); });
-  expect(api.savePrivacySettings).toHaveBeenCalledTimes(1);
+  expect(api.setProfileVisibility).toHaveBeenCalledTimes(1);
   expect(root.findAllByType(Switch).every((node) => node.props.disabled)).toBe(true);
   expect(root.findAllByType(Switch)[0].props.value).toBe(false);
   expect(action(root, '저장하기').props.disabled).toBe(true);
   await act(async () => {
-    if (kind === 'returned') complete(new Error('fixture failure'));
+    if (kind === 'returned') complete({ data: null, error: new Error('fixture failure') });
     else fail(new Error('fixture failure'));
   });
   expect(root.findAllByType(Switch)[0].props.value).toBe(true);
   expect(root.findAllByType(Switch).every((node) => !node.props.disabled)).toBe(true);
   expect(profileState.reload).not.toHaveBeenCalled();
-  expect(Alert.alert).toHaveBeenCalledWith('저장 실패', expect.any(String));
+  expect(output()).toContain(kind === 'returned' ? '처리하지 못했어요.' : '저장하지 못했어요.');
   expect(output()).toContain('꺼 둔 정보는 방장에게도 보이지 않아요.');
 });
 
