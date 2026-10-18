@@ -6,7 +6,6 @@ import AvailabilityGrid from '../../components/AvailabilityGrid';
 import { Button } from '../../components/ui/Button';
 import { Chip } from '../../components/ui/Chip';
 import { fetchRoomAvailability, saveMyAvailability, type AvailabilityStatus } from '../../lib/availability';
-import type { MyLocation } from '../../lib/myLocation';
 import { leaveRoom } from '../../lib/rooms';
 import { buildNextDays, cellKey, isPastCell, toSlots } from '../../lib/scheduleSlots';
 import { useNavigation } from '../../navigation/NavigationContext';
@@ -15,7 +14,7 @@ import { v3Colors as colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 import ScheduleFrame from './ScheduleFrame';
 
-type Params = { roomId?: string; name?: string; invitees?: string[]; origin?: MyLocation; originSource?: 'profile' | 'gps' | 'search' };
+type Params = { roomId?: string; name?: string; invitees?: string[] };
 
 export default function ScheduleTimeScreen() {
   /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
@@ -26,7 +25,6 @@ export default function ScheduleTimeScreen() {
   const roomId = params?.roomId ?? null;
   const name = params?.name ?? '';
   const invitees = params?.invitees ?? [];
-  const origin = params?.origin;
 
   const days = useMemo(() => buildNextDays(5), []);
 
@@ -76,7 +74,7 @@ export default function ScheduleTimeScreen() {
 
   /* 내 답을 방에 저장하고 AI 추천으로 넘어간다 */
   const goNext = async () => {
-    if (!roomId || !origin || slots.length === 0) return;
+    if (!roomId || slots.length === 0) return;
 
     setSaving(true);
     const error = await saveMyAvailability(roomId, [...picked]);
@@ -87,7 +85,7 @@ export default function ScheduleTimeScreen() {
       return;
     }
 
-    navigate('ScheduleConfirmed', { roomId, name, invitees, origin, originSource: params?.originSource });
+    navigate('ScheduleConfirmed', { roomId, name, invitees });
   };
 
   /*
@@ -100,11 +98,11 @@ export default function ScheduleTimeScreen() {
    */
   const goPrev = () => {
     if (roomId) void leaveRoom(roomId);
-    goBackWith({ name, invitees, origin, originSource: params?.originSource });
+    goBackWith({ name, invitees });
   };
 
   return <ScheduleFrame bodyGap={12} step={2} title="언제 만날까요?" subtitle="가능한 시간을 눌러서 표시해 주세요. 메이트가 제출한 가능한 시간도 함께 보여요." onBack={goPrev}
-    footer={<Button label="선택 완료" loading={saving} disabled={saving || slots.length === 0 || !origin} onPress={() => void goNext()} />}>
+    footer={<Button label="선택 완료" loading={saving} disabled={saving || slots.length === 0} onPress={() => void goNext()} />}>
     {/* TODO(서버 단계): 메이트 바쁜 시간 계약이 없어 기존 othersSlots(가능 시간)의 뜻을 유지한다. */}
     <View style={styles.legend}>
       <View style={styles.legendItem}><View style={[styles.swatch, styles.mine]}><Check size={10} strokeWidth={3} color={colors.onPrimary} /></View><Text style={styles.legendText}>내가 가능</Text></View>

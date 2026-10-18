@@ -159,6 +159,7 @@ it('opens preserved v1 from a newer server privacy document without replacing it
 it('renders the actual configured app version and generated licenses without an update badge', async () => {
   const root = await render(AppInfoScreen);
   expect(root.findAll((node) => typeof node.type === 'string' && node.props.testID === 'license-row')).toHaveLength(licenses.length);
+  expect(output()).toContain('공용 만남 지역의 기준 좌표는 서울교통공사, 부산교통공사, 국가철도공단의 공공데이터를 활용했습니다. 공공누리 제1유형(출처표시). 데이터 수집일: 2026-10-19. 표시명과 검색 반경은 MealChat에서 편집했습니다.');
   expect(output()).toContain(appVersion);
   expect(output()).not.toContain('최신');
   expect(licenses.find((entry) => entry.name === '42dot Sans').license).toBe('SIL OFL 1.1');

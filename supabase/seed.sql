@@ -147,6 +147,9 @@ begin
  if public.get_consent_manifest()->>'bundle_version' is distinct from bundle_version then
   raise exception 'CONSENT_CONFIGURATION_UNAVAILABLE' using errcode='S1006';
  end if;
+ if to_regclass('public.public_meeting_areas') is not null then
+  insert into public.public_meeting_areas(id,label,latitude,longitude,radius_m,enabled) values('local-dev-seoul-center','LOCAL DEV 서울 도심',37.5665,126.9780,2000,false) on conflict(id) do nothing;
+ end if;
 end;
 $s1_activate$;
 commit;

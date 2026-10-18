@@ -26,6 +26,7 @@ import { fontFamily } from '../../theme/typography';
 import LegalDocumentSheet, { legalViewForTerm, type LegalView } from '../settings/LegalDocumentSheet';
 import { queueNotificationGuide } from '../settings/notificationPermission';
 
+import { bindSignupFoodDraft } from '../food/signupFoodDraft';
 
 const dudu = require('../../../assets/brand/dudu.png');
 
@@ -83,6 +84,7 @@ export default function SignupTermsScreen() {
         displayName: draft.nickname,
         ...(legacy ? { marketingOptIn: agreed.marketing } : {}),
       });
+      bindSignupFoodDraft(result.error ? null : result.userId);
       if (result.error) {
         await clearPending();
         notify('회원가입 실패', authErrorMessage(result.error));
@@ -90,7 +92,7 @@ export default function SignupTermsScreen() {
       }
 
       if (result.userId) await queueNotificationGuide(result.userId).catch(() => undefined);
-      const profile = result.userId ? { email: draft.email, userId: result.userId, bank: draft.bank, account: draft.account, birth: draft.birth, tastes: draft.tastes, savedAt } : null;
+      const profile = result.userId ? { email: draft.email, userId: result.userId, bank: draft.bank, account: draft.account, birth: draft.birth, savedAt } : null;
       if (result.confirmationRequired || !profile) {
         // Obfuscated existing-user replies have no bindable id and leave no pending data.
         // The visible email-confirmation outcome is identical for new and existing addresses.
@@ -126,6 +128,7 @@ export default function SignupTermsScreen() {
       if (result.userId) { setConsentAccess(result.userId, 'accepted'); await completePendingProfile({ id: result.userId, email: draft.email }); }
       resetDraft();
     } catch (error) {
+      bindSignupFoodDraft(null);
       await clearPending().catch(() => undefined); forgetImmediateSignupProfile();
       notify('회원가입 실패', authErrorMessage(error));
     } finally {

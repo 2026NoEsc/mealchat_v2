@@ -21,7 +21,7 @@ const MAX_CANDIDATE_SLOTS = 12;
 const SLOT_RECOMMENDATION_COUNT = 3;
 const PLACE_RECOMMENDATION_COUNT = 4;
 
-/** 클라이언트가 Tmap 에서 받아 온 식당. AI 는 이 중에서만 고를 수 있다. */
+/** 레거시 파이프라인 공통 타입. 현재 시간 전용 경로는 빈 배열만 받는다. */
 type ValidPlace = {
   id: string;
   name: string;
@@ -158,15 +158,35 @@ export default {
           req.headers.get("Authorization"),
         );
         if (consentFailure) return consentFailure;
+        // Parse once, after verified Auth + S1 consent. Never trust client POIs.
+        const s5 = await import("./s5Recommendation.ts");
+        let earlyBody: unknown;
+        try { earlyBody = await s5.readBoundedJson(req, 8192); }
+        catch { return s5.s5FailureResponse("22023"); }
+        if (earlyBody && typeof earlyBody === "object" && !Array.isArray(earlyBody) &&
+            (earlyBody as Record<string, unknown>).contract_version === 2) {
+          return s5.runS5Places(earlyBody, Deno.env, req.headers.get("Authorization"),
+            async (name, args) => {
+              // The SDK default schema has no generated S5 RPC argument map.
+              const worker=ctx.supabaseAdmin as unknown as {rpc(name:string,args:Record<string,unknown>):PromiseLike<{data:unknown;error:{code?:string}|null}>};
+              const { data, error } = await worker.rpc(name, args);
+              return { data, error };
+            });
+        }
+        // The retained legacy path is time-only. Restaurant candidates come from S5's server search.
+        const legacy = earlyBody as Record<string, unknown> | null;
+        if (!legacy || !Array.isArray(legacy.placeCandidates) || legacy.placeCandidates.length !== 0 ||
+            Object.keys(legacy).some(key => !["meetingName", "roomId", "placeCandidates"].includes(key))) {
+          return s5.s5FailureResponse("S1008");
+        }
+
         const apiKey =
           Deno.env.get(
             "GEMINI_API_KEY",
           );
 
         if (!apiKey) {
-          console.error(
-            "GEMINI_API_KEY is not configured",
-          );
+          console.error("SCHEDULE_RECOMMEND_FAILURE");
 
           return Response.json(
             {
@@ -209,8 +229,7 @@ export default {
           );
         }
 
-        const body =
-          (await req.json()) as unknown;
+        const body = earlyBody;
 
         const rawBytes =
           new TextEncoder().encode(
@@ -361,7 +380,7 @@ export default {
                           "참석 조건이 비슷하면 식사하기 자연스러운 시간대를 고려한다.",
                           "rainChance 가 높으면(60 이상) 그 시간대를 낮게 본다. 값이 null 이면 날씨는 언급하지 마라.",
                           "시간과 식당은 따로 추천한다. 짝지어 묶지 마라.",
-                          "slotRecommendations 는 slotCount 개, placeRecommendations 는 placeCount 개를 정확히 만든다.",
+                          placeCount===0 ? "slotRecommendations 는 slotCount 개를 만든다. placeRecommendations 필드는 출력하지 마라." : "slotRecommendations 는 slotCount 개, placeRecommendations 는 placeCount 개를 정확히 만든다.",
                           "각 목록 안에서 같은 항목을 두 번 쓰지 마라.",
                           "시간은 참석 인원과 시간대로만 평가하고, 식당은 취향·거리로만 평가한다.",
                           "reason은 한국어로 짧고 구체적으로 작성한다.",
@@ -433,16 +452,12 @@ export default {
                             slotCount,
                           ),
 
-                        placeRecommendations:
-                          rankedArraySchema(
-                            "placeId",
-                            placeCount,
-                          ),
+                        ...(placeCount>0 ? {placeRecommendations:rankedArraySchema("placeId",placeCount)} : {}),
                       },
 
                       required: [
                         "slotRecommendations",
-                        "placeRecommendations",
+                        ...(placeCount>0 ? ["placeRecommendations"] : []),
                       ],
 
                       additionalProperties:
@@ -456,11 +471,7 @@ export default {
         if (
           !geminiResponse.ok
         ) {
-          console.error(
-            "Gemini API error:",
-            geminiResponse.status,
-            geminiData,
-          );
+          console.error("SCHEDULE_RECOMMEND_FAILURE");
 
           /* 쿼터는 재시도로 풀리지 않는다 — 다른 실패와 구분해서 알린다 */
           if (
@@ -493,13 +504,16 @@ export default {
 
         const parsed = parseGeminiRecommendationText(geminiData);
         if (!parsed.ok) {
-          console.error("Gemini recommendation response invalid:", parsed.error);
+          console.error("SCHEDULE_RECOMMEND_FAILURE");
           return Response.json({ error: parsed.error }, { status: 502 });
         }
 
         const modelValidation =
           validateModelResultPipeline(
-            parsed.data,
+            // The zero-place provider schema omits this field; keep the app response additive.
+            placeCount===0 && parsed.data && typeof parsed.data==='object' && !Array.isArray(parsed.data) &&
+              !Object.prototype.hasOwnProperty.call(parsed.data,'placeRecommendations')
+              ? {...parsed.data,placeRecommendations:[]} : parsed.data,
             candidateFacts,
             requestBody.placeCandidates,
             slotCount,
@@ -507,11 +521,7 @@ export default {
           );
 
         if (!modelValidation.ok) {
-          console.error(
-            "Gemini recommendation validation failed:",
-            modelValidation.error,
-            parsed.data,
-          );
+          console.error("SCHEDULE_RECOMMEND_FAILURE");
 
           return Response.json(
             {
@@ -534,7 +544,7 @@ export default {
           ),
         );
       } catch {
-        console.error("schedule-recommend failed");
+        console.error("SCHEDULE_RECOMMEND_FAILURE");
 
         return Response.json(
           {
@@ -606,15 +616,11 @@ function validateRequest(
   }
 
   /*
-   * 식당은 클라이언트가 Tmap 에서 실제로 받아 온 목록으로만 온다.
-   * Gemini 는 이 중에서 고르기만 하고, 새로 지어내면 뒤에서 걸러진다.
+   * 빈 식당 배열은 시간 전용 레거시 요청이다.
+   * 라우트 첫 경계는 레거시 식당 후보 입력을 거절한다.
    */
   if (
-    !Array.isArray(
-      body.placeCandidates,
-    ) ||
-    body.placeCandidates.length ===
-      0
+    !Array.isArray(body.placeCandidates)
   ) {
     return {
       ok: false,
@@ -869,10 +875,7 @@ async function loadRoomAvailability(
     .eq("room_id", roomId);
 
   if (error) {
-    console.error(
-      "participants load failed:",
-      error,
-    );
+    console.error("SCHEDULE_RECOMMEND_FAILURE");
     return {
       ok: false,
       error:
@@ -1147,10 +1150,7 @@ async function loadWeather(
 
     return result;
   } catch (error) {
-    console.warn(
-      "weather load failed:",
-      error,
-    );
+    console.warn("SCHEDULE_RECOMMEND_WARNING");
     return {};
   }
 }

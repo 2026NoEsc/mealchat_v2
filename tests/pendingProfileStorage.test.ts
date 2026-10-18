@@ -2,7 +2,7 @@ import { createPendingProfileStorage, PENDING_PROFILE_TICKET_KEY, PENDING_PROFIL
 import { parsePendingSignupProfile, PENDING_PROFILE_ACCOUNT_MAX_LENGTH, PENDING_SIGNUP_PROFILE_KEY, PENDING_SIGNUP_PROFILE_TTL_MS } from '../src/auth/pendingSignupProfile';
 
 const now = 1_000_000;
-const draft = { userId: 'actual-user', email: 'fixture@example.test', bank: '국민은행', account: '1234-5678', birth: { year: '2000', month: '1', day: '2' }, tastes: { korean: true }, savedAt: now };
+const draft = { userId: 'actual-user', email: 'fixture@example.test', bank: '국민은행', account: '1234-5678', birth: { year: '2000', month: '1', day: '2' }, savedAt: now };
 function fixture(platform = 'ios') {
   const entries = new Map<string, string>(); let encrypted: string | null = null;
   const metadata = { getItem: jest.fn(async (key: string) => entries.get(key) ?? null), setItem: jest.fn(async (key: string, value: string) => { entries.set(key, value); }), removeItem: jest.fn(async (key: string) => { entries.delete(key); }) };
@@ -80,13 +80,12 @@ it.each(['malformed', 'wrong-ticket', 'oversized'])('still deletes a %s secure e
   expect(f.entries.has(PENDING_PROFILE_TICKET_KEY)).toBe(false);
   expect(f.onDiscard).toHaveBeenCalledTimes(1);
 });
-it('fits the maximum account input, full birth and food choices, and a 254-character email in a 2KB envelope', async () => {
+it('fits the maximum account input, full birth, and a 254-character email in a 2KB envelope', async () => {
   const f = fixture();
   const maximum = { ...draft, userId: '00000000-0000-4000-8000-000000000000',
     email: `${'a'.repeat(64)}@${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(56)}.test`,
     bank: '한국투자증권', account: '9'.repeat(PENDING_PROFILE_ACCOUNT_MAX_LENGTH),
     birth: { year: '2000', month: '12', day: '31' }, savedAt: 1_790_000_000_000,
-    tastes: { korean: true, meat: true, seafood: true, western: true, chinese: true, japanese: true },
   };
   expect(maximum.email).toHaveLength(254);
   await f.vault.write(JSON.stringify(maximum), maximum.savedAt);

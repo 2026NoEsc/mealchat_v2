@@ -67,7 +67,7 @@ beforeEach(() => {
   bundle = {
     profile: { id: 'self', name: '밀챗', tag: 'user-00000000', avatarUrl: null, avatarColor: '' },
     privateProfile: { birthDate: '2000-01-02', bankName: null, accountNumber: null,
-      personalData: { gender: 'male' }, privacySettings: {}, tastes: { spicy: true },
+      personalData: { gender: 'male' }, privacySettings: {}, tastes: {}, foodProfileAvailable: true, foodProfileCompleted: true,
       startLocationName: '서면역', startLat: 35.15, startLng: 129.05 },
   };
   auth = { user: { id: 'self', email: 'fixture@example.test' }, updatePassword: jest.fn(async () => null), signOut: jest.fn(async () => null) };
@@ -271,7 +271,7 @@ it('uses actual data and a three-item completion denominator without unavailable
   expect(text).toContain('음식 취향 매칭');
   expect(text).not.toContain('일정 입력하기');
   expect(text).not.toContain('밥약 기록');
-  expect(text).not.toContain('음식 취향 다시 고르기');
+  expect(text).toContain('음식 취향 다시 고르기');
 });
 
 it.each(['앨범에서 고르기', '사진 찍기'])('waits for iOS native dismissal before opening a system picker (%s)', async (label) => {
@@ -344,7 +344,7 @@ it.each(['기본 캐릭터로 바꾸기', '사진 지우기'])('removes an uploa
 });
 
 it.each([0, 2, 3])('renders only persisted completion progress (%s of 3)', async (count) => {
-  bundle.privateProfile.tastes = count >= 2 ? { spicy: true } : {};
+  bundle.privateProfile.foodProfileCompleted = count >= 2;
   bundle.privateProfile.startLocationName = count >= 2 ? '서면역' : null;
   bundle.privateProfile.bankName = count === 3 ? '국민은행' : null;
   bundle.privateProfile.accountNumber = count === 3 ? '1234567890' : null;

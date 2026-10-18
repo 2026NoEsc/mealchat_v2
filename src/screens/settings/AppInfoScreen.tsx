@@ -15,6 +15,10 @@ export default function AppInfoScreen() {
         <Image source={logo} style={styles.logo} resizeMode="contain" accessible={false} />
         <Text style={styles.brand}>MEALCHAT {appVersion}</Text>
       </View>
+      <Text style={styles.heading}>데이터 출처</Text>
+      <View style={styles.card}>
+        <Text style={styles.attribution}>공용 만남 지역의 기준 좌표는 서울교통공사, 부산교통공사, 국가철도공단의 공공데이터를 활용했습니다. 공공누리 제1유형(출처표시). 데이터 수집일: 2026-10-19. 표시명과 검색 반경은 MealChat에서 편집했습니다.</Text>
+      </View>
       <Text style={styles.heading}>오픈소스 라이선스</Text>
       <View style={styles.card}>
         {licenses.map((entry, index) => <View key={entry.name} testID="license-row" accessible
@@ -38,4 +42,5 @@ const styles = StyleSheet.create({
   name: { flex: 1, fontFamily: fontFamily.medium, fontSize: 15, lineHeight: 22, color: colors.ink },
   license: { flexShrink: 1, maxWidth: '40%', fontFamily: fontFamily.body, fontSize: 13, lineHeight: 20, color: colors.sub, textAlign: 'right' },
   lastRow: { borderBottomWidth: 0 },
+  attribution: { paddingVertical: 12, fontFamily: fontFamily.body, fontSize: 15, lineHeight: 23, color: colors.ink },
 });

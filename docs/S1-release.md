@@ -104,3 +104,5 @@ SQL Editor 실행만으로 CLI migration 이력에 자동 기록된다고 가정
 **운영 반영 승인 전까지 Develop에서 `supabase db push`는 금지한다.** M7이 빠진 채 M6의 필수 약관 gate만 적용되면 유효한 current bundle이 없어 S1006으로 전체 서비스 접근이 차단된다. M1~M6만 먼저 배포하지 않는다.
 
 **Develop→main 병합 전에도 이 위험을 다시 판단한다.** 병합할 migration 목록, 확정 M7 포함 여부·시행 시각, `release:check` 결과, 운영 적용/migration 이력, 별도 운영 승인 상태와 DB→Edge 배포 순서를 재확인한다. Develop 커밋 조건부 승인은 병합 또는 운영 반영을 자동 승인하지 않는다.
+
+- 새 schedule-recommend Edge 배포는 M1~M7 직후 진행하며, 앱 측은 레거시 서버에서 시간 추천을 비활성화한다.

@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import vm from 'node:vm';
+import { runEdgeVm } from './edge_vm.mjs';
 import ts from 'typescript';
 
 const gateSource = await fs.readFile(new URL('../functions/schedule-recommend/consentGate.ts', import.meta.url), 'utf8');
 const handlerSource = await fs.readFile(new URL('../functions/schedule-recommend/index.ts', import.meta.url), 'utf8');
 const gateModule = { exports: {} };
 const gateDiagnostics = [];
-vm.runInNewContext(ts.transpileModule(gateSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: gateModule.exports, module: gateModule, Response, fetch, AbortSignal, console: { error: (message) => gateDiagnostics.push(message) } });
+runEdgeVm(ts.transpileModule(gateSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: gateModule.exports, module: gateModule, Response, AbortSignal, console: { error: (message) => gateDiagnostics.push(message) } });
 const { checkRequiredConsent, checkRoomPermission } = gateModule.exports;
 const accepted = { contract_version: 1, bundle_version: 'synthetic', required: { status: 'accepted', service_agreed: true, privacy_agreed: true } };
 for (const [label, payload, status] of [
@@ -35,7 +35,7 @@ for (const [label, payload, status] of [
       if (id.startsWith('@supabase/functions-js')) return {};
       throw new Error('Unexpected import');
     };
-    vm.runInNewContext(ts.transpileModule(handlerSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
+    runEdgeVm(ts.transpileModule(handlerSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
       exports: module.exports, module, require: requireMock,
       Deno: { env: { get: (name) => name === 'GEMINI_API_KEY' ? undefined : name === 'SUPABASE_URL' ? 'http://127.0.0.1:55321' : 'synthetic-test-value' } },
       Response, Request, TextEncoder, AbortSignal, console: { error() {}, warn() {} },
@@ -61,7 +61,7 @@ test('RPC rejection and transport error fail closed', async () => {
   }
 });
 
-test('room permission is resolved with user-scoped RPC before privileged access', async () => {
+test('legacy room permission is resolved with user-scoped RPC before privileged access', async () => {
   let calls = 0;
   assert.equal(await checkRoomPermission('http://127.0.0.1', 'synthetic', 'Bearer synthetic', 'room', async (url, options) => {
     calls++; assert.ok(url.endsWith('/rpc/room_availability_status'));
@@ -73,7 +73,8 @@ test('room permission is resolved with user-scoped RPC before privileged access'
   assert.equal((await checkRoomPermission('http://127.0.0.1', 'synthetic', 'Bearer synthetic', 'room', async () => Response.json([]))).status, 403);
   assert.equal((await checkRoomPermission('http://127.0.0.1', 'synthetic', 'Bearer synthetic', 'room', async () => Response.json({ code: 'S1001' }, { status: 400 }))).status, 403);
   assert.equal((await checkRoomPermission('http://127.0.0.1', 'synthetic', 'Bearer synthetic', 'room', async () => Response.json({}, { status: 500 }))).status, 503);
-  assert.ok(handlerSource.indexOf('const roomPermissionFailure') < handlerSource.indexOf('ctx.supabaseAdmin'));
+  const legacySource=handlerSource.slice(handlerSource.indexOf('const legacy ='));
+  assert.ok(legacySource.indexOf('const roomPermissionFailure')>=0 && legacySource.indexOf('const roomPermissionFailure') < legacySource.indexOf('ctx.supabaseAdmin'));
 });
 
 test('missing public key fails closed and logs only the configuration field name', async () => {

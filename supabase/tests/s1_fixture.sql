@@ -1,3 +1,9 @@
+-- Only synthetic regression sessions expose the disabled local area (S1-only schema supported).
+do $s5_local_fixture$ begin
+ if to_regclass('public.public_meeting_areas') is not null then
+  update public.public_meeting_areas set enabled=true where id='local-dev-seoul-center';
+ end if;
+end; $s5_local_fixture$;
 -- Trusted synthetic fixture helper, session-local only; never installed in public/private.
 create function pg_temp.set_health_expiry(u uuid, expiry timestamptz) returns void language plpgsql as $$
 declare s public.profile_consent_states%rowtype; e bigint; t timestamptz:=clock_timestamp()-interval '2 years';

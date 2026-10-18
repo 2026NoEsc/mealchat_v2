@@ -370,7 +370,7 @@ it.each([false, true])('blocks signup until both required terms are chosen and p
     email: 'fixture@example.test', password: '12345678', displayName: '밀챗',
   });
   expect(completeSignupConsents).toHaveBeenCalledWith(expect.objectContaining({ p_choices: { service: true, privacy: true, health: false, marketing } }));
-  expect(saveSignupPrivateProfile).toHaveBeenCalledWith('fixture', expect.objectContaining({ bank: null, account: '', birth: { year: '', month: '', day: '' }, tastes: {} }));
+  expect(saveSignupPrivateProfile).toHaveBeenCalledWith('fixture', expect.objectContaining({ bank: null, account: '', birth: { year: '', month: '', day: '' } }));
 });
 
 it('lays out the password toggle in the input box and the email action below its label without label-height offsets', async () => {

@@ -8,7 +8,7 @@ export const PENDING_PROFILE_ACCOUNT_MAX_LENGTH = 32;
 /**
  * 가입 화면에서 받았지만 아직 서버에 못 넣은 값.
  *
- * 계좌·생년월일·취향은 본인만 볼 수 있는 행(profile_private)에 들어가고, 그 쓰기는
+ * 계좌·생년월일은 본인만 볼 수 있는 행(profile_private)에 들어가고, 그 쓰기는
  * 로그인된 세션을 요구한다. 그런데 이메일 확인을 켜 두면 가입 직후에는 세션이 없다.
  * 예전에는 그 경우 그냥 버려서, 메일을 확인하고 처음 로그인하면 적어 넣은 값이
  * 하나도 없었다.
@@ -22,8 +22,6 @@ export const PENDING_SIGNUP_PROFILE_KEY = 'mealchat.auth.pending-signup-profile.
 
 /** 이 기간이 지나면 버린다 */
 export { PENDING_SIGNUP_CONSENTS_TTL_MS as PENDING_SIGNUP_PROFILE_TTL_MS } from './pendingSignupConsents';
-const FOOD_KEYS = ['korean', 'meat', 'seafood', 'western', 'chinese', 'japanese'];
-const foodOnly = (tastes: Record<string, unknown>) => Object.fromEntries(Object.entries(tastes).filter(([key, picked]) => FOOD_KEYS.includes(key) && typeof picked === 'boolean')) as Record<string, boolean>;
 
 export type PendingSignupProfile = {
   /** 이 값이 누구 것인지 가리는 기준. 다른 계정으로 로그인하면 옮기지 않는다 */
@@ -32,7 +30,6 @@ export type PendingSignupProfile = {
   bank: string | null;
   account: string;
   birth: { year: string; month: string; day: string };
-  tastes: Record<string, boolean>;
   /** 저장한 때 (Date.now) */
   savedAt: number;
 };
@@ -77,7 +74,6 @@ export function parsePendingSignupProfile(raw: string | null): PendingSignupProf
     if (!email.trim() || typeof value.userId !== 'string' || !value.userId.trim()) return null;
 
     const birth = (value.birth ?? {}) as Record<string, unknown>;
-    const tastes = (value.tastes ?? {}) as Record<string, unknown>;
 
     return {
       email,
@@ -89,7 +85,6 @@ export function parsePendingSignupProfile(raw: string | null): PendingSignupProf
         month: typeof birth.month === 'string' ? birth.month : '',
         day: typeof birth.day === 'string' ? birth.day : '',
       },
-      tastes: foodOnly(tastes),
       savedAt: typeof value.savedAt === 'number' ? value.savedAt : 0,
     };
   } catch {
@@ -117,9 +112,9 @@ export async function persistPendingSignupProfile(
   value: Omit<PendingSignupProfile, 'savedAt'>,
   now: number = Date.now(),
 ): Promise<void> {
-  const { email, userId, bank, account, birth, tastes } = value;
+  const { email, userId, bank, account, birth } = value;
   if (!userId?.trim()) { await clearPendingSignupProfile(storage); return; }
-  await vault(storage).write(JSON.stringify({ email, userId, bank, account, birth, tastes: foodOnly(tastes), savedAt: now }), now);
+  await vault(storage).write(JSON.stringify({ email, userId, bank, account, birth, savedAt: now }), now);
 }
 
 export async function readPendingSignupProfile(

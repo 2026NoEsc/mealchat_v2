@@ -80,7 +80,7 @@ export default function OriginScreen() {
   };
   return <ProfileFrame title="출발지 설정" footer={<PrimaryButton label="이 위치로 저장" disabled={!userId || !loaded} loading={saving} onPress={() => void save()} />}>
     <ScrollView contentContainerStyle={shared.body} keyboardShouldPersistTaps="handled">
-      <Text style={shared.intro}>밥약 장소를 고를 때 중간 지점 계산에 써요. 검색해서 고르면 좌표까지 저장돼요.</Text>
+      <Text style={shared.intro}>내 출발지를 선택 정보로 저장해요. 현재 공동 식당 추천에는 사용하지 않아요. 검색해서 고르면 좌표까지 저장돼요.</Text>
       <View style={styles.searchGroup}>
         <Text style={shared.label}>출발지 검색</Text>
         <View style={[styles.searchBox, focused && styles.focused]}>

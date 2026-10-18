@@ -99,7 +99,7 @@ it('does not flush or remove B pending profile after an A storage read completes
   const { readPendingSignupProfile } = require('../src/auth/pendingSignupProfile');
   const { SECURE_PENDING_PROFILE_KEY, PENDING_PROFILE_TICKET_KEY } = require('../src/auth/pendingProfileStorage');
   const secure = require('expo-secure-store');
-  const pendingB = { email: 'other@example.test', userId: 'other', bank: 'fixture-bank', account: 'B-1234', birth: { year: '2001', month: '2', day: '3' }, tastes: {}, savedAt: Date.now() };
+  const pendingB = { email: 'other@example.test', userId: 'other', bank: 'fixture-bank', account: 'B-1234', birth: { year: '2001', month: '2', day: '3' }, savedAt: Date.now() };
   await persistPendingSignupProfile(storage, pendingB);
   const encryptedB = await secure.getItemAsync(SECURE_PENDING_PROFILE_KEY);
   const ticketB = await storage.getItem(PENDING_PROFILE_TICKET_KEY);

@@ -16,14 +16,14 @@ import ScheduleConfirmedScreen from '../screens/schedule/ScheduleConfirmedScreen
 import SettlementsScreen from '../screens/settlement/SettlementsScreen';
 import ScheduleDetailScreen from '../screens/schedule/ScheduleDetailScreen';
 import ScheduleHomeScreen from '../screens/schedule/ScheduleHomeScreen';
-import ScheduleOriginSearchScreen from '../screens/schedule/ScheduleOriginSearchScreen';
 import ScheduleTimeScreen from '../screens/schedule/ScheduleTimeScreen';
 import SignupCalendarScreen from '../screens/signup/SignupCalendarScreen';
 import SignupPersonalScreen from '../screens/signup/SignupPersonalScreen';
 import SignupStartScreen from '../screens/signup/SignupStartScreen';
 import SignupTasteScreen from '../screens/signup/SignupTasteScreen';
 import SignupTermsScreen from '../screens/signup/SignupTermsScreen';
-import TasteGameScreen from '../screens/taste/TasteGameScreen';
+import FoodProfileScreen from '../screens/food/FoodProfileScreen';
+import FoodProfilePrompt from '../screens/food/FoodProfilePrompt';
 import SettingsScreen from '../screens/settings/SettingsScreen';
 import ServiceTermsScreen from '../screens/settings/ServiceTermsScreen';
 import PrivacyPolicyScreen from '../screens/settings/PrivacyPolicyScreen';
@@ -43,6 +43,7 @@ export default function AppNavigator() {
     <View style={styles.root}>
       <View style={styles.screen}>{renderScreen(current.name)}</View>
 
+      <FoodProfilePrompt />
       {activeTab ? (
         <BottomNav active={activeTab} onChange={(tab) => resetTo(TAB_ROUTES[tab])} />
       ) : null}
@@ -76,16 +77,14 @@ function renderScreen(name: RouteName) {
       return <SignupCalendarScreen />;
     case 'SignupTaste':
       return <SignupTasteScreen />;
-    case 'TasteGame':
-      return <TasteGameScreen />;
+    case 'FoodProfile':
+      return <FoodProfileScreen />;
     case 'SignupTerms':
       return <SignupTermsScreen />;
     case 'Home':
       return <HomeScreen />;
     case 'Schedule':
       return <ScheduleHomeScreen />;
-    case 'ScheduleOriginSearch':
-      return <ScheduleOriginSearchScreen />;
     case 'ScheduleDetail':
       return <ScheduleDetailScreen />;
     case 'ScheduleTime':

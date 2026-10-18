@@ -61,7 +61,8 @@ function generate() {
   ].map(([name, data]) => ({ target: resolve(root, 'src/legal', name), output: JSON.stringify(data, null, 2) + '\n' }));
   if (process.argv.includes('--check')) {
     for (const { target, output } of outputs) {
-      if (readFileSync(target, 'utf8') !== output) throw new Error('Legal documents changed. Run node scripts/generate-legal-hashes.mjs and review versions before publishing.');
+      // Ignore checkout line endings only; canonical content and published hashes remain exact.
+      if (readFileSync(target, 'utf8').replace(/\r\n?/g, '\n') !== output) throw new Error('Legal documents changed. Run node scripts/generate-legal-hashes.mjs and review versions before publishing.');
     }
   } else for (const { target, output } of outputs) writeFileSync(target, output, 'utf8');
   for (const document of Object.values(result)) process.stdout.write(`${document.version} ${document.content_hash}\n`);

@@ -21,13 +21,14 @@ import { v3Layout } from '../../theme/scale';
 import { v3Colors as colors, v3FeedbackColors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 
-export type RestaurantSuggestion = { label: string; matchPercent?: number; fresh?: boolean };
+export type RestaurantSuggestion = { label: string; matchPercent?: number; fresh?: boolean; source?: 'gemini' | 'rules' };
 export type RecommendationStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'error' | 'unavailable';
 type Props = {
   visible: boolean; isOwner?: boolean; stage?: RoomStage; confirmedSlot?: string | null; participantCount?: number;
   confirmedRestaurant?: string | null; participants?: RoomParticipant[];
   roomId: string | null; kind: VotingKind; title: string; subtitle: string; placeholder: string;
   onClose: () => void; onConfirm: () => void; onVoted?: () => void;
+  recommendationControls?: ReactNode; validateSuggestion?: (label: string) => Promise<void>;
   suggestions?: RestaurantSuggestion[]; suggestionTitle?: string;
   suggestionStatus?: RecommendationStatus; suggestionReason?: string; receivedMore?: boolean; onRequestSuggestions?: () => void;
 };
@@ -44,7 +45,7 @@ function votingAddErrorMessage(error: unknown) {
 /** Phone 540:1524 / 563:1755 / 628:3074 / 683:12975 / 540:1682. */
 export default function VotingSheet({ visible, isOwner = false, stage = 'place', confirmedSlot = null, participantCount, confirmedRestaurant,
   participants = [], roomId, kind, title, subtitle, placeholder, onClose, onConfirm, onVoted, suggestions = [],
-  suggestionStatus = 'idle', suggestionReason, receivedMore = false, onRequestSuggestions }: Props) {
+  suggestionStatus = 'idle', suggestionReason, receivedMore = false, onRequestSuggestions, recommendationControls, validateSuggestion, suggestionTitle }: Props) {
   const { user } = useAuth(); const myId = user?.id ?? null;
   const [options, setOptions] = useState<VotingOption[]>([]); const [memberCount, setMemberCount] = useState(0);
   const [loading, setLoading] = useState(true); const [loadError, setLoadError] = useState(false);
@@ -63,7 +64,7 @@ export default function VotingSheet({ visible, isOwner = false, stage = 'place',
   useEffect(() => {
     if (!visible || restaurantLocked || !receivedMore || shownMore.current) return;
     const count = suggestions.filter(item => item.fresh).length;
-    if (count > 0) { shownMore.current = true; showToast({ message: 'AI가 조건에 맞는 곳을 ' + count + '곳 더 찾았어요' }); }
+    if (count > 0) { shownMore.current = true; showToast({ message: '조건에 맞는 곳을 ' + count + '곳 더 찾았어요' }); }
   }, [visible, receivedMore, suggestions, showToast, restaurantLocked]);
 
   const load = useCallback(async () => {
@@ -104,6 +105,7 @@ export default function VotingSheet({ visible, isOwner = false, stage = 'place',
     if (!label || Array.from(label).length > 120) { setActionError('후보 이름은 1~120자로 입력해 주세요.'); return; }
     if (options.some(option => votingLabelKey(option.label) === votingLabelKey(label))) { setActionError('이미 같은 이름의 후보가 있어요. 목록을 확인해 주세요.'); return; }
     let added = false; return void mutate(async () => {
+    if (thenVote && validateSuggestion) await validateSuggestion(label);
     const error = await addVotingItem(roomId!, kind, label); if (error) throw error; added = true;
     const rows = await load();
     if (thenVote) {
@@ -193,19 +195,21 @@ export default function VotingSheet({ visible, isOwner = false, stage = 'place',
           {query.trim() && searchState !== 'loading' ? <Button label="이 이름으로 후보 추가" variant="secondary" disabled={busy || options.some(option => votingLabelKey(option.label) === votingLabelKey(query))} onPress={() => add(query.trim())} /> : !query.trim() ? <Text style={styles.note}>{kind === 'menu' ? '식당 이름을 입력해 주세요. 검색은 두 글자부터 가능해요.' : '추가할 시간을 입력해 주세요.'}</Text> : null}
           {/* TODO(서버 단계): 후보에는 이름만 저장된다. 검색 주소/사진/가격/거리와 AI 출처 저장 계약은 없다. */}
         </> : <>
+          {!restaurantLocked ? recommendationControls : null}
           {loading ? <Text style={styles.note}>후보를 불러오는 중이에요</Text> : loadError ? <FailureCard title="후보를 불러오지 못했어요" reason="잠시 후 다시 시도해 주세요." icon={<MapPin size={28} color={colors.sub} />} onRetry={() => void load()} /> : null}
           {!loading && !loadError ? options.map(option => <CandidateRow key={option.id} option={option} highlighted={leader?.id === option.id && option.voters.length > 0} participants={participants}
             suggestion={suggestions.find(item => votingLabelKey(item.label) === votingLabelKey(option.label))} busy={busy || restaurantLocked} onVote={() => vote(option)}
             onRemove={isOwner || (Boolean(myId) && option.createdBy === myId) ? () => discard(option) : undefined} />) : null}
+          {!loadError && openSuggestions.length ? <Text accessibilityRole="header" style={styles.resultName}>{openSuggestions.some(item => item.source === 'rules') ? '추천 식당' : suggestionTitle ?? '추천 식당'}</Text> : null}
           {!loadError ? openSuggestions.map(item => <CandidateRow key={'ai-' + item.label} option={{ id: item.label, kind, label: item.label, createdBy: null, voters: [], mine: false }}
             suggestion={item} pendingAddition participants={participants} busy={busy || loading} onVote={() => add(item.label, true)} />) : null}
           {!restaurantLocked && (suggestionStatus === 'error' || suggestionStatus === 'empty') ? <View style={styles.failure}>
             <View style={styles.failureIcon}><MapPin size={28} color={colors.selectedText} /></View><Text style={styles.failureTitle}>{suggestionStatus === 'empty' ? '근처에서 찾은 곳이 없어요' : '추천을 불러오지 못했어요'}</Text>
             <Text style={styles.failureNote}>{suggestionReason || (suggestionStatus === 'empty' ? '아는 식당을 직접 추가해 주세요.' : '추천을 불러오지 못했어요. 다시 시도해 주세요.') }</Text>
             {suggestionStatus === 'error' ? <Button label="다시 시도" style={styles.retry} onPress={onRequestSuggestions} disabled={!onRequestSuggestions} /> : null}
-          </View> : !restaurantLocked && suggestionStatus === 'loading' ? <Text style={styles.note} accessibilityLiveRegion="polite">AI가 식당을 찾고 있어요</Text> : !restaurantLocked && suggestionReason ? <Text style={styles.note}>{suggestionReason}</Text> : !restaurantLocked && noCandidates && !loading && !loadError ? <Text style={styles.note}>아직 후보가 없어요. 직접 추가해 주세요.</Text> : null}
+          </View> : !restaurantLocked && suggestionStatus === 'loading' ? <Text style={styles.note} accessibilityLiveRegion="polite">식당을 찾고 있어요</Text> : !restaurantLocked && suggestionReason ? <Text style={styles.note}>{suggestionReason}</Text> : !restaurantLocked && noCandidates && !loading && !loadError ? <Text style={styles.note}>아직 후보가 없어요. 직접 추가해 주세요.</Text> : null}
           <View style={styles.addRow}><AddAction label="직접 추가" Icon={Plus} onPress={openAdding} disabled={busy || restaurantLocked} />
-            {kind === 'menu' && (restaurantLocked || (suggestionStatus !== 'error' && suggestionStatus !== 'empty')) && onRequestSuggestions ? <AddAction label={receivedMore ? 'AI 추천을 받았어요' : 'AI 추천 더 받기'} Icon={Sparkles} accent onPress={onRequestSuggestions} disabled={busy || restaurantLocked || suggestionStatus === 'loading' || suggestionStatus === 'unavailable' || receivedMore} /> : null}</View>
+            {kind === 'menu' && (restaurantLocked || (suggestionStatus !== 'error' && suggestionStatus !== 'empty')) && onRequestSuggestions ? <AddAction label={receivedMore ? '추천을 받았어요' : '추천 더 받기'} Icon={Sparkles} accent onPress={onRequestSuggestions} disabled={busy || restaurantLocked || suggestionStatus === 'loading' || suggestionStatus === 'unavailable' || receivedMore} /> : null}</View>
         </>}
       </VotingFrame>}
     <Toast {...toastProps} bottom={Math.max(16, height - 164)} />
@@ -216,7 +220,7 @@ function CandidateRow({ option, pendingAddition = false, highlighted = false, su
   return <View style={[styles.candidate, highlighted && styles.candidateSelected, suggestion?.fresh && styles.candidateFresh]}>
     {/* TODO(서버 단계): 식당 사진·도보 거리·가격 값이 없다. 임의 이미지나 숫자를 표시하지 않는다. */}
     <View style={styles.candidateText}><View style={styles.nameRow}><Text style={styles.candidateName}>{option.label}</Text>
-      {suggestion ? <View style={styles.aiBadge}><Sparkles size={11} color={colors.selectedText} /><Text style={styles.aiLabel}>{suggestion.fresh ? 'AI 새 추천' : 'AI 추천'}</Text></View> : null}</View>
+      {suggestion ? <View style={styles.aiBadge}><Sparkles size={11} color={colors.selectedText} /><Text style={styles.aiLabel}>{suggestion.source === 'rules' ? '기본 추천' : suggestion.fresh ? 'AI 새 추천' : 'AI 추천'}</Text></View> : null}</View>
       <View style={styles.voters}><View style={styles.avatarStack}>{option.voters.slice(0, 3).map((voter, index) => {
         // Voter IDs are absent in the existing contract. Only use a unique name match for a saved photo.
         const matching = participants.filter(member => member.name === voter.name);

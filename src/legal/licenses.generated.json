@@ -45,11 +45,6 @@
     "license": "MIT"
   },
   {
-    "name": "expo-location",
-    "version": "19.0.8",
-    "license": "MIT"
-  },
-  {
     "name": "expo-notifications",
     "version": "0.32.17",
     "license": "MIT"

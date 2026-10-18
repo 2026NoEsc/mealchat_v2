@@ -38,7 +38,6 @@ const draft = {
   bank: '국민은행',
   account: '1234-56-7890',
   birth: { year: '2003', month: '10', day: '29' },
-  tastes: { korean: true, seafood: false },
 };
 
 describe('pendingSignupProfile', () => {
@@ -83,12 +82,12 @@ describe('pendingSignupProfile', () => {
     expect(await readPendingSignupProfile(storage)).toBeNull();
   });
 
-  it('건강·식단과 알 수 없는 취향 키는 가입 보조 저장소에 남기지 않는다', async () => {
+  it('이전 음식·건강 취향 키를 가입 보조 저장소에서 제거한다', async () => {
     const { storage, read } = createStorage();
-    await persistPendingSignupProfile(storage, { ...draft, tastes: { korean: true, allergy: true, dietary_restriction: false, unknown: true } });
+    await persistPendingSignupProfile(storage, { ...draft, tastes: { korean: true, allergy: true, dietary_restriction: false, unknown: true } } as typeof draft);
     expect(read()).toBeNull();
-    expect(JSON.stringify((SecureStore.setItemAsync as jest.Mock).mock.calls)).not.toMatch(/allergy|dietary_restriction|unknown/);
-    expect((await readPendingSignupProfile(storage))?.tastes).toEqual({ korean: true });
+    expect(JSON.stringify((SecureStore.setItemAsync as jest.Mock).mock.calls)).not.toMatch(/tastes|korean|allergy|dietary_restriction|unknown/);
+    expect(await readPendingSignupProfile(storage)).not.toHaveProperty('tastes');
   });
 
   it('깨진 값은 없는 셈 친다', async () => {
@@ -109,7 +108,6 @@ describe('pendingSignupProfile', () => {
       bank: null,
       account: '',
       birth: { year: '', month: '', day: '' },
-      tastes: {},
       savedAt: 0,
     });
   });

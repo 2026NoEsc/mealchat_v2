@@ -7,7 +7,6 @@ jest.mock('react-native-safe-area-context', () => ({ SafeAreaProvider: ({ childr
 jest.mock('../src/theme/keyboard', () => ({ useKeyboardOverlap: () => ({ overlap: 0, remeasure: jest.fn() }) }));
 jest.mock('../src/lib/supabase', () => ({ supabase: { auth: {} } }));
 jest.mock('../src/lib/profile', () => ({ saveMyPrivateProfile: jest.fn(async () => null) }));
-jest.mock('../src/lib/scheduleDraft', () => ({ clearSettingsDraft: jest.fn(async () => undefined) }));
 jest.mock('../src/lib/confirm', () => ({ notify: jest.fn() }));
 jest.mock('../src/navigation/NavigationContext', () => ({ useNavigation: jest.fn() }));
 jest.mock('../src/screens/settings/notificationPermission', () => ({ queueNotificationGuide: jest.fn(async () => undefined) }));
@@ -113,7 +112,8 @@ it('keeps immediate-session account/birth fields off AsyncStorage and saves them
   await mount(); await submit(); await pendingEmpty();
   expect(storage.setItem.mock.calls.filter(([key]) => [PENDING_SIGNUP_PROFILE_KEY, PENDING_SIGNUP_CONSENTS_KEY].includes(key))).toHaveLength(0);
   expect(require('expo-secure-store').setItemAsync).not.toHaveBeenCalled();
-  expect(saveMyPrivateProfile).toHaveBeenCalledWith('new-user', expect.objectContaining({ account: draft.account, birth: draft.birth, tastes: draft.tastes }));
+  expect(saveMyPrivateProfile).toHaveBeenCalledWith('new-user', expect.objectContaining({ account: draft.account, birth: draft.birth }));
+  expect(saveMyPrivateProfile.mock.calls[0][1]).not.toHaveProperty('tastes');
 });
 it('discards a memory-only signup profile on logout rather than applying it to the next account', async () => {
   response.data.session = { user: response.data.user };

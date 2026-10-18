@@ -161,7 +161,8 @@ export function validateRequest(value: unknown): Validation<RequestBody> {
     return { ok: false, error: 'roomId is required' };
   }
 
-  if (!Array.isArray(body.placeCandidates) || body.placeCandidates.length === 0) {
+  // Empty candidates keep the legacy time-only path valid; the handler rejects legacy POIs.
+  if (!Array.isArray(body.placeCandidates)) {
     return { ok: false, error: 'placeCandidates is required' };
   }
   if (body.placeCandidates.length > MAX_PLACE_CANDIDATES) {

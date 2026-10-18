@@ -5,9 +5,9 @@ import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 import { Button } from '../../components/ui/Button';
 import { Radio } from '../../components/ui/Radio';
 import { BREAKTIME_NOTICE, hasBreaktimeRisk } from '../../lib/breaktime';
-import type { MyLocation } from '../../lib/myLocation';
-import { buildPlaceCandidates } from '../../lib/placeCandidates';
 import { advanceRoomStage, fetchRoom } from '../../lib/rooms';
+import { fetchConsentManifest, getConsentServerMode } from '../../lib/consents';
+import { fetchFoodCatalog } from '../../lib/foodProfile';
 import { supabase } from '../../lib/supabase';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { scheduleColors, scheduleLayout as layout } from '../../theme/scheduleTokens';
@@ -19,22 +19,14 @@ import type { ScheduleRecommendResponse, SlotPick } from './scheduleTypes';
 
 const INVOKE_TIMEOUT_MS = 70_000;
 
-/** supabase-js 가 감싼 오류에서 서버가 보낸 문구를 꺼낸다 */
-async function readFunctionError(error: unknown): Promise<string | null> {
-  const context = (error as { context?: unknown })?.context;
-  if (!(context instanceof Response)) return null;
-
-  try {
-    const body = await context.clone().json();
-    const message = (body as { error?: unknown })?.error;
-    return typeof message === 'string' && message.trim() ? message : null;
-  } catch {
-    return null;
-  }
+/** Transport status only. Never display a server/provider's raw error text. */
+function functionStatus(error: unknown) {
+  const value = error as { status?: number; context?: { status?: number } } | null;
+  return value?.context?.status ?? value?.status;
 }
 
-type Params = { roomId?: string; name?: string; invitees?: string[]; origin?: MyLocation; originSource?: 'profile' | 'gps' | 'search' };
-type Failure = { title: string; message: string; action: 'restart' | 'home' | 'search' | 'retry' };
+type Params = { roomId?: string; name?: string; invitees?: string[] };
+type Failure = { title: string; message: string; action: 'restart' | 'home' | 'retry' | 'continue' };
 
 export default function ScheduleConfirmedScreen() {
   /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
@@ -46,7 +38,6 @@ export default function ScheduleConfirmedScreen() {
   const roomId = params?.roomId ?? null;
   const title = params?.name || '새 밥약';
   const invitees = params?.invitees ?? [];
-  const origin = params?.origin;
 
   const [picks, setPicks] = useState<SlotPick[]>([]);
   const [selected, setSelected] = useState(0);
@@ -63,30 +54,32 @@ export default function ScheduleConfirmedScreen() {
       setFailure({ title: '밥약 정보가 없어요', message: '새 밥약을 만들고 가능한 시간을 골라 주세요.', action: 'restart' });
       setLoading(false); return;
     }
-    if (!origin) {
-      setFailure({ title: '출발지를 골라 주세요', message: '중간 지점을 계산하려면 내가 출발할 곳이 필요해요.', action: 'search' });
-      setLoading(false); return;
-    }
-    let phase: 'room' | 'candidates' | 'recommendation' = 'room';
+    let phase: 'capability' | 'room' | 'recommendation' = 'capability';
     try {
+      if (getConsentServerMode() === 'unknown') {
+        const capability = await fetchConsentManifest();
+        if (capability.error) throw capability.error;
+      }
+      if (getConsentServerMode() === 'legacy') {
+        setFailure({ title: '시간 추천은 곧 다시 이용할 수 있어요', message: '추천 없이 식당 정하기로 넘어갈 수 있어요.', action: 'continue' }); return;
+      }
+      if (getConsentServerMode() !== 's1') throw new Error('Capability not established');
+      // S1 can be deployed without S5/new Edge. Do not send the old Edge an empty candidate list.
+      const s5 = await fetchFoodCatalog();
+      if ((s5.error as { code?: string } | null)?.code === 'S5_UNAVAILABLE') {
+        setFailure({ title: '시간 추천은 곧 다시 이용할 수 있어요', message: '추천 없이 식당 정하기로 넘어갈 수 있어요.', action: 'continue' }); return;
+      }
+      if (!s5.data) throw s5.error ?? new Error('S5 capability not established');
+      phase = 'room';
       const room = await fetchRoom(roomId);
       // A failed room lookup cannot establish membership for the candidate request.
       if (room.error) throw room.error;
       if (!room.data) {
         setFailure({ title: '밥약을 찾을 수 없어요', message: '방이 없어졌거나 참여 정보를 확인할 수 없어요.', action: 'home' }); return;
       }
-      const memberIds = room.data.participants.map(participant => participant.profileId).filter((id): id is string => Boolean(id));
-      phase = 'candidates';
-      const candidates = await buildPlaceCandidates(memberIds, origin);
-      if (!candidates) {
-        setFailure({ title: '중간 지점을 계산하지 못했어요', message: '출발지 좌표를 확인할 수 없어요. 다른 출발지를 골라 다시 찾아보세요.', action: 'search' }); return;
-      }
-      if (!candidates.candidates.length) {
-        setFailure({ title: '근처에서 식당 후보를 찾지 못했어요', message: '다른 출발지를 골라 다시 찾아보세요.', action: 'search' }); return;
-      }
       phase = 'recommendation';
       const { data, error } = await supabase.functions.invoke('schedule-recommend', {
-        body: { meetingName: title, roomId, placeCandidates: candidates.candidates }, timeout: INVOKE_TIMEOUT_MS,
+        body: { meetingName: title, roomId, placeCandidates: [] }, timeout: INVOKE_TIMEOUT_MS,
       });
       if (error) throw error;
       const response = data as ScheduleRecommendResponse;
@@ -94,33 +87,36 @@ export default function ScheduleConfirmedScreen() {
       if (!response.slotRecommendations.length) throw new Error('Empty recommendation response');
       setPicks([...response.slotRecommendations].sort((a, b) => a.rank - b.rank)); setSelected(0);
     } catch (error) {
-      const detail = phase === 'recommendation' ? await readFunctionError(error) : null;
-      setFailure(phase === 'room'
+      if (phase === 'recommendation' && functionStatus(error) === 400) {
+        setFailure({ title: '시간 추천을 준비하고 있어요', message: '현재 서버와 앱의 시간 추천 방식이 달라요. 추천 없이 식당 정하기로 넘어갈 수 있어요.', action: 'continue' }); return;
+      }
+      setFailure(phase === 'capability'
+        ? { title: '시간 추천 지원 여부를 확인하지 못했어요', message: '연결 상태를 확인하고 다시 시도해 주세요.', action: 'retry' }
+        : phase === 'room'
         ? { title: '밥약 정보를 불러오지 못했어요', message: '연결 상태를 확인하고 다시 시도해 주세요.', action: 'retry' }
-        : phase === 'candidates'
-          ? { title: '식당 후보를 불러오지 못했어요', message: '연결 상태를 확인하고 다시 시도해 주세요.', action: 'retry' }
-          : { title: '모두 되는 시간을 계산하지 못했어요', message: detail ?? '다시 시도하거나 날짜를 직접 골라 주세요.', action: 'retry' });
+        : { title: '모두 되는 시간을 계산하지 못했어요', message: '다시 시도하거나 날짜를 직접 골라 주세요.', action: 'retry' });
     } finally { setLoading(false); }
-  }, [roomId, origin, title]);
+  }, [roomId, title]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const goPrev = () => goBackWith({ roomId, name: title, invitees, origin, originSource: params?.originSource });
+  const goPrev = () => goBackWith({ roomId, name: title, invitees });
 
   const chosen = picks[selected];
 
   /* 시간 추천 선택은 이 화면에서만 유지하고 기존 식당 단계로 이동한다. */
+  const manualContinuation = failure?.action === 'continue';
   const goToRestaurants = async () => {
-    if (!roomId || !chosen || loading || failure || confirming) return;
+    if (!roomId || (!manualContinuation && (!chosen || failure)) || loading || confirming) return;
 
     setConfirming(true);
     try {
       // TODO(서버 단계): 선택 시간 저장 계약. chosen.slot을 저장하는 계약이 없으므로 기존 stage 변경만 유지한다.
       const { error } = await advanceRoomStage(roomId, 'place');
       if (error) {
-        Alert.alert('식당 정하기로 넘어가지 못했어요', error.message);
+        Alert.alert('식당 정하기로 넘어가지 못했어요', '방장과 참여 상태를 확인한 뒤 다시 시도해 주세요.');
         return;
       }
 
@@ -131,15 +127,15 @@ export default function ScheduleConfirmedScreen() {
   };
 
   return <ScheduleFrame step={3} title="언제가 좋을까요?" subtitle="모인 일정으로 추천한 시간을 살펴보고, 식당을 정하러 가요." onBack={goPrev}
-    footer={<Button label="식당 정하러 가기" loading={confirming} disabled={confirming || loading || Boolean(failure) || !chosen} onPress={() => void goToRestaurants()} />}>
+    footer={<Button label={manualContinuation ? '추천 없이 식당 정하기' : '식당 정하러 가기'} loading={confirming} disabled={confirming || loading || (!manualContinuation && (Boolean(failure) || !chosen))} onPress={() => void goToRestaurants()} />}>
     {loading ? <View style={styles.state}><ActivityIndicator color={colors.primary} /><Text style={styles.note}>가능한 시간을 분석하고 있어요.</Text></View>
       : failure ? <View style={styles.state}>
         <View style={styles.stateIcon}><Clock size={28} color={colors.selectedText} /></View>
         <Text accessibilityRole="header" style={styles.stateTitle}>{failure.title}</Text>
         <Text accessibilityRole="alert" style={styles.stateNote}>{failure.message}</Text>
         <View style={styles.actions}>{failure.action === 'retry' ? <><Button label="다시 시도" onPress={() => void load()} /><Button label="날짜 직접 고르기" variant="secondary" onPress={goPrev} /></> : <Button
-          label={failure.action === 'restart' ? '새 밥약 만들기' : failure.action === 'home' ? '홈으로 가기' : '다른 출발지 고르기'}
-          onPress={() => { if (failure.action === 'restart') navigate('ScheduleDetail'); else if (failure.action === 'home') resetTo('Home'); else navigate('ScheduleOriginSearch', { name: title, invitees, origin }); }} />}</View>
+          label={failure.action === 'restart' ? '새 밥약 만들기' : '홈으로 가기'}
+          onPress={() => { if (failure.action === 'restart') navigate('ScheduleDetail'); else resetTo('Home'); }} />}</View>
       </View> : <>
         <View accessibilityRole="radiogroup" accessibilityLabel="추천 시간" style={styles.recommendations}>
           {picks.map((pick, index) => {

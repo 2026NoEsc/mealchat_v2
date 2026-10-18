@@ -7,7 +7,7 @@ import Avatar from '../../components/Avatar';
 import FailureCard from '../../components/ui/FailureCard';
 import { ListRow } from '../../components/ui/ListRow';
 import Toast from '../../components/ui/Toast';
-import { countLikedTastes, formatAccount, formatBirthDate, formatGender } from '../../lib/format';
+import { formatAccount, formatBirthDate, formatGender } from '../../lib/format';
 import { fetchMyFriends } from '../../lib/friends';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useMyProfile } from '../../profile/useMyProfile';
@@ -45,7 +45,7 @@ export default function ProfileHomeScreen() {
   ];
   // TODO(서버 단계): 일정 입력 완료를 판단할 계약이 없어 항목과 분모에서 제외한다.
   const steps = [
-    { label: '음식 취향 매칭', done: countLikedTastes(privateProfile?.tastes) > 0, action: '설정하기', onPress: () => navigate('TasteGame') },
+    ...(privateProfile?.foodProfileAvailable !== false ? [{ label: '음식 취향 매칭', done: privateProfile?.foodProfileCompleted === true, action: '설정하기', onPress: () => navigate('FoodProfile') }] : []),
     { label: '송금 계좌 등록', done: Boolean(account), action: '등록하기', onPress: () => navigate('ProfileEdit') },
     { label: '출발지 설정', done: Boolean(origin), action: '설정하기', onPress: () => navigate('Origin') },
   ];
@@ -82,7 +82,7 @@ export default function ProfileHomeScreen() {
         <ListRow title="정보 공개 범위" onPress={() => navigate('Privacy')} style={styles.lastRow} />
         <ListRow title="설정" value="약관 · 계정" style={[styles.lastRow, { borderTopWidth: 1, borderTopColor: colors.border }]} onPress={() => navigate('Settings')} />
         {/* TODO(서버 단계): 밥약 기록·설정 화면 계약이 생기면 메뉴에 추가한다. */}
-        {/* TODO(서버 단계): 음식 프로필 도입 전에는 기존 TasteGame 진입만 유지한다. */}
+        {privateProfile?.foodProfileAvailable !== false ? <ListRow title="음식 취향 다시 고르기" onPress={() => navigate('FoodProfile')} /> : null}
       </View>
       <View style={styles.accountActions}>
         <Pressable accessibilityRole="button" accessibilityLabel="로그아웃" disabled={leaving} accessibilityState={{ disabled: leaving, busy: leaving }} onPress={() => void leave()}

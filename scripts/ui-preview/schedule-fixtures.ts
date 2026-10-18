@@ -1,7 +1,6 @@
 /** Isolated manual fixtures only. The resolver never loads a real backend client. */
 import type { CalendarNote } from '../../src/lib/calendarNotes';
 import type { Friend } from '../../src/lib/friends';
-import type { MyLocation } from '../../src/lib/myLocation';
 import type { Place } from '../../src/lib/tmap';
 
 const params = new URLSearchParams(globalThis.location?.search);
@@ -9,7 +8,7 @@ const scene = params.get('scene');
 const calls: string[] = [];
 Reflect.set(globalThis, '__scheduleFixtureCalls', calls);
 const record = (name: string) => { calls.push(name); };
-export const fixtureOrigin: MyLocation = { name: '부산 서면역 7번 출구 근처', address: '', lat: 35.157, lng: 129.059, fromGps: true };
+export const fixtureOrigin = { name: '부산 서면역 7번 출구 근처', address: '', lat: 35.157, lng: 129.059, fromGps: true };
 const profile = { profile: { name: '나야나' }, privateProfile: { startLocationName: fixtureOrigin.name, startLat: fixtureOrigin.lat, startLng: fixtureOrigin.lng } };
 export const useAuth = () => ({ user: { id: 'fixture-user', created_at: '2026-08-01T00:00:00+09:00' } });
 export const useMyProfile = () => ({ bundle: profile });

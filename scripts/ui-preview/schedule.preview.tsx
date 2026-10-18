@@ -16,13 +16,12 @@ import ScheduleHomeScreen from '../../src/screens/schedule/ScheduleHomeScreen';
 import ScheduleDetailScreen from '../../src/screens/schedule/ScheduleDetailScreen';
 import ScheduleTimeScreen from '../../src/screens/schedule/ScheduleTimeScreen';
 import ScheduleConfirmedScreen from '../../src/screens/schedule/ScheduleConfirmedScreen';
-import ScheduleOriginSearchScreen from '../../src/screens/schedule/ScheduleOriginSearchScreen';
 import { v3Colors } from '../../src/theme/tokens';
 import { fixtureOrigin } from './schedule-fixtures';
 
 const params = new URLSearchParams(globalThis.location?.search);
 const scene = params.get('scene') ?? 'calendar';
-const scenes: Record<string, RouteName> = { detail: 'ScheduleDetail', 'detail-denied': 'ScheduleDetail', 'detail-requestable': 'ScheduleDetail', 'detail-profile': 'ScheduleDetail', 'owner-delete': 'RoomDetail', 'chat-pending': 'ChatRoom', time: 'ScheduleTime', confirmed: 'ScheduleConfirmed', failure: 'ScheduleConfirmed', search: 'ScheduleOriginSearch' };
+const scenes: Record<string, RouteName> = { detail: 'ScheduleDetail', 'detail-denied': 'ScheduleDetail', 'detail-requestable': 'ScheduleDetail', 'detail-profile': 'ScheduleDetail', 'owner-delete': 'RoomDetail', 'chat-pending': 'ChatRoom', time: 'ScheduleTime', confirmed: 'ScheduleConfirmed', failure: 'ScheduleConfirmed' };
 function Flow() {
   const { current, replace, resetTo } = useNavigation();
   const [ready, setReady] = useState(false);
@@ -31,7 +30,7 @@ function Flow() {
     setReady(true);
   }, [replace]);
   if (!ready) return null;
-  const screens = { Home: HomeScreen, RoomDetail: RoomDetailScreen, ChatRoom: ChatRoomScreen, Schedule: ScheduleHomeScreen, ScheduleDetail: ScheduleDetailScreen, ScheduleTime: ScheduleTimeScreen, ScheduleConfirmed: ScheduleConfirmedScreen, ScheduleOriginSearch: ScheduleOriginSearchScreen };
+  const screens = { Home: HomeScreen, RoomDetail: RoomDetailScreen, ChatRoom: ChatRoomScreen, Schedule: ScheduleHomeScreen, ScheduleDetail: ScheduleDetailScreen, ScheduleTime: ScheduleTimeScreen, ScheduleConfirmed: ScheduleConfirmedScreen };
   const Screen = screens[current.name as keyof typeof screens];
   return <View style={{ flex: 1, backgroundColor: v3Colors.bg }}>{Screen ? <Screen /> : <Text>{'오프라인 흐름 종료 · ' + current.name}</Text>}{(current.name === 'Schedule' || current.name === 'Home') ? <BottomNav active={current.name === 'Home' ? 'home' : 'schedule'} onChange={() => resetTo('Schedule')} /> : null}</View>;
 }

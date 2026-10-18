@@ -4,8 +4,7 @@ import * as Linking from 'expo-linking';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Alert, AppState } from 'react-native';
 
-import { clearSettingsDraft } from '../lib/scheduleDraft';
-import { setRestaurantRecommendationUser } from '../lib/restaurantRecommendationCache';
+import { purgeLegacyScheduleDrafts } from '../lib/legacyScheduleCleanup';
 import { setConsentAccess } from '../consents/access';
 import { getConsentServerMode } from '../lib/consents';
 import { supabase } from '../lib/supabase';
@@ -71,6 +70,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [passwordResetPending, setPasswordResetPending] = useState(false);
 
   useEffect(() => {
+    void purgeLegacyScheduleDrafts().catch(() => undefined);
     void readPendingSignupProfile(AsyncStorage).catch(() => undefined);
     const pendingCleanup = AppState.addEventListener('change', state => {
       if (state === 'active') void readPendingSignupProfile(AsyncStorage).catch(() => undefined);
@@ -146,7 +146,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (active) {
         currentUserId = restoredSession?.user?.id ?? null;
         setConsentAccess(currentUserId, 'loading');
-        setRestaurantRecommendationUser(currentUserId);
         setSession(restoredSession);
         setPasswordResetPending(restoredResetPending);
         setIsReady(true);
@@ -164,7 +163,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const previousUserId = currentUserId;
       currentUserId = nextSession?.user?.id ?? null;
       if (previousUserId !== currentUserId) setConsentAccess(currentUserId, 'loading');
-      setRestaurantRecommendationUser(currentUserId);
       setSession(nextSession);
       // 웹은 URL 조각이 아니라 이벤트로 복구 흐름을 알려준다
       if (event === 'PASSWORD_RECOVERY') {
@@ -178,7 +176,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (event === 'SIGNED_OUT') {
         forgetImmediateSignupProfile();
         // Expiration and external sign-outs bypass the public signOut callback.
-        if (previousUserId) void clearSettingsDraft(previousUserId).catch(() => undefined);
         setPasswordResetPending(false);
         void clearPasswordResetPending(AsyncStorage).catch(() => undefined);
         void clearPendingSignupProfile(AsyncStorage).catch(() => undefined);
@@ -291,8 +288,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     forgetImmediateSignupProfile();
     await clearPendingSignupProfile(AsyncStorage).catch(() => undefined);
     await clearPendingSignupConsents(AsyncStorage).catch(() => undefined);
-    setRestaurantRecommendationUser(null);
-    if (session?.user?.id) await clearSettingsDraft(session.user.id).catch(() => {});
 
     try {
       await clearPasswordResetPending(AsyncStorage);
@@ -303,7 +298,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         ? storageError
         : new Error('비밀번호 재설정 상태를 정리하지 못했습니다.');
     }
-  }, [session?.user?.id]);
+  }, []);
 
   /** 새 비밀번호를 정하지 않고 빠져나가면 링크로 얻은 세션을 그대로 두지 않는다 */
   const cancelPasswordReset = useCallback(async () => {

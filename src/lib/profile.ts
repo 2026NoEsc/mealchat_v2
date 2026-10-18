@@ -1,4 +1,5 @@
 import { type BirthInput, toBirthDate } from './birthDate';
+import { fetchFoodCatalog, fetchFoodProfile } from './foodProfile';
 import { supabase } from './supabase';
 import { getConsentAccess, hasConsentAccess } from '../consents/access';
 import { consentError, consentErrorMessage, type VisibilityField, type Visibility, type ProfileVisibility } from '../consents/contracts';
@@ -46,6 +47,8 @@ export type MyPrivateProfile = {
   accountNumber: string | null;
   birthDate: string | null;
   tastes: Record<string, boolean>;
+  foodProfileCompleted?: boolean;
+  foodProfileAvailable?: boolean;
   personalData: Record<string, unknown>;
   privacySettings: Record<string, string>;
   startLocationName: string | null;
@@ -102,7 +105,16 @@ export async function fetchMyProfile(userId: string): Promise<{
       .select(`bank_name, account_number, birth_date, personal_data, privacy_settings, start_location_name, start_latitude, start_longitude${legacy ? ', tastes' : ''}`)
       .eq('id', userId)
       .maybeSingle<PrivateRow>(),
-    legacy ? Promise.resolve({ data: null, error: null }) : requestS1('get_my_food_preferences', {}, parseFood),
+    legacy ? Promise.resolve({ data: null, error: null, available: false, completed: false }) : (async () => {
+      const catalog = await fetchFoodCatalog();
+      if (catalog.data) {
+        const food = await fetchFoodProfile();
+        return { data: { preferences: {} }, error: food.error, available: true, completed: Boolean(food.data?.completed_at) && food.data?.requires_update === false };
+      }
+      if ((catalog.error as { code?: string } | null)?.code !== 'S5_UNAVAILABLE') return { data: null, error: catalog.error, available: false, completed: false };
+      // Missing/stale v2 schema cache must not invoke the v1 reader against v2 rows.
+      return { data: { preferences: {} }, error: null, available: false, completed: false };
+    })(),
   ]);
 
   const error = await checkProfileError(profileResult.error ?? privateResult.error ?? foodResult.error);
@@ -130,6 +142,8 @@ export async function fetchMyProfile(userId: string): Promise<{
         bankName: privateRow?.bank_name ?? null,
         accountNumber: privateRow?.account_number ?? null,
         birthDate: privateRow?.birth_date ?? null,
+        foodProfileCompleted: foodResult.completed,
+        foodProfileAvailable: foodResult.available,
         tastes: legacy ? safeTastes(privateRow?.tastes ?? {}) : foodResult.data!.preferences,
         personalData: Object.fromEntries(Object.entries(privateRow?.personal_data ?? {}).filter(([key]) => key === 'gender' || key === 'bio')),
         privacySettings: normalizePrivacySettings(privateRow?.privacy_settings),

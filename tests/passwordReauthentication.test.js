@@ -7,13 +7,10 @@ jest.mock('../src/lib/supabase', () => ({ supabase: { auth: {} }, createPassword
 jest.mock('../src/lib/supabaseConfig', () => ({ getSupabaseConfig: () => ({ url: 'https://example.supabase.co', publishableKey: 'sb_publishable_fixture' }) }));
 jest.mock('@supabase/supabase-js', () => ({ createClient: jest.fn(() => ({ auth: {} })), processLock: jest.fn() }));
 jest.mock('../src/lib/profile', () => ({ saveMyPrivateProfile: jest.fn(async () => null) }));
-jest.mock('../src/lib/scheduleDraft', () => ({ clearSettingsDraft: jest.fn(async () => undefined) }));
 
 const { supabase, createPasswordVerificationAuth } = require('../src/lib/supabase');
 const { verifyCurrentPassword } = require('../src/lib/passwordReauthentication');
 const { AuthProvider, useAuth } = require('../src/auth/AuthProvider');
-const { clearSettingsDraft } = require('../src/lib/scheduleDraft');
-const cache = require('../src/lib/restaurantRecommendationCache');
 let verifier, user, renderer, authContext;
 beforeEach(() => {
   require('expo-secure-store').reset();
@@ -33,7 +30,6 @@ beforeEach(() => {
 afterEach(async () => {
   if (renderer) await act(async () => renderer.unmount());
   renderer = undefined;
-  cache.setRestaurantRecommendationUser(null);
 });
 
 it('verifies the active session email and matching returned user without adopting its session', async () => {
@@ -110,7 +106,7 @@ it('does not send a password when the initial session identity differs', async (
   await expect(verifyCurrentPassword('other', 'fixture-current')).resolves.toMatchObject({ code: 'reauth_identity_mismatch' });
   expect(createPasswordVerificationAuth).not.toHaveBeenCalled();
 });
-it('preserves the real AuthProvider identity, cache entry and draft through verification', async () => {
+it('preserves the real AuthProvider identity and accepted gate through verification', async () => {
   let authChanged;
   supabase.auth.onAuthStateChange.mockImplementation(callback => { authChanged = callback; return { data: { subscription: { unsubscribe: jest.fn() } } }; });
   supabase.auth.updateUser.mockImplementation(async () => {
@@ -119,14 +115,10 @@ it('preserves the real AuthProvider identity, cache entry and draft through veri
   });
   function Probe() { authContext = useAuth(); return null; }
   await act(async () => { renderer = create(React.createElement(AuthProvider, null, React.createElement(Probe))); });
-  const sessionVersion = cache.getRestaurantRecommendationSession();
-  const entry = cache.createRestaurantRecommendation('self', 'fixture-room', 1, { status: 'ready', key: 'fixture-room', roomId: 'fixture-room', items: [], receivedMore: false });
   await act(async () => { expect(await verifyCurrentPassword('self', 'fixture-current')).toBeNull(); });
   await act(async () => { expect(await authContext.updatePassword('fixture-new')).toBeNull(); });
   expect(authContext.user.id).toBe('self');
-  expect(cache.getRestaurantRecommendation('self', 'fixture-room')).toBe(entry);
-  expect(cache.getRestaurantRecommendationSession()).toBe(sessionVersion);
-  expect(clearSettingsDraft).not.toHaveBeenCalled();
+  expect(require('../src/consents/access').getConsentAccess().userId).toBe('self');
   expect(supabase.auth.signInWithPassword).not.toHaveBeenCalled();
   expect(supabase.auth.signOut).not.toHaveBeenCalled();
 });

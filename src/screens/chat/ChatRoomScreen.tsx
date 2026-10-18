@@ -25,20 +25,8 @@ import RoomTimer from '../../components/ui/RoomTimer';
 import MeetingCard from '../../components/ui/MeetingCard';
 import MessageActionsSheet, { type CopyableMessage } from '../../components/ui/MessageActionsSheet';
 import Toast, { useToast } from '../../components/ui/Toast';
-import { buildPlaceCandidates } from '../../lib/placeCandidates';
-import {
-  createRestaurantRecommendation,
-  getRestaurantRecommendation,
-  getRestaurantRecommendationSession,
-  isRestaurantRecommendationCurrent,
-  removeRestaurantRecommendation,
-  subscribeRestaurantRecommendation,
-  updateRestaurantRecommendation,
-  type RestaurantRecommendationState,
-} from '../../lib/restaurantRecommendationCache';
-import { supabase } from '../../lib/supabase';
-import { useMyProfile } from '../../profile/useMyProfile';
-import type { ScheduleRecommendResponse } from '../schedule/scheduleTypes';
+import PublicMeetingAreaControls from './PublicMeetingAreaControls';
+import { useRestaurantRecommendations } from './useRestaurantRecommendations';
 import { parseEmoticonToken } from '../../lib/emoticon';
 import { notify } from '../../lib/confirm';
 import { roomNoticeOf, type RoomNotice } from '../../lib/roomNotice';
@@ -183,7 +171,6 @@ export function toDisplayMessages(
 }
 
 type SheetKey = 'schedule' | 'menu' | 'settlement' | 'members' | null;
-type SuggestionState = RestaurantRecommendationState;
 
 /**
  * Figma 채팅/채팅방 (315:4324) — 220 x 486
@@ -200,7 +187,6 @@ export default function ChatRoomScreen() {
   const { overlap: keyboard, remeasure } = useKeyboardOverlap(screenRef);
   const { goBack, navigate, current } = useNavigation();
   const { user } = useAuth();
-  const { bundle } = useMyProfile();
   const params = current.params as
     | { roomId?: string; title?: string; color?: string; openSheet?: SheetKey }
     | undefined;
@@ -226,76 +212,10 @@ export default function ChatRoomScreen() {
   // 홈의 "미완료 정산 보기" 처럼 특정 시트를 펼친 채로 들어오는 경로가 있다
   const stage = room?.stage ?? 'scheduling';
 
-  const recommendationKey = JSON.stringify([user?.id ?? null, roomId]);
-  const restaurantLocked = stage === 'place' && Boolean(room?.confirmedMenu?.trim());
-  const [suggestionRequest, setSuggestionRequest] = useState({ key: '', sequence: 0, session: -1 });
-  const [suggestionState, setSuggestionState] = useState<SuggestionState>({ key: recommendationKey, roomId, status: 'idle', items: [], receivedMore: false });
-  const userId = user?.id ?? null;
-  const origin = bundle?.privateProfile;
-  const originReady = typeof origin?.startLat === 'number' && Number.isFinite(origin.startLat) && typeof origin?.startLng === 'number' && Number.isFinite(origin.startLng);
-  const recommendationInput = useRef({ lat: origin?.startLat, lng: origin?.startLng, name: origin?.startLocationName, members: room?.participants, title });
-  recommendationInput.current = { lat: origin?.startLat, lng: origin?.startLng, name: origin?.startLocationName, members: room?.participants, title };
-  const requestSequence = suggestionRequest.session === getRestaurantRecommendationSession() && suggestionRequest.key === recommendationKey ? suggestionRequest.sequence : 0;
-  useEffect(() => {
-    if (!userId || !roomId) return;
-    if (restaurantLocked) { removeRestaurantRecommendation(userId, recommendationKey); return; }
-    if (stage !== 'place') return;
-    const previous = getRestaurantRecommendation(userId, recommendationKey);
-    const observe = (entry: NonNullable<typeof previous>) => subscribeRestaurantRecommendation(entry, state => {
-      // Only the screen that initiated an explicit request presents its fresh-result feedback.
-      const explicit = requestSequence > 0 && entry.sequence === requestSequence;
-      setSuggestionState(explicit ? state : { ...state, items: state.items.map(item => ({ ...item, fresh: false })), receivedMore: false });
-    });
-    // Subscribe to a pending request too: screen exits and profile refreshes do not cancel it.
-    if (previous && previous.sequence >= requestSequence) return observe(previous);
-    if (!originReady) {
-      setSuggestionState({ key: recommendationKey, roomId, status: 'unavailable', items: [], reason: '프로필 출발지를 설정하면 AI 추천을 받을 수 있어요. 식당을 직접 추가할 수도 있어요.', receivedMore: false });
-      return;
-    }
-    const input = recommendationInput.current;
-    const explicit = requestSequence > 0;
-    const base = { key: recommendationKey, roomId, items: (previous?.state.items ?? []).map(item => ({ ...item, fresh: false })), receivedMore: false };
-    const entry = createRestaurantRecommendation(userId, recommendationKey, requestSequence, { ...base, status: 'loading' });
-    const unsubscribe = observe(entry);
-    const update = (state: SuggestionState) => updateRestaurantRecommendation(userId, recommendationKey, entry, state);
-    const empty = () => update({ ...base, status: 'empty', reason: '아는 식당을 직접 추가해 주세요.' });
-    void (async () => {
-      try {
-        const memberIds = (input.members ?? []).map(member => member.profileId).filter((id): id is string => Boolean(id));
-        const candidates = await buildPlaceCandidates(memberIds, { name: input.name?.trim() || '사는 곳', address: '', lat: input.lat!, lng: input.lng!, fromGps: false });
-        // Saved restaurants and account changes invalidate the request, unlike screen departure.
-        if (!isRestaurantRecommendationCurrent(userId, recommendationKey, entry) || entry.state.status !== 'loading') return;
-        if (!candidates || candidates.candidates.length === 0) { empty(); return; }
-        const { data, error } = await supabase.functions.invoke('schedule-recommend', { body: { meetingName: input.title, roomId, placeCandidates: candidates.candidates } });
-        if (error) throw error;
-        const response = data as ScheduleRecommendResponse;
-        if (!Array.isArray(response?.placeRecommendations)) throw Error('Invalid recommendations');
-        if (response.placeRecommendations.length === 0) { empty(); return; }
-        const allowed = new Set(candidates.candidates.map(place => place.name.trim()));
-        const picks = response.placeRecommendations.filter(pick => typeof pick?.place?.name === 'string' && allowed.has(pick.place.name.trim())).sort((a, b) => a.rank - b.rank);
-        if (picks.length === 0) throw Error('Invalid restaurant recommendations');
-        const existing = new Set(base.items.map(item => item.label)); const items = [...base.items];
-        for (const pick of picks) {
-          const label = pick.place.name.trim();
-          if (!existing.has(label)) { existing.add(label); items.push({ label, fresh: explicit }); }
-        }
-        const receivedMore = explicit && items.some(item => item.fresh);
-        update({ ...base, status: 'ready', items, receivedMore, reason: explicit && !receivedMore ? '새로운 식당을 찾지 못했어요. 기존 후보에 투표하거나 직접 추가해 주세요.' : undefined });
-      } catch {
-        update({ ...base, status: 'error', reason: '추천을 불러오지 못했어요. 다시 시도해 주세요.' });
-      }
-    })();
-    return unsubscribe;
-  }, [stage, roomId, restaurantLocked, recommendationKey, originReady, requestSequence, userId]);
-  const currentSuggestions = suggestionState.key === recommendationKey ? suggestionState : { status: 'idle' as const, items: [], receivedMore: false, reason: undefined };
-  const requestSuggestions = () => {
-    if (!userId || restaurantLocked || currentSuggestions.status === 'loading') return;
-    setSuggestionRequest({ key: recommendationKey, sequence: (getRestaurantRecommendation(userId, recommendationKey)?.sequence ?? 0) + 1, session: getRestaurantRecommendationSession() });
-  };
-
   const isOwner = Boolean(user?.id && room?.ownerId && user.id === room.ownerId);
 
   const [sheet, setSheet] = useState<SheetKey>(params?.openSheet ?? null);
+  const recommendation = useRestaurantRecommendations({ roomId, userId: user?.id ?? null, enabled: sheet === 'menu' && stage === 'place' && !room?.confirmedMenu, members: (room?.participants ?? []).map(p => p.profileId).sort().join(',') });
   const [emoticonOpen, setEmoticonOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   const panelOpen = actionsOpen || emoticonOpen;
@@ -523,12 +443,14 @@ export default function ChatRoomScreen() {
         title="식당 정하기"
         subtitle="가고 싶은 식당에 투표해 주세요"
         placeholder="예: 조선칼국수 하단점"
-        suggestionTitle="AI 추천 식당"
-        suggestions={currentSuggestions.items}
-        suggestionStatus={currentSuggestions.status}
-        suggestionReason={currentSuggestions.reason}
-        receivedMore={currentSuggestions.receivedMore}
-        onRequestSuggestions={requestSuggestions}
+        suggestionTitle={recommendation.suggestions.length > 0 && recommendation.suggestions.every(item => item.source === 'gemini') ? 'AI 추천 식당' : '추천 식당'}
+        suggestions={recommendation.suggestions}
+        suggestionStatus={recommendation.status}
+        suggestionReason={recommendation.reason}
+        receivedMore={false}
+        onRequestSuggestions={() => void recommendation.request()}
+        validateSuggestion={recommendation.validateSuggestion}
+        recommendationControls={<PublicMeetingAreaControls recommendation={recommendation} isOwner={isOwner} />}
         onClose={() => setSheet(null)}
         onConfirm={() => {
           reload();
