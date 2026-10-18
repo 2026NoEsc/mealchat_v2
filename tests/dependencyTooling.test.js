@@ -29,7 +29,15 @@ describe('dependency audit gate', () => {
   };
   const allowlist = { schemaVersion: 2, advisories: [entry] };
   const finding = { via: [{ url: `https://github.com/advisories/${entry.id}` }] };
-  const report = { vulnerabilities: { 'sprintf-js': finding }, metadata: { vulnerabilities: { total: 1 } } };
+  const reportFor = (vulnerabilities) => ({
+    auditReportVersion: 2,
+    vulnerabilities,
+    metadata: {
+      vulnerabilities: { info: 0, low: Object.keys(vulnerabilities).length, moderate: 0, high: 0, critical: 0, total: Object.keys(vulnerabilities).length },
+      dependencies: { total: 100 },
+    },
+  });
+  const report = reportFor({ 'sprintf-js': finding });
   const checkCases = (cases) => runNode(`
     (async () => {
       const { checkAuditReport } = await import('./scripts/check-dependency-audit.mjs');
@@ -44,14 +52,14 @@ describe('dependency audit gate', () => {
     expect(checkCases([
       { allowlist, report },
       { allowlist: { ...allowlist, advisories: [{ ...entry, expiresOn: '2026-11-14' }] }, report },
-      { allowlist, report: { ...report, vulnerabilities: { ...report.vulnerabilities, argparse: { via: ['sprintf-js'] } } } },
+      { allowlist, report: reportFor({ ...report.vulnerabilities, argparse: { via: ['sprintf-js'] } }) },
     ])).toEqual(['PASS', 'PASS', 'PASS']);
   });
 
   it('rejects a substituted package and a second package sharing an allowed GHSA', () => {
     const results = checkCases([
-      { allowlist, report: { vulnerabilities: { argparse: finding } } },
-      { allowlist, report: { vulnerabilities: { 'sprintf-js': finding, argparse: finding } } },
+      { allowlist, report: reportFor({ argparse: finding }) },
+      { allowlist, report: reportFor({ 'sprintf-js': finding, argparse: finding }) },
     ]);
     for (const result of results) expect(result).toMatch(/Audit package mismatch/);
   });
@@ -78,12 +86,91 @@ describe('dependency audit gate', () => {
       [{ ...allowlist, advisories: [entry, entry] }, report, /Duplicate advisory/],
       [{ ...allowlist, advisories: [{ ...entry, reviewedOn: '2026-10-01', expiresOn: '2026-10-15' }] }, report, /Expired audit exception/],
       [{ ...allowlist, advisories: [] }, report, /New advisory/],
-      [allowlist, { vulnerabilities: {} }, /Resolved advisory/],
-      [allowlist, { vulnerabilities: { 'sprintf-js': { via: [{ title: 'Missing ID' }] } } }, /Unidentified audit finding/],
+      [allowlist, reportFor({}), /Resolved advisory/],
+      [allowlist, reportFor({ 'sprintf-js': { via: [{ title: 'Missing ID' }] } }), /Unidentified audit finding/],
       [allowlist, { error: { summary: 'Registry failure' } }, /npm audit failed/],
     ];
     const results = checkCases(cases.map(([allowlist, report]) => ({ allowlist, report })));
     results.forEach((result, index) => expect(result).toMatch(cases[index][2]));
+  });
+
+  it('rejects absent, malformed, and inconsistent reports before resolving exceptions, even with an empty allowlist', () => {
+    const invalid = [
+      null, [], {}, { vulnerabilities: {} }, { ...report, auditReportVersion: 1 },
+      { ...report, metadata: undefined }, { ...report, metadata: {} },
+      { ...report, metadata: { ...report.metadata, dependencies: {} } },
+      { ...report, metadata: { ...report.metadata, dependencies: { total: 0 } } },
+      { ...report, metadata: { ...report.metadata, vulnerabilities: { total: 1 } } },
+      { ...report, vulnerabilities: [] }, { ...report, vulnerabilities: {} },
+      { ...report, metadata: { ...report.metadata, vulnerabilities: { ...report.metadata.vulnerabilities, total: '1' } } },
+      { ...report, metadata: { ...report.metadata, vulnerabilities: { ...report.metadata.vulnerabilities, low: 0 } } },
+      reportFor({ 'sprintf-js': null }), reportFor({ 'sprintf-js': {} }),
+      reportFor({ 'sprintf-js': { via: [] } }), reportFor({ 'sprintf-js': { via: [null] } }),
+      reportFor({ 'sprintf-js': { via: ['missing-package'] } }),
+      { error: { code: 'ENOTFOUND', summary: 'Registry failure' } }, { ...report, error: null },
+    ];
+    const results = checkCases([allowlist, { ...allowlist, advisories: [] }]
+      .flatMap((list) => invalid.map((invalidReport) => ({ allowlist: list, report: invalidReport }))));
+    for (const result of results) {
+      expect(result).toMatch(/Dependency audit not performed/);
+      expect(result).not.toMatch(/Resolved advisory/);
+    }
+  });
+
+  it('accepts a genuine clean online report when no exceptions remain', () => {
+    expect(checkCases([{ allowlist: { ...allowlist, advisories: [] }, report: reportFor({}) }])).toEqual(['PASS']);
+  });
+
+  const auditExecutions = (cases) => runNode(`
+    (async () => {
+      const { getAuditReport } = await import('./scripts/check-dependency-audit.mjs');
+      console.log(JSON.stringify(${JSON.stringify(cases)}.map(({ config, audit }) => {
+        const calls = [];
+        try {
+          getAuditReport((command, args) => {
+            calls.push(args);
+            const response = calls.length === 1 ? config : audit;
+            if (response?.throws) throw new Error('Private subprocess error');
+            return response;
+          });
+          return { result: 'PASS', calls };
+        } catch (error) { return { result: error.message, calls }; }
+      })));
+    })().catch(error => { console.error(error.message); process.exitCode = 1; });
+  `);
+  const completed = (value, status = 0) => ({ status, stdout: JSON.stringify(value) });
+
+  it('fails before auditing when effective npm offline configuration is enabled or cannot be checked', () => {
+    const configs = [completed(true), completed(null), { status: 0, stdout: '' },
+      { status: 1, stdout: 'false' }, { status: null, signal: 'SIGTERM' }, { error: { code: 'ENOENT' } }, { throws: true }];
+    const results = auditExecutions(configs.map((config) => ({ config, audit: completed(reportFor({})) })));
+    for (const { result, calls } of results) {
+      expect(result).toMatch(/Dependency audit not performed/);
+      expect(result).not.toContain('Private subprocess error');
+      expect(calls).toHaveLength(1);
+      expect(calls.flat().join(' ')).toContain('config get offline --json');
+    }
+    expect(results[0].result).toMatch(/configured offline/);
+  });
+
+  it('rejects empty JSON, registry errors, interrupted processes, and abnormal exits as unaudited', () => {
+    const audits = [{ status: 0, stdout: '' }, { status: 0, stdout: '<html>unavailable</html>' },
+      completed(null), completed({}), completed({ error: { code: 'ENOTFOUND' } }, 1),
+      completed(report, 2), { ...completed(report), signal: 'SIGTERM' }, { error: { code: 'ENOENT' } },
+      completed(reportFor({}), 1), { throws: true }];
+    for (const { result } of auditExecutions(audits.map((audit) => ({ config: completed(false), audit })))) {
+      expect(result).toMatch(/Dependency audit not performed/);
+      expect(result).not.toMatch(/Resolved advisory/);
+    }
+  });
+
+  it('accepts online findings with exit 1 and clean reports with exit 0 while forcing audit execution', () => {
+    const results = auditExecutions([completed(report, 1), completed(reportFor({}))]
+      .map((audit) => ({ config: completed(false), audit })));
+    for (const { result, calls } of results) {
+      expect(result).toBe('PASS'); expect(calls).toHaveLength(2);
+      expect(calls.flat().join(' ')).toContain('audit --json --audit=true --prefer-online');
+    }
   });
 });
 

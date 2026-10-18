@@ -17,6 +17,12 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        timezone: [UTC, Asia/Seoul, America/Los_Angeles]
+    env:
+      TZ: ${{ matrix.timezone }}
 
     steps:
       - name: Check out repository

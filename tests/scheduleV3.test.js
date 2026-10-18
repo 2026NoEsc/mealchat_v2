@@ -7,7 +7,8 @@ jest.mock('expo-linking', () => ({ getInitialURL: jest.fn().mockResolvedValue(nu
 jest.mock('@react-native-async-storage/async-storage', () => ({ getItem: jest.fn(), setItem: jest.fn(), removeItem: jest.fn() }));
 jest.mock('../src/theme/insets', () => ({ useTopInset: () => 0 }));
 jest.mock('../src/theme/keyboard', () => ({ useKeyboardOverlap: () => ({ overlap: 0, remeasure: jest.fn() }) }));
-jest.mock('../src/auth/AuthProvider', () => ({ useAuth: () => ({ user: { id: 'me', created_at: '2026-08-01T00:00:00+09:00' } }) }));
+// Calendar fixtures describe device-local dates; a KST midnight is July in UTC/LA.
+jest.mock('../src/auth/AuthProvider', () => ({ useAuth: () => ({ user: { id: 'me', created_at: new Date(2026, 7, 1).toISOString() } }) }));
 jest.mock('../src/profile/useMyProfile', () => ({ useMyProfile: jest.fn() }));
 jest.mock('../src/components/NotificationsProvider', () => ({ useNotifications: () => ({ hasUnread: false, open: jest.fn() }) }));
 jest.mock('../src/navigation/NavigationContext', () => ({ useNavigation: jest.fn() }));
@@ -139,7 +140,7 @@ it('does not render event deletion for a new event or the memo tab', async () =>
   await press(root, '약속 메모'); expect(target(root, '일정 삭제')).toBeUndefined(); expect(target(root, '메모 지우기')).toBeDefined();
 });
 it('limits month navigation at the signup month while allowing later months across years', async () => {
-  jest.useFakeTimers().setSystemTime(new Date('2026-09-25T12:00:00+09:00'));
+  jest.useFakeTimers().setSystemTime(new Date(2026, 8, 25, 12));
   const root = await render(ScheduleHomeScreen);
   await press(root, '이전 달'); expect(text(root)).toContain('2026 년 8 월');
   expect(target(root, '이전 달').props.disabled).toBe(true);
@@ -148,8 +149,15 @@ it('limits month navigation at the signup month while allowing later months acro
   expect(canMoveCalendarMonth({ year: 2027, month: 1 }, -1, { year: 2026, month: 8 })).toBe(true);
   expect(earliestCalendarMonth(undefined, new Date(2026, 8, 25))).toEqual({ year: 2026, month: 9 });
 });
+it.each([
+  [new Date(2026, 7, 1), { year: 2026, month: 8 }],
+  [new Date(2027, 0, 1), { year: 2027, month: 1 }],
+  [new Date(2026, 11, 31, 23, 59), { year: 2026, month: 12 }],
+])('keeps the local signup month at the calendar boundary %s', (createdAt, expected) => {
+  expect(earliestCalendarMonth(createdAt.toISOString())).toEqual(expected);
+});
 it('shows at most 3 event dots from real notes and exposes 48px date targets', async () => {
-  jest.useFakeTimers().setSystemTime(new Date('2026-09-25T12:00:00+09:00'));
+  jest.useFakeTimers().setSystemTime(new Date(2026, 8, 25, 12));
   useMonthNotes.mockReturnValue({ notes: Array.from({ length: 4 }, (_, index) => ({ id: 'note' + index, date: '2026-09-25', title: '일정', time: '10:00', endTime: '11:00', color: '#1D4ED8' })), status: 'ready', reload: jest.fn() });
   const root = await render(ScheduleHomeScreen); const day = target(root, '9월 25일, 일정 4개');
   expect(StyleSheet.flatten(day.props.style).height).toBe(48);
@@ -157,7 +165,7 @@ it('shows at most 3 event dots from real notes and exposes 48px date targets', a
   expect(dots).toHaveLength(3);
 });
 it('keeps other mates available cells selectable and disables past cells in v3', async () => {
-  jest.useFakeTimers().setSystemTime(new Date('2026-09-25T10:00:00+09:00'));
+  jest.useFakeTimers().setSystemTime(new Date(2026, 8, 25, 10));
   const toggle = jest.fn(); const root = await render(AvailabilityGrid, { variant: 'v3', days: [{ date: '2026-09-25', month: 9, day: 25, label: '금' }], picked: new Set(), others: new Set(['2026-09-25-12']), onToggle: toggle });
   const cell = targets(root).find((node) => node.props.accessibilityLabel?.includes('12시 ~ 13시'));
   expect(cell.props.disabled).toBe(false); await act(async () => cell.props.onPress()); expect(toggle).toHaveBeenCalledWith('2026-09-25', 12);
@@ -196,7 +204,7 @@ it('uses the new palette only for missing colors and preserves stored legacy col
   expect(result.eventsByDay[25].map(e => e.color)).toEqual([scheduleEventColors[0].value, '#5B9BD5']);
 });
 it('exposes both mine and mate availability with a visible non-color marker and today text', async () => {
-  jest.useFakeTimers().setSystemTime(new Date('2026-09-25T10:00:00+09:00'));
+  jest.useFakeTimers().setSystemTime(new Date(2026, 8, 25, 10));
   const root = await render(AvailabilityGrid, { variant: 'v3', days: [{ date: '2026-09-25', month: 9, day: 25, label: '금' }], picked: new Set(['2026-09-25-12']), others: new Set(['2026-09-25-12']), onToggle: jest.fn() });
   const cell = targets(root).find(n => n.props.accessibilityLabel?.includes('12시 ~ 13시'));
   expect(cell.props.accessibilityLabel).toContain('내가 가능, 메이트 가능, 오늘'); expect(cell.props.accessibilityState.checked).toBe(true);
@@ -210,7 +218,7 @@ it('keeps all five days inside a 298px viewport on a 360px device with 44px targ
   expect(Math.max(...widths)).toBeLessThan(56); expect(Math.min(...widths)).toBeGreaterThanOrEqual(44); expect(widths.reduce((a,b) => a+b, 36 + 5*4)).toBeCloseTo(298);
 });
 it('passes exact calendar event, edit, delete and memo arguments to existing APIs', async () => {
-  jest.useFakeTimers().setSystemTime(new Date('2026-09-25T12:00:00+09:00'));
+  jest.useFakeTimers().setSystemTime(new Date(2026, 8, 25, 12));
   useMonthNotes.mockReturnValue({ notes: [{ id: 'event', date: '2026-09-25', title: '알바', time: '10:00', endTime: '15:00', color: '#1D4ED8' }, { id: 'memo', date: '2026-09-25', title: '', time: null, content: 'old' }], status: 'ready', reload: jest.fn() });
   const root = await render(ScheduleHomeScreen); const sheet = root.findByType(PersonalEventSheet);
   await act(async () => sheet.props.onSave({ ...event, id: 'new' })); expect(createEvent).toHaveBeenCalledWith({ profileId: 'me', date: '2026-09-25', title: '알바', time: '10:00', endTime: '15:00', color: '#1D4ED8' });
@@ -219,12 +227,12 @@ it('passes exact calendar event, edit, delete and memo arguments to existing API
   await act(async () => sheet.props.onSaveMemo('new memo')); expect(saveMemo).toHaveBeenCalledWith({ profileId: 'me', date: '2026-09-25', existingId: 'memo', content: 'new memo' });
 });
 it('saves one-hour cell keys in the existing availability format before navigation', async () => {
-  jest.useFakeTimers().setSystemTime(new Date('2026-09-25T10:00:00+09:00'));
+  jest.useFakeTimers().setSystemTime(new Date(2026, 8, 25, 10));
   fetchRoomAvailability.mockResolvedValue({ data: { members: [], mySlots: ['2026-09-25-12'], othersSlots: [] }, error: null });
   const root = await render(ScheduleTimeScreen); await press(root, '선택 완료'); expect(saveMyAvailability).toHaveBeenCalledWith('room', ['2026-09-25-12']); expect(navigation.navigate).toHaveBeenCalledWith('ScheduleConfirmed', expect.objectContaining({ roomId: 'room' })); expect(navigation.navigate.mock.calls.at(-1)[1]).not.toHaveProperty('origin');
 });
 it('creates a room and sends only selected invitations before moving to time selection', async () => {
-  jest.useFakeTimers().setSystemTime(new Date('2026-09-25T10:00:00+09:00')); navigation.current.params.invitees = ['mate', 'mate2'];
+  jest.useFakeTimers().setSystemTime(new Date(2026, 8, 25, 10)); navigation.current.params.invitees = ['mate', 'mate2'];
   const root = await render(ScheduleDetailScreen); await press(root, '다음');
   expect(createRoom).toHaveBeenCalledWith({ ownerId: 'me', title: '오늘 저녁팟', meetingDate: '2026-10-02', expiresAt: new Date('2026-10-02T23:59:59').toISOString() });
   expect(createRoomInvitation.mock.calls).toEqual([['new-room', 'mate'], ['new-room', 'mate2']]); expect(navigation.navigate).toHaveBeenCalledWith('ScheduleTime', expect.objectContaining({ roomId: 'new-room', invitees: ['mate','mate2'] }));
