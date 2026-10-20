@@ -14,7 +14,9 @@ import {
   saveMyAvailability,
   type AvailabilityStatus,
 } from '../../lib/availability';
-import { advanceRoomStage, fetchRoom, type RoomSummary } from '../../lib/rooms';
+import { advanceRoomStage, fetchRoom, type RoomSummary, type RoomParticipant } from '../../lib/rooms';
+import { useRoomDecision } from '../../lib/useRoomDecision';
+import S4ScheduleSheet from './S4ScheduleSheet';
 import { buildNextDays, cellKey, isPastCell, toSlots } from '../../lib/scheduleSlots';
 import { v3Layout } from '../../theme/scale';
 import { v3Colors as colors, v3FeedbackColors } from '../../theme/tokens';
@@ -23,11 +25,13 @@ import { fontFamily } from '../../theme/typography';
 type Props = {
   visible: boolean;
   roomId: string | null;
+  roomName?: string;
   /** 단계를 넘기는 건 방장만 할 수 있다 — advance_room_stage 가 서버에서 막는다 */
   isOwner: boolean;
   onClose: () => void;
   /** 상태 RPC가 끝난 뒤 부모의 스냅샷을 갱신한다. 임의 시스템 메시지는 만들지 않는다. */
   onStateChanged: () => void;
+  participants?: RoomParticipant[];
 };
 
 const ROOM_FAILURE = '방 정보를 불러오지 못해 지금은 일정을 낼 수 없어요. 다시 불러와 주세요.';
@@ -54,12 +58,23 @@ function endMutation(roomId: string, mutation: PendingMutation) {
 
 /** Phone 527:1613. Existing availability persistence and owner-only stage transition. */
 export default function ScheduleSheet({
+  ...props
+}: Props) {
+  const decision = useRoomDecision(props.roomId, props.visible);
+  const identity = useRef({ roomId: props.roomId, accountId: decision.accountId });
+  if (identity.current.roomId !== props.roomId || identity.current.accountId !== decision.accountId) identity.current = { roomId: props.roomId, accountId: decision.accountId };
+  const binding = identity.current;
+  return decision.mode === 'legacy' ? <LegacyScheduleSheet key={decision.accountId} {...props} checkingServer={decision.loading} onStateChanged={() => { if (binding === identity.current) props.onStateChanged(); }} />
+    : <S4ScheduleSheet key={`${props.roomId}:${decision.accountId}`} {...props} decision={decision} onStateChanged={() => { if (binding === identity.current) props.onStateChanged(); }} />;
+}
+function LegacyScheduleSheet({
   visible,
   roomId,
   isOwner,
   onClose,
   onStateChanged,
-}: Props) {
+  checkingServer,
+}: Props & { checkingServer?: boolean }) {
   const { user } = useAuth();
   const myId = user?.id ?? null;
 
@@ -184,7 +199,7 @@ export default function ScheduleSheet({
       if (!latest) { setRoomError(true); return; }
       setRoom(latest); setRoomError(false);
       if (latest.stage !== 'scheduling') { callbacks.current.onStateChanged(); return; }
-      // TODO(서버 단계): 단계 확인과 가용 시간 저장 사이의 경합은 원자적인 서버 계약으로 막아야 한다.
+      // Pre-S4 only: this separate preflight has no atomicity guarantee. The S4 branch uses a revisioned RPC.
       const result = await saveMyAvailability(roomId, [...picked]);
       if (result) {
         if (active.current && cycle === lifecycle.current) setError('일정을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.');
@@ -255,12 +270,13 @@ export default function ScheduleSheet({
       subtitle="확정된 시간과 메이트들의 일정 제출 현황이에요."
       onClose={onClose}>
       <ScrollView showsVerticalScrollIndicator={false} style={styles.body} contentContainerStyle={styles.content}>
+        {checkingServer ? <Text style={styles.hint} accessibilityLiveRegion="polite">서버 기능을 다시 확인하고 있어요. 입력 내용은 유지돼요.</Text> : null}
         {!canUse ? <Text style={styles.error} accessibilityRole="alert">밥약과 로그인 정보를 확인해 주세요.</Text> : loading ? <View style={styles.loading}>
           <ActivityIndicator color={colors.primary} accessible={false} /><Text style={styles.hint} accessibilityLiveRegion="polite">일정을 불러오는 중이에요.</Text>
         </View> : <>
           {confirmedSlot ? <View testID="schedule-confirmed" style={styles.confirmed}>
             <Clock3 size={22} color={colors.safeText} aria-hidden={true} />
-            <View style={styles.grow}><Text style={styles.confirmedLabel}>확정</Text><Text style={styles.confirmedTime}>{meetingTimeLabel(confirmedSlot, room?.stage ?? 'scheduling')}</Text></View>
+            <View style={styles.grow}><Text style={styles.confirmedLabel}>기존 표기</Text><Text style={styles.confirmedTime}>{meetingTimeLabel(confirmedSlot, room?.stage ?? 'scheduling')}</Text></View>
           </View> : !roomError ? <Text style={styles.hint} accessibilityLiveRegion="polite">{roomLoading ? '방 정보를 불러오는 중이에요.' : scheduling ? '모두 가능한 시간을 제출하면 방장이 식당 정하기로 넘어갈 수 있어요.' : '시간 미정'}</Text> : null}
           {/* [결정] 방 단계 조회 실패 시 안전하게 제출을 막고, 제출 불가 사유와 재시도 방법을 명시한다. */}
           {roomError ? <Text style={styles.hint} accessibilityLiveRegion="polite">{ROOM_FAILURE}</Text> : null}

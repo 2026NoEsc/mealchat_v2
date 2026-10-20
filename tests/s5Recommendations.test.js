@@ -56,6 +56,14 @@ it('discards context-changed results on validation failure', async () => {
   await mount(); api.validateRecommendation.mockResolvedValueOnce({ data: null, error: Object.assign(Error('context'), { code: 'S5003' }) });
   await act(async () => { await expect(value.validateSuggestion('검증된 식당')).rejects.toMatchObject({ code: 'S5003' }); }); expect(value.suggestions).toEqual([]);
 });
+it('rejects the real Edge S5003 response for a recommendation made stale by an S4 decision', async () => {
+  const invoke = jest.fn(async () => ({ data: null, error: { context: { clone: () => ({ json: async () => ({ code: 'S5003', message: 'private-server-text' }) }) } } }));
+  const liveRequest = jest.requireActual('../src/lib/placeCandidates').requestRestaurantRecommendation;
+  await expect(liveRequest('room', invoke)).rejects.toMatchObject({ code: 'S5003', message: expect.stringContaining('다시 추천받아 주세요') });
+  expect(require('../src/consents/access').getConsentAccess().state).toBe('accepted');
+  api.requestRestaurantRecommendation.mockImplementationOnce((room, _invoke, id, signal) => liveRequest(room, invoke, id, signal));
+  await mount(); expect(value.status).toBe('error'); expect(value.suggestions).toEqual([]); expect(value.reason).not.toContain('private-server-text');
+});
 it('discards late results on room departure and makes a new request after reentry', async () => {
   let resolve; api.requestRestaurantRecommendation.mockReturnValueOnce(new Promise(done => { resolve = done; })); await mount(); props.enabled = false; await update();
   await act(async () => resolve(response('늦은 식당'))); expect(value.suggestions).toEqual([]); props.enabled = true; await update(); expect(api.requestRestaurantRecommendation).toHaveBeenCalledTimes(2); expect(value.suggestions[0].label).toBe('검증된 식당');

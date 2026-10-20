@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { fetchRoomDecisionState, fetchS4Capabilities, roomDecisionErrorMessage, submitRoomAvailability } from './roomDecisions';
 
 /**
  * 방의 일정 조율 현황.
@@ -13,11 +14,16 @@ export type AvailabilityStatus = {
     name: string;
     avatarColor: string;
     submitted: boolean;
+    eligible?: boolean;
   }[];
   /** 내가 앞서 낸 답 — 격자에 되살려서 이어 고칠 수 있게 한다 */
   mySlots: string[];
   /** 다른 사람이 고른 칸. 누가 골랐는지는 오지 않는다 */
   othersSlots: string[];
+  revision?: string;
+  allSubmitted?: boolean;
+  eligibleCount?: number;
+  submittedCount?: number;
 };
 
 type StatusRow = {
@@ -35,6 +41,14 @@ export async function fetchRoomAvailability(roomId: string): Promise<{
   data: AvailabilityStatus | null;
   error: Error | null;
 }> {
+  const support = await fetchS4Capabilities();
+  if (support.mode === 'error') return { data: null, error: support.error };
+  if (support.mode === 's4') {
+    const result = await fetchRoomDecisionState(roomId);
+    if (!result.data) return { data: null, error: result.error };
+    const a = result.data.availability;
+    return { data: { members: a.members.map(m => ({ id: m.participant_id, name: m.name, avatarColor: m.avatar_color, submitted: m.submitted, eligible: m.eligible })), mySlots: a.my_slots, othersSlots: a.others_slots, revision: result.data.revision, allSubmitted: a.all_submitted, eligibleCount: a.eligible_count, submittedCount: a.submitted_count }, error: null };
+  }
   const [status, cells] = await Promise.all([
     supabase.rpc('room_availability_status', { target_room: roomId }),
     supabase.rpc('room_availability_cells', { target_room: roomId }),
@@ -70,7 +84,14 @@ export async function fetchRoomAvailability(roomId: string): Promise<{
 export async function saveMyAvailability(
   roomId: string,
   slotKeys: string[],
+  expectedRevision?: string,
 ): Promise<Error | null> {
+  const support = await fetchS4Capabilities();
+  if (support.mode === 'error') return support.error;
+  if (support.mode === 's4') {
+    if (expectedRevision === undefined) return Object.assign(new Error(roomDecisionErrorMessage({ code: 'S4005' })), { code: 'S4005' });
+    return (await submitRoomAvailability(roomId, slotKeys, expectedRevision)).error;
+  }
   const { error } = await supabase.rpc('set_my_availability', {
     target_room: roomId,
     slot_keys: slotKeys,

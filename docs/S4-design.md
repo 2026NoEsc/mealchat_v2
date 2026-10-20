@@ -1,6 +1,6 @@
 # S4 구현 명세: 일정 저장과 방장의 약속 확정
 
-작성: 2026-10-19. 조사 기준: 로컬 `Develop`, `HEAD 729dffa`. **설계 초안이며 구현·보안 승인·운영 반영 증거가 아니다.** 아래의 권장 제품 정책은 §12의 사용자 결정 뒤 확정한다. 이번 작업은 이 문서만 생성한다. 기존 `docs/S1-release.md` 변경은 보존했다. 원격 Supabase, `.env`, 인증 파일, 실제 사용자 데이터에는 접근하지 않았다.
+작성: 2026-10-19. 조사 기준: 로컬 `Develop`, 구현 기준 `HEAD ca88baf`. **§12의 일곱 제품 결정은 사용자 권장안 승인으로 확정됐다. 구현·보안 승인·운영 반영 증거는 별도 검증한다.** DB/Edge와 앱 작업자가 소유 범위별로 구현한다. 원격 Supabase, `.env`, 인증 파일, 실제 사용자 데이터에는 접근하지 않았다.
 
 진행 순서: S1 → S5 일부(음식 프로필·공용 지역 추천) → **S4** → S3(방 생명주기) → S2(계정 삭제) → S5 나머지·S6·S7. S1 `17ad858`, S5 일부 `729dffa`의 완료·운영 미반영 상태는 작업 요청의 전제다. 로컬 코드와 과거 WORKFLOW 문구만으로 운영 상태를 확정하지 않는다.
 
@@ -13,7 +13,7 @@
 5. S1 필수 약관 gate, 공개 범위, 정산 계좌의 요청·고정 수취인·공개 종료 계약은 유지한다. S4 응답·이벤트에는 계좌·건강·개인 출발지를 넣지 않는다.
 6. S5의 공용 지역, 방장 공용 음식 종류, STEP 1 내부 집계, ticket 재검증을 유지한다. `menu`라는 기존 투표 kind와 `confirmed_menu`는 현재 **식당**을 뜻한다. 음식 메뉴 단계 신설이나 이름 변경은 S5 나머지에서 한다. `meeting_midpoint` 재개방, 건강 필터, 시간 추천 v2 신설은 하지 않는다.
 
-S3의 메이트 나가기·초대 코드 TTL/실패 제한·방 삭제 정책, S2 계정 삭제, S6 정산 모델, S7 알림/신고를 구현하지 않는다. 기존 join/accept/leave 및 정산 경로에 필요한 잠금·revision 연계는 S4 경쟁 방어에 한해서만 변경한다. 현재 정산을 시작할 수 있는 단계 자체를 제한하는 정책은 별도 결정 없이는 바꾸지 않는다.
+S3의 메이트 나가기·초대 코드 TTL/실패 제한·방 삭제 정책, S2 계정 삭제, S6 정산 모델, S7 알림/신고를 구현하지 않는다. 기존 join/accept/leave 및 정산 경로에 필요한 잠금·revision 연계는 S4 경쟁 방어에 한해서만 변경한다. 사용자 추가 결정: 새 정산은 약속 확정 뒤에만 시작한다. confirmed 또는 appointment_confirmed_at이 있는 settling/done에서는 새 bill을 허용한다. 확정 증거 없는 레거시 settling/done은 기존 미완료 정산 재시도만 유지하고 새 bill은 거절한다. NULL-profile 표시행은 새 정산 수취인·정족수에서 제외한다.
 
 ## 2. 현재 상태 진단과 근거
 
@@ -30,19 +30,19 @@ S3의 메이트 나가기·초대 코드 TTL/실패 제한·방 삭제 정책, S
 | 같은 S1 migration `:706-862` | `confirm_room_vote`는 멤버십만 검사하고 방장 여부·정확한 stage를 검사하지 않는다. 정족수는 실제 사용자만, strict majority와 배열 순서 tie-break를 사용한다. time 확정은 `is_confirmed=true`, menu 확정은 별도 저장이다. |
 | 같은 S1 migration `:867-918` | `advance_room_stage`는 owner만 확인하고 잠금·멤버십·만료·제출 완료 검사 없이 임의의 더 높은 단계로 이동한다. `done` 호출로 만료까지 변경할 수 있다. |
 | `src/screens/chat/ScheduleSheet.tsx:174-223`, 같은 S1 migration `:921-1000` | 앱은 저장 직전 stage를 재조회하지만 서버 제출 함수는 stage를 검사하지 않는다. 상태 RPC는 NULL profile 행도 반환하고 UI는 모든 행에 `every(submitted)`를 적용한다. |
-| 같은 S1 migration `:939-946,993-996` | 제출은 최대500칸 길이 외 검증이 약하고, 빈 배열은 미제출로 취급한다. S4는 빈 배열을 철회로 유지하는 안을 권장한다. |
+| 같은 S1 migration `:939-946,993-996` | 제출은 최대500칸 길이 외 검증이 약하고, 빈 배열은 미제출로 취급한다. S4는 빈 배열을 철회로 유지한다(확정). |
 | 같은 S1 migration `:440-445,479-484`, `src/screens/chat/VotingSheet.tsx:40-41` | 빈/긴 이름과 종류별30개 초과가 모두 `22023`. UI가 이를 전부 상한 초과로 해석한다. |
 | `src/lib/voting.ts:77-92` | 정족수는 NULL profile 행을 제외하지만 후보별 voters는 제외하지 않는다. 서버 판정과 앱 표시를 함께 맞춰야 한다. |
 | `supabase/migrations/20260823072701_harden_settlement_invitation_events.sql:924-955` | rooms UPDATE는 차단했지만 INSERT에는 `is_confirmed/confirmed_slot`이 허용되고 일치 여부만 확인한다. 새 방에 확정값 주입을 막아야 한다. |
 | `supabase/migrations/20261017095000_s1_terms_access_gate.sql:1-19`, `20261017091000_s1_consent_rpcs.sql:28-33` | RLS restrictive gate와 SD RPC의 `private.require_current_terms_consent()`가 별도 방어다. 신규/교체 RPC 모두 유지한다. |
 | `supabase/migrations/20261017093000_s1_profile_visibility.sql:35-37` | 현재 participant SELECT 열에 `schedule`이 포함된다. 상태 RPC가 타인 슬롯을 숨긴다는 사실만으로 DB 전체의 일정 비공개를 주장할 수 없다. S4는 접근 범위를 추가하지 않으며 이 기존 노출의 재설계는 별도 검토 사항이다. |
-| `supabase/migrations/20260908120000_settlement_stage_transitions.sql:18-62`, `20261017094000_s1_settlement_disclosure.sql:130-184` | 정산 트리거는 scheduling/place에서도 settling으로 이동할 수 있다. 정산 생성은 방 advisory→room→bill 순서다. S4에서 이 경로를 generic stage RPC와 혼동하면 안 된다. |
+| `supabase/migrations/20260908120000_settlement_stage_transitions.sql:18-62`, `20261017094000_s1_settlement_disclosure.sql:130-184` | 이전 정산 트리거는 scheduling/place에서도 settling으로 이동했다. 사용자 추가 결정에 따라 새 migration에서 confirmed 또는 방장 확정 증거가 있는 done의 새 bill INSERT만 settling으로 전환하고 두 생성 RPC의 공용 core에 S4008/SETTLEMENT_REQUIRES_CONFIRMATION guard를 둔다. 방 advisory→room→bill 순서는 유지한다. |
 | `supabase/functions/schedule-recommend/index.ts:871-907,981-1028` | 유지 중인 시간 추천은 schedule을 읽고 인원을 `rows.length`로 센다. 연속 칸 전체에 가능한 사람은 교집합으로 계산하므로 0명 구간도 생길 수 있다. 레거시 인원 제외 및 저장 시 독립 검증이 필요하다. |
 | `src/lib/scheduleSlots.ts:26-75,130-179` | 격자는 기기 로컬 날짜를 사용하며 `parseSlotLabel`은 연도 없는 라벨을 가까운 미래로 추정한다. 영속값 이전이나 새 시간 저장에 이 추정을 사용하지 않는다. |
 
 워크플로·디자인 참조: `docs/WORKFLOW.md:25,67,166`의 상태는 날짜가 붙은 과거 기록이다. `docs/figma-specs.md:62-71`은 화면/시트 매핑 근거이며, 이번의 “약속 확정은 식당 정하기에서 방장만”은 사용자 작업 지시를 우선한다. Figma 원격 노드는 이번에 조회하지 않았다.
 
-## 3. 상태·제품 정책의 권장안
+## 3. 확정된 상태·제품 정책
 
 ### 3.1 상태 전이
 
@@ -51,13 +51,14 @@ S3의 메이트 나가기·초대 코드 TTL/실패 제한·방 삭제 정책, S
 | `scheduling` | 본인 일정 제출/수정/빈 배열 철회 | 본인 schedule만 변경. stage 유지 |
 | `scheduling` | 방장이 시간 선택 후 식당 단계로 이동 | 실제 사용자 전원 제출 재검사 → 시간 저장과 `place` 전환 원자 처리 |
 | `scheduling` | 추천 없이 식당 단계로 이동 | 전원 제출 검사는 동일. 시간은 null 유지하고 `place`로 전환; UI에서 시간 미정 명시 |
+| `place`, 구조화 시간 미선택 | 본인 일정 제출/수정/철회 | 본인 schedule만 변경. 시간 선택 뒤 제출 불가 |
 | `place` | 방장이 시간 선택/수정 | 시간만 저장. `place` 유지. 이미 제출된 일정 자료에서 직접 선택 가능 |
 | `place` | 멤버 후보 추가/삭제/투표 | 기존 권한 조건과 후보 제한 유지. 자동 확정 없음 |
 | `place` | 방장 최종 확정 | 유효 시간 + 서버가 계산한 과반 최다 득표 식당 → 식당/단계/메시지 원자 저장 |
 | `confirmed`, `settling`, `done` | 일정·후보·투표 변경 또는 새 확정 | 거절. 동일 성공 요청 재시도는 부수 효과 없는 조회로 처리 |
-| 기존 정산 경로 | 정산 생성/수취인 완료 | 기존 정산 RPC·트리거가 settling/done 관리. S4 일반 단계 변경 API는 이를 대신하지 않음 |
+| 기존 정산 경로 | 정산 생성/수취인 완료 | 새 bill은 confirmed 또는 방장 확정 증거가 있는 settling/done에서 생성. 기존 진행 중 bill 재시도·수취인 완료는 기존 규칙. 일반 단계 API는 정산을 대신하지 않음 |
 
-권장 정책: 전원 제출은 **일정 제공을 마쳤다는 뜻**이며 전원 참석 보장이 아니다. 최종 선택 구간 전체에 최소1명의 실제 참가자가 가능해야 한다. 전원 공통 시간만 강제하지 않는다. 시간 없이 `place` 진입은 허용하지만 **새 최종 확정에는 구조화된 시간이 필요**하다. 선택 시간 변경은 최종 확정 전까지 방장에게만 허용한다. 이 세 정책은 §12에서 결정한다.
+확정 정책: 전원 제출은 **일정 제공을 마쳤다는 뜻**이며 전원 참석 보장이 아니다. 최종 선택 구간 전체에 최소1명의 실제 참가자가 가능해야 한다. 전원 공통 시간만 강제하지 않는다. 시간 없이 `place` 진입은 허용하지만 **새 최종 확정에는 구조화된 시간이 필요**하다. 선택 시간 변경은 최종 확정 전까지 방장에게만 허용한다. 이 정책들은 §12의 사용자 승인으로 확정됐다.
 
 정족수 집합은 현재 방의 `participants.profile_id IS NOT NULL`인 행이다. 초대 대기자는 포함하지 않고, 필수 약관 미동의 멤버는 임의로 정족수에서 제외하지 않는다. 빈 집합은 전원 제출/과반 달성이 아니다. 익명 표시 행은 삭제하지 않고 “일정 제출 대상 아님”으로 표시할 수 있다. 식당 확정은 이 집합의 `floor(N/2)+1`표 이상인 최다 득표 후보만 허용한다. 복수 후보 투표와 동률 시 `voting_items` 배열 순서 우선은 현재 동작을 유지한다. 전원 투표를 별도 확정 조건으로 요구하지 않는다.
 
@@ -66,7 +67,7 @@ S3의 메이트 나가기·초대 코드 TTL/실패 제한·방 삭제 정책, S
 - 저장: `meeting_starts_at timestamptz`, `meeting_ends_at timestamptz`, `meeting_time_zone text`. S4 허용 zone은 `Asia/Seoul` 하나. `timestamptz`만으로 원래 IANA zone은 보존되지 않으므로 별도 열을 둔다.
 - RPC 입력은 정확히 `{starts_at,ends_at,time_zone}` 또는 허용된 경우 JSON null. 두 시각은 날짜·초·`Z` 또는 `±HH:MM` offset을 포함한 ISO 8601 문자열. offset 없는 시각, 연도 없는 라벨, infinity, 날짜 자동 보정, unknown key는 거절한다. 같은 순간의 다른 offset 표기는 UTC로 정규화한다.
 - 추천 `date/startTime/endTime`는 한국 현지 시각으로 해석해 명시적 `+09:00`를 붙여 전송한다. 추천 라벨/순위/참석률은 저장 인자가 아니다. 예: `2026-10-20T18:00:00+09:00`~`19:00:00+09:00` → `09:00:00Z`~`10:00:00Z`.
-- 권장 범위는 기존 격자대로 KST 같은 날짜 11:00~21:00, 정각, 최소1시간, 시작<종료. 시작은 잠금 획득 뒤 `clock_timestamp()`보다 미래, 종료는 기존 `expires_at` 이하여야 한다. 과거 시각·만료 이후 약속을 자동 보정하거나 방 수명을 연장하지 않는다.
+- 확정 범위는 기존 격자대로 KST 같은 날짜 11:00~21:00, 정각, 최소1시간, 시작<종료. 시작은 잠금 획득 뒤 `clock_timestamp()`보다 미래, 종료는 기존 `expires_at` 이하여야 한다. 과거 시각·만료 이후 약속을 자동 보정하거나 방 수명을 연장하지 않는다.
 - 가용 시간 키 `YYYY-MM-DD-H`(11..20)는 하위 호환을 위해 유지하되 뜻을 KST로 고정한다. 실제 달력 검증, 1차원 배열, null 원소/중복 거절, 최대500칸, 허용 시간·만료 범위 검증. 저장 배열은 정렬한다. 새 요청은 과거 칸을 제거해 제출하며 서버도 과거 칸을 거절한다.
 - 제출 판정은 현재 시점에 유효한 미래 칸이 1개 이상 있는지로 통일한다. 기존 잘못된/지난 칸은 DB에서 조용히 날짜를 추정하거나 삭제하지 않고 조회 시 집계에서 제외한다. `submitted_at`만 있고 빈 배열이면 미제출이다.
 - 모든 JSON 시각은 UTC ISO 문자열로 반환한다. `meeting_date`는 구조화된 시간을 저장할 때 KST 시작 날짜로 동기화하되, null 시간인 기존 방의 값은 유지하고 확정 날짜로 사용하지 않는다. `expires_at`·`settled_at`은 S4 시간 저장/확정으로 변경하지 않는다.
@@ -83,7 +84,7 @@ S3의 메이트 나가기·초대 코드 TTL/실패 제한·방 삭제 정책, S
 | `public.rooms` | `s4_revision bigint NOT NULL DEFAULT 0 CHECK (s4_revision>=0)`; JSON에서는 10진 문자열. `appointment_confirmed_at timestamptz`, `appointment_confirmed_by uuid REFERENCES profiles(id) ON DELETE SET NULL` nullable. 새 원자 확정만 설정. 계정 삭제로 by가 null이 될 수 있으므로 영구 쌍 CHECK를 만들지 않는다. |
 | `private.s4_requests` | `(actor_id,request_id)` PK, `room_id` FK, `operation`, 정규화 입력의 `payload_hash`, `applied_revision`, `created_at`. actor/room 삭제 CASCADE. RLS 활성, 앱/worker table grant 없음. 원본 일정·식당 이름·전체 응답은 중복 보관하지 않는다. |
 
-`s4_revision`은 시간·stage·후보·투표·제출 일정·현재 멤버 구성/owner가 바뀔 때 증가한다. 이름/아바타/채팅/읽음/추천 안내·건강 변경은 증가시키지 않는다. 새 S4 writer뿐 아니라 남겨 둔 legacy writer, join/accept/leave, 정산의 stage writer에도 동일 방 잠금 아래 revision 증가를 연결한다. 정산의 revision만 바꾸고 계좌/수취인 로직은 복제하지 않는다. 구현 전 실제 writer 목록을 SQL catalog와 migration으로 대조하고 누락을 테스트한다. 트리거로 보완할 경우 **participant row를 잠근 뒤 뒤늦게 room advisory lock을 얻는 역순**을 만들지 않는다. 같은 논리 변경의 정확한 증가량은 계약하지 않고 단조 증가만 보장한다.
+`s4_revision`은 시간·stage·후보·투표·제출 일정·현재 멤버 구성/owner가 바뀔 때 증가한다. 이름/아바타/채팅/읽음/추천 안내·건강 변경은 증가시키지 않는다. 새 S4 writer뿐 아니라 남겨 둔 legacy writer, join/accept/leave, 정산의 stage writer에도 동일 방 잠금 아래 revision 증가를 연결한다. 계좌 공개·고정 수취인 계약은 유지하며, 정산 시작 단계와 NULL-profile 수취인 제외는 승인된 추가 결정으로 보강한다. 구현 전 실제 writer 목록을 SQL catalog와 migration으로 대조하고 누락을 테스트한다. 트리거로 보완할 경우 **participant row를 잠근 뒤 뒤늦게 room advisory lock을 얻는 역순**을 만들지 않는다. 같은 논리 변경의 정확한 증가량은 계약하지 않고 단조 증가만 보장한다.
 
 새 시간 저장 시 기존 `confirmed_slot`에는 UTC 시작시각 문자열만 서버가 써서 구앱이 읽을 수 있게 한다. 새 앱은 구조화 구간을 우선한다. `confirmed_time_item_id`는 새 시간 저장에서 null; 레거시 텍스트 time 투표와 섞지 않는다. 시간만 선택한 상태에서는 `is_confirmed=false`; 최종 식당 확정에서만 true로 바꾼다. 과거 전체 행에 stage/is_confirmed CHECK를 일괄 적용하지 않는다.
 
@@ -96,15 +97,21 @@ S3의 메이트 나가기·초대 코드 TTL/실패 제한·방 삭제 정책, S
 5. 새 요청은 `p_expected_revision`과 room revision 비교 → stage와 행위별 조건을 다시 계산 → 저장/이벤트/revision/ledger를 같은 트랜잭션에서 완료한다. 중간 실패는 모두 rollback한다.
 6. 성공 재시도도 현재 약관·멤버십·방 유효성 검사를 생략하지 않는다. replay는 현재 상태와 원 적용 revision을 반환한다. 정산으로 이미 전진한 방을 confirmed로 되돌리지 않는다. 삭제·탈퇴 뒤에는 과거 성공 응답도 노출하지 않는다.
 
-ledger는 방 수명 동안 유지하며 S4에 별도 cron을 추가하지 않는다. timeout은 성공 여부 불명이다. 앱은 payload·request_id를 그대로 유지해 재시도하거나 상태를 재조회하며 새 request_id로 자동 덮어쓰지 않는다. 충돌 후 사용자가 최신 상태를 확인해 다시 결정할 때만 새 ID를 만든다.
+ledger는 방 수명 동안 유지하며 S4에 별도 cron을 추가하지 않는다. 실제 일정 변경(submit) 이력만 actor당 전체 1,000행·방당 `1,000 × greatest(5, 현재 실제 참가자 수)`로 제한한다. 참가자 최대 수를 새로 도입하지 않고 현재 인원에 비례해 방 상한을 확보한다. 방장 시간 선택(select)·확정(confirm)은 두 상한에서 제외한다. 신규 변경 요청의 상한 오류는 S4011이며 상태/이벤트/ledger는 무변경이다. 성공 ID replay는 상한 검사보다 먼저 처리한다. 정규화한 일정·방장 선택 시간이 현재 저장 내용과 같거나 동일 후보가 이미 최종 확정됐으면 각 core의 권한·stage·시간 검사 및 revision 검증 뒤 applied/현재 revision을 반환하고 새 ledger 행을 만들지 않는다. 이 무변경 요청 ID는 저장되지 않으므로 S1007/replayed 보장은 ledger에 기록된 변경 요청에 적용된다. 무변경 요청 뒤 revision이 바뀌면 같은 입력의 재시도도 S4005로 재조회가 필요하다. 임의 기간 삭제로 오래된 ID를 재실행하지 않으며 방/계정 삭제 CASCADE가 공간을 회수한다. timeout은 성공 여부 불명이다. 앱은 payload·request_id를 그대로 유지해 재시도하거나 상태를 재조회하며 새 request_id로 자동 덮어쓰지 않는다. 충돌 후 사용자가 최신 상태를 확인해 다시 결정할 때만 새 ID를 만든다.
 
-단일 상태 조회도 같은 방의 읽기 일관성을 확보한다. 짧은 방 advisory/row 잠금 안에서 제출수·후보·revision을 함께 반환하고 외부 HTTP 호출을 하지 않는다. S5 provider 대기 중 DB 잠금을 유지하지 않는 계약을 그대로 지킨다.
+상태 및 availability 조회는 STABLE 호출 그래프의 한 statement snapshot으로 제출수·후보·revision을 반환한다. 읽기는 advisory/row 쓰기 잠금을 얻지 않고 동의·멤버십·만료를 검사하며 다른 멤버의 프로필·동의 쓰기를 막지 않는다. 외부 HTTP 호출은 없다. S5 provider 대기 중 DB 잠금을 유지하지 않는 계약을 그대로 지킨다.
 
 ## 5. 공개 RPC 계약
 
-새 이름은 아래로 고정하고 overload하지 않는다. `RETURNS jsonb`, 성공은 단일 object, UTC 시각, bigint는 10진 문자열이다. 인자의 누락/null 허용 범위를 구별한다. UUID 형식·음수 revision·8KiB 초과 JSON·unknown key는 `22023/INVALID_INPUT`. 사용자에게 DB 원문 오류를 표시하지 않는다.
+새 이름은 아래로 고정하고 overload하지 않는다. `RETURNS jsonb`, 성공은 단일 object, UTC 시각, bigint는 10진 문자열이다. 인자의 누락/null 허용 범위를 구별한다. UUID 인자 캐스팅 단계 오류는 PostgreSQL/PostgREST의 `22P02`이며 앱에서는 INVALID_INPUT으로 처리한다. 함수 내부 타입·형식·음수 revision·8KiB 초과 JSON·unknown key는 `22023/INVALID_INPUT`. 사용자에게 DB 원문 오류를 표시하지 않는다.
 
 ### 5.1 지원 여부·조회
+
+| RPC | 입력 | 반환 / 권한 |
+|---|---|---|
+| `get_s4_capabilities` | 없음 | 아래 capability. authenticated + S1 gate |
+| `get_room_s4_state` | `p_room_id uuid` | 아래 RoomDecisionState. 현재 방 멤버 |
+| `preview_room_meeting_time_v1` | `p_room_id uuid, p_starts_at text, p_ends_at text, p_time_zone text` | `{eligible_count:number,available_count:number,all_available:boolean,revision:string}`. 현재 방 멤버, 읽기 전용 STABLE |
 
 `get_s4_capabilities()` → `{contract_version:1,atomic_confirmation:true,structured_meeting_time:true,owner_confirmation:true,availability_stage_guard:true,time_zones:["Asia/Seoul"],requires_time_for_confirmation:true}`.
 
@@ -123,7 +130,7 @@ type RoomDecisionState = {
   time_status: 'selected' | 'unset' | 'legacy_unverified';
   legacy_time_label: string | null;
   restaurant: { item_id: string | null; label: string } | null;
-  confirmation_status: 'none' | 'legacy_partial' | 'legacy_confirmed' | 'owner_confirmed';
+  confirmation_status: 'none' | 'legacy_partial' | 'legacy_confirmed' | 'legacy_settlement_unverified' | 'owner_confirmed';
   availability: {
     eligible_count: number; submitted_count: number; all_submitted: boolean;
     members: { participant_id: string; name: string; avatar_color: string;
@@ -138,16 +145,26 @@ type RoomDecisionState = {
 
 권한은 유효한 현재 participant만. `others_slots`는 기존 cells와 같은 타인 가능 칸의 합집합이며 이름/ID별 슬롯을 추가하지 않는다. 익명 집계나 “바쁜 시간”으로 표현하지 않는다. NULL profile 행은 members에 eligible=false로만 표시하고 나머지 집계·others_slots에서 제외한다. permissions는 화면 힌트이며 mutation에서 모두 재검사한다. 미지/타방/만료는 `42501/NOT_ALLOWED`로 통일한다. 목록은 capability 확인 후 rooms 신규 열을 명시 SELECT하여 N+1 호출을 피하고, mutation 진입 시 상태 RPC로 최신 revision을 얻는다.
 
-`time_status`는 구조화 구간 존재 시 selected, 구조화 구간 없이 기존 confirmed_slot이 있으면 legacy_unverified, 둘 다 없으면 unset이다. `confirmation_status`는 appointment_confirmed_at 존재 시 owner_confirmed, 그 증거 없이 confirmed/settling/done이면 legacy_confirmed(방장 확정 증거 없음), place에 confirmed_menu가 있으면 legacy_partial, 나머지는 none이다. restaurant는 confirmed_menu를 우선 반환하고, 과거 자동확정 방의 location_name만 있으면 UI의 기존 장소 표기로만 유지한다. location_name만으로 restaurant 확정 객체를 만들지 않는다.
+`time_status`는 구조화 구간 존재 시 selected, 구조화 구간 없이 기존 confirmed_slot이 있으면 legacy_unverified, 둘 다 없으면 unset이다. `confirmation_status`는 appointment_confirmed_at 존재 시 owner_confirmed, 그 증거 없이 confirmed이면 legacy_confirmed(방장 확정 증거 없음), settling/done이면 legacy_settlement_unverified(이전 정산·약속 확정 여부 확인 불가), place에 confirmed_menu가 있으면 legacy_partial, 나머지는 none이다. restaurant는 confirmed_menu를 우선 반환하고, 과거 자동확정 방의 location_name만 있으면 UI의 기존 장소 표기로만 유지한다. location_name만으로 restaurant 확정 객체를 만들지 않는다.
+
+#### 직접 선택 구간의 참석률 미리보기
+
+`preview_room_meeting_time_v1(p_room_id uuid,p_starts_at text,p_ends_at text,p_time_zone text)`는 선택 RPC와 같은 명시적 offset의 ISO 문자열과 `Asia/Seoul`을 받는다. null/누락은 허용하지 않는다. 문자열 형식·zone 오류는 22023, KST 같은 날 11~21시 정각·1시간 이상·미래·방 만료 범위를 벗어나면 S4006이다. 시간 선택과 같은 공통 시간 검증·슬롯 정규화 함수를 사용한다.
+
+분모 eligible_count는 현재 실제 멤버(profile_id IS NOT NULL) 수이며 초대 대기자·NULL 표시행은 제외한다. 분자 available_count는 **구간의 모든 1시간 칸에 연속 참석 가능한 같은 멤버** 수다. 빈/지난/잘못된 일정은 가능자로 세지 않는다. `all_available = eligible_count > 0 && available_count === eligible_count`. 가능자 0명도 정상 조회 결과이며 실제 선택은 S4006으로 거절한다. 응답은 위 네 필드뿐이고 개인 이름·식별자·슬롯은 포함하지 않는다.
+
+S1 필수 약관·현재 멤버십·만료를 검사하며 방장 외 멤버도 조회할 수 있다. 비멤버/미지/만료 방은 42501. stage나 전원 제출 조건은 조회를 막지 않는다. STABLE statement snapshot으로 인원과 revision을 함께 읽으며 advisory/room/profile 쓰기 잠금을 얻지 않고 이력·방·일정·이벤트도 변경하지 않는다.
+
+앱은 직접 구간을 바꿀 때 이 RPC 결과의 가능자/전체 인원과 참석률을 표시한 뒤 방장의 선택을 받는다. `available_count=0`이면 선택을 허용하지 않는다. 요청 구간이 바뀐 뒤 도착한 옛 미리보기는 버리고, 저장에는 **표시한 미리보기의 revision과 같은 구간**을 보낸다. S4005이면 재조회·재확인이 필요하며 최신 revision만 붙여 이전 집계를 자동 저장하지 않는다. 미리보기는 저장 권한/성공 보장이 아니고 실제 선택 RPC가 잠금 뒤 전원 제출·시간·가능 인원을 다시 검사한다. 기존 others_slots 합집합으로 연속 참석 인원은 복원할 수 없고 모든 가능한 구간을 상태 응답에 미리 싣는 비용도 피하기 위해 별도 RPC를 둔다.
 
 ### 5.2 일정 제출
 
 `submit_room_availability_v1(p_room_id uuid,p_slot_keys text[],p_expected_revision bigint,p_request_id uuid)` → `{contract_version:1,outcome:"applied"|"replayed",applied_revision:string,state:RoomDecisionState}`.
 
-- 본인 participant만 수정, `scheduling`에서만 허용. 빈 배열은 제출 철회이며 submitted=false. 인자 null은 빈 배열로 암묵 변환하지 않고 거절한다.
+- 본인 participant만 수정. scheduling 또는 구조화 시간이 아직 없고 명시 확정 증거가 없는 place에서 허용한다. 빈 배열은 제출 철회이며 submitted=false. 인자 null은 빈 배열로 암묵 변환하지 않고 거절한다.
 - 입력은 §3.2 검증 후 현재 `participants.schedule={slots:[...],submitted_at:UTC}`에 저장한다. 기존 Edge의 읽기 형식을 보존한다.
 - 같은 요청 replay는 timestamp/revision을 갱신하지 않는다. 새 요청이 현재 슬롯과 같으면 실제 데이터 변화 없이 완료할 수 있다.
-- 제출과 단계 전환의 선후 관계는 방 잠금으로 결정한다. 먼저 저장된 변경으로 revision이 달라졌으면 뒤 요청은 우선 `S4005`. 최신 revision으로 다시 시도해도 전환 뒤 제출은 `S4003`, 철회 뒤 전환은 `S4004`다. 성공 직후 화면을 닫아도 부모 상태는 갱신한다.
+- 제출과 단계 전환의 선후 관계는 방 잠금으로 결정한다. 먼저 저장된 변경으로 revision이 달라졌으면 뒤 요청은 우선 `S4005`. 최신 revision으로 다시 시도해도 시간 선택/최종 확정 뒤 제출은 S4003, scheduling에서 철회 뒤 전환은 S4004다. 시간 없이 place로 이동했다면 시간 선택 전까지 제출/수정을 허용한다. 성공 직후 화면을 닫아도 부모 상태는 갱신한다.
 
 ### 5.3 시간 선택 및 식당 단계 진입
 
@@ -180,20 +197,30 @@ type RoomDecisionState = {
 | `42501/AUTH_REQUIRED`, `42501/NOT_ALLOWED` | 로그인 또는 접근 불가. 타방 존재·방장/메이트 세부 원인 노출 없음 |
 | `S1001/TERMS_REQUIRED`, `S1006/CONSENT_CONFIGURATION_UNAVAILABLE` | S1 gate로 복귀/재시도. legacy fallback 금지 |
 | `S1007/IDEMPOTENCY_CONFLICT` | 같은 request ID의 다른 요청. 자동 재시도 중단 |
-| `22023/INVALID_INPUT` | 타입·형식·지원하지 않는 kind/zone 등 일반 입력 오류 |
+| `22023/INVALID_INPUT`, `22P02`(UUID 인자 바인딩) | 타입·형식·지원하지 않는 kind/zone 등 일반 입력 오류 |
 | `S4001/CANDIDATE_LIMIT_REACHED` | 종류별30개 상한. 기존 후보 삭제 안내 |
-| `S4002/CANDIDATE_LABEL_INVALID` | trim 후 빈 값 또는 PostgreSQL char_length>120. 이름 수정 안내 |
+| `S4002/CANDIDATE_LABEL_INVALID` | POSIX [:space:] 양끝 정리 후 빈 값/char_length>120 또는 원문 제어문자 포함. 이름 수정 안내 |
 | `23505/CANDIDATE_ALREADY_EXISTS` | 현재의 대소문자 무시 중복 정책 유지 |
 | `S4003/ROOM_STAGE_CONFLICT` | 지금은 제출/선택/투표 불가. 상태 새로고침 |
+| `S4003/ROOM_MEMBERSHIP_CLOSED` | `hint=operation=membership`. settling/done에서 코드 참가·초대 생성·수락 불가. 초대/참가 UI를 닫고 상태 새로고침 |
+| `P0002`(정산 생성) | 방 만료 또는 방장 확정+30일 절대 상한 경과. 기존 만료 처리 사용 |
 | `S4004/AVAILABILITY_INCOMPLETE` | eligible 0명 또는 전원 미제출. 상태의 제출 인원 표시 |
 | `S4005/ROOM_REVISION_CONFLICT` | 일정/멤버/투표 등이 변함. 재조회 후 사용자 재결정 |
-| `S4006/MEETING_TIME_INVALID` | 과거·만료 이후·범위 불일치·전체 참석 가능자 없음. 시간 재선택 |
+| `S4006/MEETING_TIME_INVALID` | 과거·만료 이후·범위 불일치. 선택/확정에서는 전체 구간 가능자 없음도 포함. preview는 가능자 0명을 정상 반환 |
 | `S4007/MEETING_TIME_REQUIRED` | 최종 확정 전에 시간 선택 필요 |
-| `S4008/VOTE_REQUIREMENT_NOT_MET` | 후보 없음/다른 방/식당 아님/과반 미달/최다 아님을 권한 확인 후 동일 안내 |
+| `S4008/VOTE_REQUIREMENT_NOT_MET` | `hint=operation=vote_confirmation`. 약속 확정 RPC: 후보 없음/다른 방/식당 아님/과반 미달/최다 아님 |
+| `S4008/SETTLEMENT_REQUIRES_CONFIRMATION` | `hint=operation=settlement`. 정산 생성 RPC: 약속 확정 전 새 정산 불가. 방장·일반 멤버 모두 적용 |
 | `S4009/APPOINTMENT_ALREADY_CONFIRMED` | 다른 내용으로 재확정 불가 |
 | `S4010/LEGACY_RESELECTION_REQUIRED` | 구조화 불가한 time 후보·식별 불가한 식당 등. 최신 앱에서 재선택 |
+| `S4011/REQUEST_LIMIT_REACHED` | 일정 변경 이력 actor1,000/방1,000×max(5,실제 인원) 상한. 방장 시간 선택·확정 및 동일 일정 재제출은 제외. 신규 변경 자동 재시도 중단. 성공 ID replay·조회 가능 |
 
-`add_voting_item`의 시그니처/uuid 반환은 유지하되 S4001/S4002를 적용한다. 이름 검사를 상한 검사보다 먼저 하여 둘 다 위반하면 S4002. JS 길이는 서버 Unicode 문자 수와 다를 수 있으므로 클라이언트 검증을 최종 근거로 삼지 않는다. 모든 DB 오류의 details/hint는 입력 원문 없이 반환한다.
+`add_voting_item`의 시그니처/uuid 반환은 유지하되 S4001/S4002를 적용한다. 이름은 POSIX [:space:] 양끝을 정리하고 원문에 [:cntrl:] 또는 U+200B–200C, U+200E–200F, U+202A–202E, U+2060–2064, U+FEFF가 있으면 S4002로 거절한다. U+3164·U+115F·U+1160·U+2800·U+00AD·U+034F 및 공백·U+200D만 조합한 보이지 않는 이름도 거절한다. U+200D(ZWJ)는 눈에 보이는 이모지 조합에 허용한다. 레거시 후보 확정도 같은 검사로 메시지 주입을 차단한다. 이름 검사를 상한 검사보다 먼저 하여 둘 다 위반하면 S4002. JS 길이는 서버 Unicode 문자 수와 다를 수 있으므로 클라이언트 검증을 최종 근거로 삼지 않는다. 모든 DB 오류의 details/hint는 입력 원문 없이 반환한다. S4008은 message 문자열 대신 위 고정 operation hint로 분기한다.
+
+### 5.6 정산 생성 추가 결정
+
+create_room_settlement_v2와 레거시 create_room_settlement는 같은 private core의 현재 약관·멤버십·만료·방 잠금 뒤 S4008/SETTLEMENT_REQUIRES_CONFIRMATION을 검사한다. 새 bill은 confirmed 또는 appointment_confirmed_at IS NOT NULL인 settling/done에서 생성한다. 확정 증거 없는 레거시 settling/done은 새 bill이 거절되며 기존 미완료·미닫힌 bill 수정/재시도만 기존 권한·수취인 규칙을 유지한다. scheduling/place에 열린 bill이 있는 극단적 레거시 방도 정산 수정은 거절하고 운영 전 집계로 식별한다. 방장도 확정 전 우회할 수 없고 확정 뒤에는 기존처럼 실제 멤버가 정산을 시작할 수 있다. 트리거는 confirmed 또는 방장 확정 증거가 있는 done의 **새 bill INSERT**에서 settling으로 이동한다. 재정산은 settled_at=NULL로 이전 완료 카운트다운을 해제하고 expires_at=min(새 bill.created_at+7일, 최초 appointment_confirmed_at+30일)로 설정한다. 7일은 미완료 송금 처리 시간을 주며, 30일 절대 상한은 연속 재정산으로 방 보관 기한을 계속 연장하는 것을 막는다. 첫 confirmed 정산의 기존 방 기한도 방장 확정+30일을 넘기지 않는다. 활성 bill 수정/재시도는 기한을 바꾸지 않는다. 모든 열린 bill의 수취인이 완료되면 새 clock_timestamp()를 settled_at에 기록하고 expires_at=min(완료 시점+24시간, 최초 방장 확정+30일)로 설정한다. 방장 확정 증거 없는 레거시 방의 완료 기한은 기존 +24시간이다. 완료된 true 재시도는 기한을 연장하지 않는다. 기존 계좌 공개 종료·수취인 snapshot은 유지한다. 과거 방·정산 데이터는 보존하고, 확정 증거 없는 정산 stage는 legacy_settlement_unverified로 표시한다. 이 새 enum을 앱 runtime parser와 카드·정산 UI에 반영해야 한다.
+
+기한이 지나면 미완료 bill이 있어도 기존 delete_expired_rooms가 방과 부속 참가·메시지·초대를 정리할 수 있다. bill의 room_id는 FK ON DELETE SET NULL로 분리되고 bill·수취인 snapshot·송금 완료 상태는 보존된다. 정산 완료 여부를 임의 변경하거나 계좌 공개를 임의 연장/종료하지 않는다. 원래 수취인은 기존 S1 권한으로 방 삭제 뒤에도 송금 정보 조회와 완료 처리를 할 수 있고, 전원 완료 시 계좌 공개가 닫힌다. 방 복구·정산 취소·채무 면제를 뜻하지 않는다.
 
 ## 6. 기존 RPC·RLS·grant와 우회 차단
 
@@ -205,8 +232,10 @@ type RoomDecisionState = {
 | `add_voting_item` / `remove_voting_item` | 후보·표 수정에 같은 stage/멤버십/만료 잠금 적용. 삭제는 기존 작성자 또는 방장만. 확정 식당 삭제 금지, 후보 삭제 시 해당 표 정리와 revision을 함께 반영. |
 | `confirm_room_vote(uuid,uuid) → void` | menu는 새 원자 확정의 private core를 호출하는 호환 wrapper. 방장/시간/과반 조건은 동일. 이미 확정된 같은 식당은 no-op. time 라벨은 구조화 불가하므로 S4010; 방장 외에는 우선 NOT_ALLOWED. |
 | `advance_room_stage(uuid,text) → text` | scheduling→place는 새 core의 null 시간 진입으로 연결하며 전원 제출 검사. place→confirmed 단독 변경 금지. 단, legacy 부분 확정에 유효 candidate ID가 있으면 같은 원자 확정 core로 복구 가능. 이미 원자 확정된 방의 후속 confirmed 호출은 현재 stage 반환 no-op. settling/done을 이 RPC로 새로 만들지 못한다. |
-| `set_my_availability(uuid,text[]) → void` | 기존 시그니처/default 유지, 새 검증·stage 잠금 core 사용. 구클라이언트의 default/명시 null은 기존처럼 빈 배열 철회로 처리하되 신규 RPC는 null 금지. expected revision이 없는 구앱은 마지막 저장 우선이나 전환 후 저장은 불가. |
+| `set_my_availability(uuid,text[]) → void` | 기존 시그니처/default 유지, 새 검증·stage 잠금 core 사용. 구클라이언트의 default/명시 null은 기존처럼 빈 배열 철회로 처리하되 신규 RPC는 null 금지. expected revision이 없는 구앱은 마지막 저장 우선이나 시간 선택 후 저장은 불가. 구조화 시간 없는 place에서는 본인 일정 수정 가능. |
 | `room_availability_status` | 기존 반환형 유지. eligible 행만 반환하고 제출 판정은 새 규칙과 동일. 새 앱의 전체 표시행/제출 인원은 상태 RPC 사용. |
+| `update_settlement_amount(uuid,integer)` | 미사용 우회 RPC의 함수 정의는 보존하되 PUBLIC/anon/authenticated EXECUTE 회수. 정상 정산 생성·수정은 기존 guarded core 사용. 폐쇄된 bill의 total_amount 변경은 내부 writer에서도 S1005로 차단. |
+| `join_room_by_code` / `create_room_invitation` / `accept_room_invitation` | 현재 신원·약관 및 기존 코드/메이트/초대 대상 권한 검사 유지. 같은 방 advisory/row 잠금 뒤 settling/done이면 S4003, hint=operation=membership로 거절. 기존 accepted 초대 재수락도 거절. 정산 단계 전이와 업그레이드에서 pending 초대는 expired/responded_at으로 정리해 목록 반복 노출을 막고 accepted/declined/expired 행은 보존한다. scheduling/place/confirmed의 정상 참가·초대 멱등성 유지. |
 | `room_availability_cells` | 서명 유지, 유효 멤버·만료·약관 재검사. NULL profile/잘못된/지난 칸 제외. 가능 칸 합집합 뜻 유지. |
 
 compat wrapper는 새 public RPC를 별도 HTTP로 호출하지 않고 같은 트랜잭션의 private core를 사용한다. 구호출에 없는 request_id를 안정적인 재시도 키인 것처럼 임의 생성하지 않는다. 확정/단계는 현재 저장 상태 기반 자연 멱등성, 제출은 동일 슬롯 비교를 사용한다. 이후 요청이라도 권한·약관 재검사는 동일하다.
@@ -224,21 +253,32 @@ compat wrapper는 새 public RPC를 별도 HTTP로 호출하지 않고 같은 �
 
 ## 7. 마이그레이션 단위와 데이터 이전
 
-과거 migration은 수정하지 않는다. 실제 파일은 구현 때 `supabase migration new <name>`으로 생성하여 S5 마지막 migration 이후 순서를 확보한다. 아래는 논리 이름이며 실행 가능한 timestamp 파일을 지금 만들지 않는다.
+과거 migration은 수정하지 않는다. 실제 파일은 구현 때 `supabase migration new <name>`으로 생성하여 S5 마지막 migration 이후 순서를 확보한다. 구현 파일은 `20261019022001_s4_meeting_time_storage.sql`, `20261019022005_s4_decision_core.sql`, `20261019022010_s4_activate_atomic_decisions.sql`, 별도 NULL 수취인 수정 `20261019022100_fix_settlement_null_participants.sql`, 정산 guard `20261019022110_s4_confirmed_settlement_boundary.sql`, 참석률 조회 `20261020010000_s4_meeting_time_preview.sql`, 재정산 lifecycle `20261020020000_s4_settlement_restart_lifecycle.sql`, 최종 금액 경계·초대 정리 `20261020030000_s4_revoke_update_settlement_amount.sql`이며 아래 논리 단위와 대응한다.
 
 | 단위 | 내용 | 통과 조건 |
 |---|---|---|
 | M1 `s4_meeting_time_storage` | nullable 시간/확정 증거, revision, private ledger와 ACL. 기존 행은 기본값/null 유지 | S1+S5 fixture upgrade, 기존 문자열·stage·정산·만료 불변 |
 | M2 `s4_decision_core` | 상태/제출/시간/확정 core와 신규 API 생성. 이 단계에서는 앱 EXECUTE 미부여 | 역할별 SQL 테스트, 멱등성·원자 rollback, 고정 search_path |
 | M3 `s4_activate_atomic_decisions` | 자동 확정 제거, 모든 legacy wrapper·stage guard·revision writer 연계·생성 RLS 강화, 앱 EXECUTE와 capability 공개를 한 트랜잭션으로 활성화 | 모든 쓰기 우회·정족수·동시성·신구 앱 조합 검증 |
+| 별도 NULL 수취인 수정 `20261019022100` | 새 정산 snapshot에서 NULL-profile 표시행 제외·NULL 비교 안전화. 기존 bill/수취인 보존 | 실제 멤버 1/2명 + NULL 표시행 정산·공개 종료 |
+| 정산 경계 보강 `20261019022110` | confirmed 또는 방장 확정 시각이 있는 settling/done에서 새 정산, 증거 없는 이후 단계는 기존 진행 중 bill 재시도만 유지, 트리거 전환 제한 | v1/v2·방장/일반 멤버의 확정 전 거절·후 허용·재정산, 과거 데이터 보존 |
+| 참석률 조회 `20261020010000` | 무잠금 STABLE 구간 집계 RPC와 선택/조회 공통 시간 검증. 데이터 변경 없음 | 다중 사용자·구간 경계·개인 정보 무반환·ACL catalog·읽기/쓰기 비차단 |
+| 재정산 lifecycle `20261020020000` | 새 재정산에서 done→settling, 7일 재정산·확정+30일 절대 상한; 완료 후 24시간도 절대 상한 적용. 유효 기한이 남은 결함 사례만 복구 | cleanup·다른 열린 bill·solo·재시도·migration 재실행·계좌 종료 보존 |
+| 최종 경계·초대 정리 `20261020030000` | 미사용 금액 RPC EXECUTE 회수, 폐쇄 bill 금액 보호, settling/done pending 초대 expired 정리 | ACL/실제 호출 거절·정상 수정/재정산·수취인/계좌 보존·이전 초대 정리 및 accepted 무변경 |
 
 M1/M2는 additive 준비 단계이며 capability를 공개하지 않는다. M3 중간 상태를 외부에 노출하지 않는다. migration 사이에 새 앱이 capability만 보고 미완성 core로 진입할 수 없어야 한다. S1 보류 활성화 파일(M7)은 `supabase/release` 절차 그대로 두고 S4가 게시/동의를 대신 활성화하지 않는다.
+
+이번 정산 보강의 운영 승인·검증 목록은 위 8개 파일 전체다. 마지막 보강은 미사용 update_settlement_amount의 PUBLIC/anon/authenticated EXECUTE 회수, 폐쇄 bill 금액 변경의 S1005 차단, settling/done 전이 및 기존 방의 pending 초대 expired 정리를 포함한다. 기존 S4 capability가 있다는 사실만으로 뒤의 NULL/정산 guard·참석률 조회까지 적용됐다고 판단하지 않는다. 마지막 migration identity와 실제 함수 정의·권한을 확인한다.
+
+20261020020000은 **appointment_confirmed_at이 있는 done + 공개 종료 전 미완료/빈 수취인 bill**, 또는 과거 구현의 무기한 settling 재정산만 복구한다. 최초 조회와 advisory/room 잠금 뒤 모두 expires_at>clock_timestamp()인 방만 대상으로 하며 만료 방은 되살리지 않는다. done 방은 min(가장 오래된 열린 bill.created_at+7일, 최초 확정+30일)이 이미 지났어도 복구하지 않는다. 과거 무기한 settling은 단계 변경 없이 원래 상한으로 기한만 단축하며 그 상한이 과거이면 즉시 만료 대상으로 둔다. 복구 기한은 이 원래 시각들을 사용하며 배포 시각으로 새 기한을 만들지 않는다. 기존 완료 bill·계좌·수취인·방장 확정 증거는 재작성하지 않는다. 미확인 레거시 done과 실제 완료 방은 보존하며 재실행은 무변경이다.
+
+운영 전 s4_legacy_place_inventory.sql은 시간 미선택 place·확정 전 열린 bill 외에 expired_owner_confirmed_done_with_open_bill(복구 제외 건수), rooms_with_nonfinite_expiry를 읽기 전용 집계한다. 새/복구된 재정산의 expires_at는 유한 ISO 시각이다. 앱 파싱 형식 변경은 없으며 settling의 기한은 재정산 보관 상한, done의 기한은 완료 후 정리 기한으로 구분한다. Edge는 남아 있는 비유한 만료를 유효한 방으로 취급하지 않는다.
 
 ### 7.1 기존 방별 처리
 
 | 기존 데이터 | 이전/복구 정책 |
 |---|---|
-| confirmed/settling/done | 현재 stage·식당·투표·만료·정산 그대로. `appointment_confirmed_at/by`를 backfill하지 않는다. 시간 없거나 불명확해도 과거 확정을 취소하지 않는다. `legacy_confirmed`로 구분한다. |
+| confirmed/settling/done | 새 lifecycle migration의 위 결함 복구 대상만 예외. 그 외 현재 stage·식당·투표·만료·정산 그대로. `appointment_confirmed_at/by`를 backfill하지 않는다. 시간 없거나 불명확해도 과거 확정을 취소하지 않는다. confirmed는 legacy_confirmed, 정산 stage이면서 명시 확정 증거가 없으면 legacy_settlement_unverified로 구분한다. 정산 단계만으로 약속 확정을 추정하지 않는다. |
 | scheduling | 구조화 시간 null, revision 초기화. 제출 가능한 실제 사용자로 정족수 재계산. 기존 slots를 KST 규칙으로 읽되 유효하지 않은 값은 집계 제외하고 재제출 안내. |
 | place, 식당 확정 없음 | 기존 후보/표 유지. 방장이 시간 선택 후 원자 확정 가능. 기존 `location_name`만으로 식당 확정 성공을 인정하지 않는다. |
 | place, confirmed_menu와 유효 menu item ID 있음 | `legacy_partial`. 자동 stage 변경 없음. 방장이 시간과 식당을 확인해 원자 확정. 최신 과반/최다 조건을 다시 검사하고 충족되지 않으면 표 변경을 허용한다. legacy 식당 저장 흔적만으로 투표를 영구 잠그지 않는다. |
@@ -271,7 +311,7 @@ M1/M2는 additive 준비 단계이며 capability를 공개하지 않는다. M3 �
 | `MeetingCard.tsx`, `RoomRow.tsx`, `RoomDetailScreen.tsx`, 최종 PlanConfirmation | 동일 `formatMeetingTime` 사용. “선택된 시간”과 “약속 확정” 구별. 구조화 null/legacy label/종료시각·timezone 표시 통일 |
 | `ScheduleHomeScreen.tsx` 및 홈/채팅 목록 소비자 | 실제 방 시간 표시를 쓰는 경로만 공통 formatter 적용. 현재 개인 일정 캘린더의 별도 데이터를 방 meeting_date로 대체하지 않음 |
 
-시간 추천 Edge의 기존 v1 경로는 eligible 사용자만 분자/분모에 넣고 KST 유효 칸·과거 칸을 정규화하도록 최소 보강한다. 구조화 저장 시 DB가 참석 가능 여부를 다시 판정하므로 provider 결과만으로 확정하지 않는다. S5 v2 `purpose='places'`, `slots_status='not_requested'`, `evidence_status='unverified'`, `my_health_filter='not_requested'`는 유지한다. S4 RPC 사용에 새 Edge 배포 완료를 필수 조건으로 삼지 않으며 직접 선택 경로를 제공한다.
+시간 추천 Edge의 기존 v1 경로는 eligible 사용자만 분자/분모에 넣고 KST 유효 칸·과거 칸을 정규화하도록 최소 보강한다. 구조화 저장 시 DB가 참석 가능 여부를 다시 판정하므로 provider 결과만으로 확정하지 않는다. S5 v2 `purpose='places'`, `slots_status='not_requested'`, `evidence_status='unverified'`, `my_health_filter='not_requested'`는 유지한다. S4 RPC 사용에 새 Edge 배포 완료를 필수 조건으로 삼지 않으며 직접 선택 경로를 제공한다. S4 활성화 시 S5 추천 context의 room fingerprint에 stage·선택 시간·appointment_confirmed_at을 추가한다. provider 대기 중 이 결정이 바뀌면 기존 S5003으로 결과를 폐기한다(응답 필드/새 오류 없음; 단순 투표나 안내 탭만으로 추천을 무효화하지 않음).
 
 ## 9. 앱 선배포 호환 전략
 
@@ -293,7 +333,7 @@ pre-S4에서 선택한 추천 시간을 로컬만 저장해 확정값처럼 보�
 
 ## 10. 다중 사용자·동시성·앱 검증 계획
 
-아래는 **구현 시 실행할 검증 목록**이며 이번 문서 작업에서 통과한 테스트가 아니다. fixture는 전부 가상 데이터다. SQL source 검사만으로 SQL 실행·동시성을 대체하지 않는다.
+아래는 구현 검증의 요구 목록이다. 실제 실행 결과·통과 수·미검증 범위는 `supabase/tests/S4-A-REPORT.md`에 기록한다. fixture는 전부 가상 데이터다. SQL source 검사만으로 SQL 실행·동시성을 대체하지 않는다.
 
 ### 10.1 DB 권한/데이터 테스트
 
@@ -312,7 +352,7 @@ PowerShell에서 격리 로컬 DB 연결 두 개 이상과 명시 barrier/lock �
 
 | 경합 | 허용 결과 |
 |---|---|
-| 마지막 제출/철회 vs scheduling→place | 먼저 잠금을 얻은 결과를 뒤 요청이 재검증. 전환 후 schedule 수정 없음 |
+| 마지막 제출/철회 vs scheduling→place | 먼저 잠금을 얻은 결과를 뒤 요청이 재검증. 시간 선택 뒤 schedule 수정 없음; 시간 없이 place 진입 시 제출 허용 |
 | 두 방장 기기의 다른 시간 선택 | 한 요청 성공, 다른 요청 revision 충돌. 식당 단계에 예전 시간 덮어쓰기 없음 |
 | 마지막 투표 vs 방장 확정 | 표 먼저면 최신 revision/득표로 재결정; 확정 먼저면 표 변경 거절. 자동 확정 0건 |
 | 후보 삭제/추가 vs 확정 | 잠금 순서대로 한 일관된 결과. 지워진 후보 확정이나 orphan vote 없음 |
@@ -320,7 +360,7 @@ PowerShell에서 격리 로컬 DB 연결 두 개 이상과 명시 barrier/lock �
 | leave/방 닫기 vs S4 저장 | 권한/존재 재검사. 사라진 방에 ledger/메시지 잔존 없음 |
 | 동일 request 병렬 재시도 및 다른 방에서 ID 충돌 | 한 부수 효과, 충돌 요청은 S1007, 메시지1건. PK 충돌을 성공으로 오인하지 않음 |
 | 약관 재동의/유효성 변경 또는 방 만료 중 lock 대기 | 잠금 뒤 최신 gate/시각 적용. 실패 요청에 상태 변화 없음 |
-| 정산 생성/완료 vs 시간 선택·확정 | 먼저 정산으로 전진하면 S4 변경 거절. S4가 먼저면 정산은 기존 규칙으로 진행. stage 후퇴·계좌 재공개·deadlock 없음 |
+| 정산 생성/완료 vs 시간 선택·확정 | 확정 전 새 정산은 S4008. 최종 확정 뒤 정산 시작만 허용. 기존 정산 완료가 먼저면 S4 변경 거절. stage 후퇴·계좌 재공개·deadlock 없음 |
 | S5 settings/추천 begin/finalize vs S4 확정 | 공통 방 잠금 순서 준수, provider 대기 중 잠금 없음. S5 context 재검증 및 개인정보 최소화 불변 |
 
 현재 `leave_room`은 방장 방 닫기 기능이므로 메이트 나가기 경쟁을 구현됐다고 주장하지 않는다. S3/S2가 participant 삭제·profile FK 변경을 추가할 때 S4 revision/잠금 계약을 다시 검증해야 한다.
@@ -344,7 +384,7 @@ PowerShell에서 격리 로컬 DB 연결 두 개 이상과 명시 barrier/lock �
 | 앱 작업자 | §8의 `src/lib`, `src/screens/schedule`, `src/screens/chat`, 관련 `src/components` 파일과 앱 `tests/**` | capability 분기·화면·formatter, focused/quality 결과, 실제 화면 흐름·시간대 증거. DB/Edge 파일 수정 금지 |
 | 조정/검토 | 계약 변경 승인과 diff 확인. `docs/S4-design.md` 계약 변경은 조정자가 한 명의 문서 작성자에게 맡김 | 계약 차이·범위 밖 문제·독립 보안 검토 기록 |
 
-현재 요청에서는 작업자를 생성하거나 위 범위의 파일을 수정하지 않는다. 후속 구현은 §12 결정 → RPC fixture 고정 → DB/앱 각 소유 범위 구현 → 통합 검증 순서다. 동일 파일에 두 작성자를 배정하지 않는다. 앱/DB가 병렬 진행하더라도 새 응답 field/에러 코드 변경은 문서에 먼저 합의한다.
+현재 구현은 §12 확정 → §5 RPC 고정 → DB/앱 각 소유 범위 구현 → 통합 검증 순서다. 동일 파일에 두 작성자를 배정하지 않는다. 앱/DB가 병렬 진행하더라도 새 응답 field/에러 코드 변경은 문서에 먼저 합의한다.
 
 ### 11.2 운영 반영 전에 따로 승인할 항목
 
@@ -356,9 +396,9 @@ PowerShell에서 격리 로컬 DB 연결 두 개 이상과 명시 barrier/lock �
 
 승인된 반영 뒤에는 migration/function identity·실제 ACL 확인, 다중 사용자 격리, 앱 실제 왕복 저장/재접속, S1 계좌 종료·S5 추천 회귀, security advisor를 다시 확인한다. cron/Auth 설정/secret 변경은 S4에 필요하지 않으며 추가하지 않는다.
 
-## 12. 사용자 결정이 필요한 질문
+## 12. 사용자 확정 결정 (7건 모두 권장안 승인)
 
-| 질문 | 권장안 | 달라질 계약 |
+| 확정 항목 | 사용자 확정 결정 | 적용 계약 |
 |---|---|---|
 | 시간 없이 식당 단계/최종 확정을 허용할까? | `place` 진입은 허용, **최종 확정에는 시간 필수**. 구앱은 필요 시 업데이트 안내 | `requires_time_for_confirmation`, S4007, 구앱 호환 범위. 시간 미정 확정 허용 시 명시 확인 UI/별도 플래그 필요 |
 | STEP3와 일정 시트 모두 전원 제출 뒤 진행할까? | eligible 실제 사용자 전원 제출을 두 진입점에 동일 적용. 초대 대기자는 제외 | 현재 STEP3의 조기 전환은 막힘. 미동의/장기 미응답 멤버 제외는 S3 정책 없이 임의로 추가하지 않음 |
@@ -368,9 +408,9 @@ PowerShell에서 격리 로컬 DB 연결 두 개 이상과 명시 barrier/lock �
 | 시간대와 선택 범위는? | S4는 `Asia/Seoul`, 기존11~21시 정각·같은 날짜. 최종 확정 전 방장만 수정 | 해외/DST/자정 넘김/분 단위는 별도 확장. 단일 시각 저장으로 종료를 잃지 않음 |
 | legacy 시간·부분 확정 처리에 동의하는가? | 시간 자동 backfill 없음. 완료 방 보존, 진행 방은 방장 재선택/현재 투표 재검증 | 원문 기반 일괄 추정 또는 과거 자동확정을 방장확정으로 인정하지 않음 |
 
-구현 착수 전 특히 시간 필수 여부·전원 제출 gate·빈 제출 뜻을 확정해야 한다. 운영 접근이나 승인을 기다리는 질문이 아니라 제품 계약을 고정하기 위한 질문이다.
+2026-10-19 사용자 지시로 위 7개 권장안을 모두 확정했다. 제품 결정을 다시 묻지 않고 §5 계약으로 구현한다. 운영 접근·배포·커밋 승인은 포함하지 않는다.
 
-## 13. 이번 문서 작업의 확인 범위
+## 13. 초기 설계 작성 시 확인 범위 (구현 전 기록)
 
 로컬 AGENTS, S1/S5 명세, WORKFLOW/Figma 로컬 문서, S4 관련 앱·최신 migration·Edge 소스를 대조했다. `git diff --no-index --check -- NUL docs/S4-design.md`에서 공백 오류가 없었고, Git status로 신규 문서와 기존 S1-release 변경만 있음을 확인했다. SQL 실행, 앱 테스트, `npm run quality`, 실제 UI, 원격 migration/ACL, 실제 provider, 독립 보안 검토는 이번에 수행하지 않았다. 설계가 구현됐거나 운영에 적용됐다는 결론은 내리지 않는다.
 

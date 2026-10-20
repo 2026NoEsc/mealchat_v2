@@ -82,7 +82,15 @@ try {
   check((await rpc('set_settlement_completed','a',{target_member:members.data[0].id,completed:false})).data?.code==='S1005','HTTP closed completion undo returns S1005');
   check((await request('GET','/dutch_pay_members?select=is_completed&bill_id=eq.'+bill,'a')).data.every(m=>m.is_completed===true),'HTTP rejected undo leaves every recipient complete');
   const next=await rpc('create_room_settlement_v2','a',{ target_room:room,bill_title:'Synthetic next HTTP bill',amount:7000,bank_name:'Synthetic bank',account_number:'1111',account_holder:'Synthetic A' });
-  check(typeof next.data==='string' && next.data!==bill,'new explicit request after completion creates a different bill');
+  const guarded=sql("select to_regprocedure('private.s4_settlement_allowed(public.rooms)') is not null;")==='t';
+  check(guarded?next.data?.code==='S4008':typeof next.data==='string'&&next.data!==bill,'completed legacy room without owner evidence cannot start a new bill after S4');
+  if(guarded) {
+    sql("update public.rooms set appointment_confirmed_at=clock_timestamp(),appointment_confirmed_by='"+uid(1)+"' where id='"+room+"';");
+    const repeated=await rpc('create_room_settlement_v2','a',{target_room:room,bill_title:'Owner-confirmed next bill',amount:7000,bank_name:'Synthetic bank',account_number:'1111',account_holder:'Synthetic A'});
+    check(typeof repeated.data==='string'&&repeated.data!==bill,'completed owner-confirmed room permits a fresh bill');
+    const stillClosed=(await rpc('get_settlement_payment_details','b',{p_bill_id:bill})).data;
+    check(stillClosed.status==='completed'&&stillClosed.payment_details===null,'new bill keeps the old HTTP disclosure closed');
+  }
   const invalid=await fetch(origin+'/public_profiles?select=id',{headers:{Authorization:'Bearer synthetic-invalid-jwt'}});
   check(invalid.status===401,'PostgREST verifies JWT signatures rather than trusting claims');
   sql(m7WithTestValues());

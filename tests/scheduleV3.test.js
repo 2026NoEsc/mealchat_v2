@@ -1,4 +1,6 @@
 const React = require('react');
+// Keep the existing cases as pre-S4 compatibility regressions; s4App covers the new contract.
+jest.mock('../src/lib/useRoomDecision', () => ({ useRoomDecision: () => ({ mode: 'legacy', data: null, error: null, loading: false, reload: jest.fn() }) }));
 const { act, create } = require('react-test-renderer');
 const { AppState, BackHandler, Linking, Platform, Pressable, StyleSheet, Text, TextInput, View } = require('react-native');
 
@@ -172,6 +174,7 @@ it('keeps other mates available cells selectable and disables past cells in v3',
 });
 it('selects a recommendation for comparison without presenting it as a saved time, then opens restaurants', async () => {
   const root = await render(ScheduleConfirmedScreen);
+  expect(text(root)).toContain('추천은 비교용이며, 시간 미정으로 식당 정하기 단계로 이동해요');
   expect(text(root)).not.toContain('89%'); expect(text(root)).toContain('4명 모두 가능');
   const radios = targets(root).filter((node) => node.props.accessibilityRole === 'radio'); expect(radios.map((node) => node.props.accessibilityState.checked)).toEqual([true, false]);
   await act(async () => radios[1].props.onPress()); expect(radios.map((node) => node.props.accessibilityState.checked)).toEqual([false, true]);
@@ -232,10 +235,21 @@ it('saves one-hour cell keys in the existing availability format before navigati
   const root = await render(ScheduleTimeScreen); await press(root, '선택 완료'); expect(saveMyAvailability).toHaveBeenCalledWith('room', ['2026-09-25-12']); expect(navigation.navigate).toHaveBeenCalledWith('ScheduleConfirmed', expect.objectContaining({ roomId: 'room' })); expect(navigation.navigate.mock.calls.at(-1)[1]).not.toHaveProperty('origin');
 });
 it('creates a room and sends only selected invitations before moving to time selection', async () => {
-  jest.useFakeTimers().setSystemTime(new Date(2026, 8, 25, 10)); navigation.current.params.invitees = ['mate', 'mate2'];
+  // Room expiry now follows KST; unlike the personal calendar fixtures this is an absolute instant.
+  jest.useFakeTimers().setSystemTime(new Date('2026-09-25T10:00:00+09:00')); navigation.current.params.invitees = ['mate', 'mate2'];
   const root = await render(ScheduleDetailScreen); await press(root, '다음');
-  expect(createRoom).toHaveBeenCalledWith({ ownerId: 'me', title: '오늘 저녁팟', meetingDate: '2026-10-02', expiresAt: new Date('2026-10-02T23:59:59').toISOString() });
+  expect(createRoom).toHaveBeenCalledWith({ ownerId: 'me', title: '오늘 저녁팟', meetingDate: '2026-10-02', expiresAt: '2026-10-02T14:59:59.000Z' });
   expect(createRoomInvitation.mock.calls).toEqual([['new-room', 'mate'], ['new-room', 'mate2']]); expect(navigation.navigate).toHaveBeenCalledWith('ScheduleTime', expect.objectContaining({ roomId: 'new-room', invitees: ['mate','mate2'] }));
+});
+it('opens fresh room state instead of continuing setup after the server closes membership', async () => {
+  const alert = jest.spyOn(require('react-native').Alert, 'alert').mockImplementation(() => {});
+  navigation.current.params.invitees = ['mate', 'mate2'];
+  createRoomInvitation.mockResolvedValueOnce({ error: { code: 'S4003', hint: 'operation=membership', message: 'private raw' } });
+  const root = await render(ScheduleDetailScreen); await press(root, '다음');
+  expect(createRoomInvitation).toHaveBeenCalledTimes(1);
+  expect(alert).toHaveBeenCalledWith('초대할 수 없어요', require('../src/lib/roomMembership').membershipClosedMessage);
+  expect(navigation.navigate).toHaveBeenCalledWith('ChatRoom', { roomId: 'new-room', title: '오늘 저녁팟' });
+  expect(navigation.navigate).not.toHaveBeenCalledWith('ScheduleTime', expect.anything());
 });
 it.each([
   ['missing-room-id', '밥약 정보가 없어요', '새 밥약 만들기'], ['room-missing', '밥약을 찾을 수 없어요', '홈으로 가기'], ['room-error', '밥약 정보를 불러오지 못했어요', '다시 시도'],

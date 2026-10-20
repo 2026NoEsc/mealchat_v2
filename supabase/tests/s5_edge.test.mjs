@@ -15,6 +15,7 @@ const load=async(name,require=()=>{throw Error('Unexpected import');})=>{
 };
 const s5=await load('s5Recommendation.ts');
 const pipeline=await load('pipeline.ts');
+const s4Availability=await load('s4Availability.ts');
 const A='10000001-0000-4000-8000-000000000001',room='21000000-0000-4000-8000-000000000001',rid='51000000-0000-4000-8000-000000000001',token='61000000-0000-4000-8000-000000000001';
 const body={contract_version:2,request_id:rid,room_id:room,purpose:'places'};
 const area={id:'public-center',label:'Public center',latitude:37.5665,longitude:126.978,radius_m:2000};
@@ -126,6 +127,7 @@ test('actual handler verifies caller and required consent before S5 dispatch',as
  const Deno={env};
  const fetchMock=async()=>{calls++;return Response.json({contract_version:1,bundle_version:'fixture',required:{status:'required',service_agreed:false,privacy_agreed:false}});};
  const req=id=>{
+  if(id==='./s4Availability.ts')return s4Availability;
   if(id==='@supabase/server')return {withSupabase:(options,fn)=>{assert.equal(options.auth,'user');return fn;}};
   if(id==='./pipeline.ts')return {...pipeline,callGeminiWithRetry:(url,options)=>pipeline.callGeminiWithRetry(url,options,{fetchImpl:fetchMock})};
   if(id==='./consentGate.ts')return {...gateSource,checkRequiredConsent:(...args)=>gateSource.checkRequiredConsent(...args,fetchMock)};
@@ -163,6 +165,7 @@ async function actualHandler({consentAccepted=true,missingGemini=false,legacyBod
   trace.push('gemini');if(legacyTime){const request=JSON.parse(opts.body),schema=request.generationConfig.responseJsonSchema;assert.equal('placeRecommendations' in schema.properties,false);assert.equal(schema.required.includes('placeRecommendations'),false);assert.ok(schema.properties.slotRecommendations.minItems>0);assert.ok(schema.properties.slotRecommendations.items.properties.rank.maximum>=1);const prompt=JSON.parse(request.contents[0].parts[0].text);assert.equal(prompt.placeCount,0);assert.deepEqual(prompt.placeCandidates,[]);return Response.json({candidates:[{content:{parts:[{text:JSON.stringify({slotRecommendations:prompt.candidates.slice(0,3).map((x,i)=>({slotId:x.slotId,rank:i+1,score:99,reason:'Synthetic time reason'}))})}]}}]});}return Response.json(model(['p1']));
  };
  const req=id=>{
+  if(id==='./s4Availability.ts')return s4Availability;
   if(id==='@supabase/server')return {withSupabase:(_options,fn)=>fn};
   if(id==='./pipeline.ts')return {...pipeline,callGeminiWithRetry:(url,options)=>pipeline.callGeminiWithRetry(url,options,{fetchImpl:fetchMock})};
   if(id==='./consentGate.ts')return {...gate,checkRequiredConsent:(...args)=>gate.checkRequiredConsent(...args,fetchMock),checkRoomPermission:(...args)=>gate.checkRoomPermission(...args,fetchMock)};
@@ -173,7 +176,7 @@ async function actualHandler({consentAccepted=true,missingGemini=false,legacyBod
  {module,exports:module.exports,require:req,Response,Request,TextEncoder,AbortSignal,fetch:fetchMock,Deno:{env:{get:k=>missingGemini&&k==='GEMINI_API_KEY'?undefined:env.get(k)}},console:{error(){},warn(){}}});
  const payload=legacyTime?{meetingName:'Legacy time',roomId:room,placeCandidates:[]}:legacyBody?{meetingName:'Legacy',roomId:room,placeCandidates:[{id:'forged'}]}:body;
  const context={jwtClaims:{sub:A,role:'authenticated',aud:'authenticated',iss:'http://127.0.0.1:55321/auth/v1',exp:Date.now()/1000+600},
-  userClaims:{id:badCaller?room:A},supabaseAdmin:{from:(table)=>{assert.equal(table,'participants');trace.push('availability');return {select:columns=>{assert.equal(columns,'profile_id, schedule');return {eq:async()=>({data:[{profile_id:A,schedule:{slots:['2030-01-01-12']}}],error:null})};}};},rpc:async(name,args)=>{
+  userClaims:{id:badCaller?room:A},supabaseAdmin:{from:(table)=>{if(table==='rooms')return {select:()=>({eq:()=>({maybeSingle:async()=>({data:{expires_at:'2099-01-01Z'},error:null})})})};assert.equal(table,'participants');trace.push('availability');return {select:columns=>{assert.equal(columns,'profile_id, schedule');return {eq:async()=>({data:[{profile_id:A,schedule:{slots:['2030-01-01-12']}}],error:null})};}};},rpc:async(name,args)=>{
    if(name.startsWith('claim')){assert.equal(trace.at(-1),'begin');trace.push('claim');return {data:{work_token:token,area,keywords:['korean']},error:null};}
    trace.push('finalize');return {data:finalResult(args.p_source,args.p_candidates.places),error:null};
   }}};

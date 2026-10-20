@@ -9,6 +9,11 @@ import { chatFeedbackColors } from '../../components/ui/chatTokens';
 import FailureCard from '../../components/ui/FailureCard';
 import { meetingTimeLabel } from '../../components/ui/MeetingCard';
 import PlanConfirmation from '../../components/ui/PlanConfirmation';
+import BottomSheet from '../../components/ui/BottomSheet';
+import DecisionFailure, { DecisionRefreshError } from '../../components/ui/DecisionFailure';
+import { useRoomDecision } from '../../lib/useRoomDecision';
+import { confirmRoomAppointment, roomDecisionErrorMessage, type RoomDecisionState } from '../../lib/roomDecisions';
+import type { MeetingTime } from '../../lib/meetingTime';
 import TextField from '../../components/ui/TextField';
 import Toast, { useToast } from '../../components/ui/Toast';
 import VoteToggle from '../../components/ui/VoteToggle';
@@ -25,6 +30,7 @@ export type RestaurantSuggestion = { label: string; matchPercent?: number; fresh
 export type RecommendationStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'error' | 'unavailable';
 type Props = {
   visible: boolean; isOwner?: boolean; stage?: RoomStage; confirmedSlot?: string | null; participantCount?: number;
+  meetingTime?: MeetingTime | null; onSelectTime?: () => void;
   confirmedRestaurant?: string | null; participants?: RoomParticipant[];
   roomId: string | null; kind: VotingKind; title: string; subtitle: string; placeholder: string;
   onClose: () => void; onConfirm: () => void; onVoted?: () => void;
@@ -32,31 +38,43 @@ type Props = {
   suggestions?: RestaurantSuggestion[]; suggestionTitle?: string;
   suggestionStatus?: RecommendationStatus; suggestionReason?: string; receivedMore?: boolean; onRequestSuggestions?: () => void;
 };
-type Plan = { id: string | null; label: string; voteSaved: boolean };
+type Plan = { id: string | null; label: string; voteSaved: boolean; revision?: string };
 const votingLabelKey = (label: string) => label.trim().toLowerCase();
 function votingAddErrorMessage(error: unknown) {
   const code = typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
   if (code === '23505') return '이미 같은 이름의 후보가 있어요. 목록을 확인해 주세요.';
-  // add() validates nonempty labels up to 120 characters first; the remaining 22023 case is the server's per-kind limit.
-  if (code === '22023') return '후보는 30개까지 추가할 수 있어요. 기존 후보를 지운 뒤 다시 추가해 주세요.';
+  if (code === 'S4001' || code === 'S4002') return roomDecisionErrorMessage(error);
+  if (code === '22023') return '후보 입력 내용을 확인하고 다시 시도해 주세요.';
   return '후보를 추가하지 못했어요. 목록을 확인하고 다시 시도해 주세요.';
 }
 
 /** Phone 540:1524 / 563:1755 / 628:3074 / 683:12975 / 540:1682. */
-export default function VotingSheet({ visible, isOwner = false, stage = 'place', confirmedSlot = null, participantCount, confirmedRestaurant,
+export default function VotingSheet(props: Props) {
+  const decision = useRoomDecision(props.roomId, props.visible);
+  const identity = useRef({ roomId: props.roomId });
+  if (identity.current.roomId !== props.roomId) identity.current = { roomId: props.roomId };
+  const binding = identity.current;
+  const guarded = { ...props, onConfirm: () => { if (identity.current === binding) props.onConfirm(); }, onClose: () => { if (identity.current === binding) props.onClose(); }, onVoted: () => { if (identity.current === binding) props.onVoted?.(); } };
+  if (decision.mode === 'legacy') return <VotingContent key={`${props.roomId}:${decision.accountId}`} {...guarded} decisionLoading={decision.loading} onRetrySupport={() => decision.reload(true)} />;
+  if (decision.mode === 's4' && decision.data) return <VotingContent key={`${props.roomId}:${decision.accountId}`} {...guarded} stage={decision.data.stage} meetingTime={decision.data.meeting_time} decision={decision.data} decisionError={decision.error} refreshDecision={() => decision.reload()} />;
+  return <BottomSheet visible={props.visible} title={props.title} onClose={props.onClose}><DecisionFailure decision={decision} /></BottomSheet>;
+}
+function VotingContent({ visible, isOwner = false, stage = 'place', confirmedSlot = null, participantCount, confirmedRestaurant, meetingTime, onSelectTime,
   participants = [], roomId, kind, title, subtitle, placeholder, onClose, onConfirm, onVoted, suggestions = [],
-  suggestionStatus = 'idle', suggestionReason, receivedMore = false, onRequestSuggestions, recommendationControls, validateSuggestion, suggestionTitle }: Props) {
+  suggestionStatus = 'idle', suggestionReason, receivedMore = false, onRequestSuggestions, recommendationControls, validateSuggestion, suggestionTitle, decision, refreshDecision, decisionLoading = false, decisionError, onRetrySupport }: Props & { decision?: RoomDecisionState; refreshDecision?: () => Promise<unknown>; decisionLoading?: boolean; decisionError?: Error | null; onRetrySupport?: () => Promise<unknown> }) {
   const { user } = useAuth(); const myId = user?.id ?? null;
   const [options, setOptions] = useState<VotingOption[]>([]); const [memberCount, setMemberCount] = useState(0);
   const [loading, setLoading] = useState(true); const [loadError, setLoadError] = useState(false);
   const [busy, setBusy] = useState(false); const operation = useRef(false);
+  const mounted = useRef(true), loadRun = useRef(0);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [actionError, setActionError] = useState<string | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null); const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [confirmationError, setConfirmationError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false); const [query, setQuery] = useState('');
   const [results, setResults] = useState<Place[]>([]); const [searchState, setSearchState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
-  const savedRestaurant = kind === 'menu' && stage === 'place' ? confirmedRestaurant?.trim() : null;
-  const restaurantLocked = kind === 'menu' && stage === 'place' && Boolean(savedRestaurant || plan?.voteSaved);
+  const savedRestaurant = !decision && kind === 'menu' && stage === 'place' ? confirmedRestaurant?.trim() : null;
+  const restaurantLocked = decision ? stage !== 'place' : kind === 'menu' && stage === 'place' && Boolean(savedRestaurant || plan?.voteSaved);
   useEffect(() => { if (restaurantLocked) { setAdding(false); setActionError(null); } }, [restaurantLocked]);
   const [searchRequest, setSearchRequest] = useState(0); const { height } = useWindowDimensions();
   const { showToast, toastProps } = useToast(); const shownMore = useRef(false);
@@ -69,16 +87,17 @@ export default function VotingSheet({ visible, isOwner = false, stage = 'place',
 
   const load = useCallback(async () => {
     if (!roomId) { setLoading(false); setLoadError(true); return []; }
-    setLoading(true); setLoadError(false);
+    const run = ++loadRun.current;
+    if (mounted.current) { setLoading(true); setLoadError(false); }
     try {
       const result = await fetchRoomVoting(roomId, myId);
       if (result.error) throw result.error;
       const rows = (result.data ?? []).filter(option => option.kind === kind);
-      setOptions(rows); setMemberCount(result.memberCount); return rows;
-    } catch { setLoadError(true); return null; }
-    finally { setLoading(false); }
+      if (mounted.current && run === loadRun.current) { setOptions(rows); setMemberCount(result.memberCount); } return rows;
+    } catch { if (mounted.current && run === loadRun.current) setLoadError(true); return null; }
+    finally { if (mounted.current && run === loadRun.current) setLoading(false); }
   }, [roomId, myId, kind]);
-  useEffect(() => { if (visible) void load(); }, [visible, load]);
+  useEffect(() => { if (visible) void load(); }, [visible, load, decision?.revision]);
   useEffect(() => {
     if (restaurantLocked || kind !== 'menu' || !adding || query.trim().length < 2) { setResults([]); setSearchState('idle'); return; }
     let active = true; setSearchState('loading');
@@ -90,15 +109,15 @@ export default function VotingSheet({ visible, isOwner = false, stage = 'place',
   }, [adding, query, searchRequest, kind, restaurantLocked]);
 
   const mutate = async (task: () => Promise<unknown>, message: string | ((error: unknown) => string)) => {
-    if (operation.current || !roomId || restaurantLocked) return;
+    if (operation.current || !roomId || restaurantLocked || decisionLoading) return;
     operation.current = true; setBusy(true); setActionError(null);
     try { await task(); }
-    catch (error) { setActionError(typeof message === 'function' ? message(error) : message); }
-    finally { operation.current = false; setBusy(false); }
+    catch (error) { if (mounted.current) setActionError(decision && /^S4/.test((error as { code?: string })?.code ?? '') ? roomDecisionErrorMessage(error) : typeof message === 'function' ? message(error) : message); }
+    finally { operation.current = false; if (mounted.current) setBusy(false); }
   };
   const vote = (option: VotingOption) => void mutate(async () => {
     const error = await toggleVote(roomId!, option.id); if (error) throw error;
-    await load(); onVoted?.();
+    await load(); await refreshDecision?.(); onVoted?.();
   }, '투표를 바꾸지 못했어요. 다시 시도해 주세요.');
   const add = (label: string, thenVote = false) => {
     label = label.trim();
@@ -112,27 +131,32 @@ export default function VotingSheet({ visible, isOwner = false, stage = 'place',
       const added = rows?.find(option => votingLabelKey(option.label) === votingLabelKey(label));
       if (!added) throw Error('Candidate unavailable');
       const voteError = await toggleVote(roomId!, added.id); if (voteError) throw voteError;
-      await load(); onVoted?.();
+      await load(); await refreshDecision?.(); onVoted?.();
     }
-    showToast({ message: '후보에 추가했어요' });
+    await refreshDecision?.(); if (mounted.current) showToast({ message: '후보에 추가했어요' });
   }, error => added && thenVote ? '후보는 추가됐지만 투표하지 못했어요. 추가된 후보에서 다시 투표해 주세요.' : votingAddErrorMessage(error)); };
   const discard = (option: VotingOption) => void mutate(async () => {
-    const error = await removeVotingItem(roomId!, option.id); if (error) throw error; await load();
+    const error = await removeVotingItem(roomId!, option.id); if (error) throw error; await load(); await refreshDecision?.();
   }, '후보를 지우지 못했어요. 다시 시도해 주세요.');
 
-  const leader = pickLeadingVoteOption(options);
-  const majority = leader !== null && hasStrictVoteMajority(leader.voters.length, memberCount);
+  const leader = decision ? options.find(option => option.id === decision.voting.leading_item_id) ?? null : pickLeadingVoteOption(options);
+  const majority = decision ? Boolean(leader && decision.voting.eligible_count > 0 && decision.voting.leading_votes >= decision.voting.required_votes) : leader !== null && hasStrictVoteMajority(leader.voters.length, memberCount);
   // Only confirmed_menu proves the vote RPC succeeded. location_name may be a general location.
-  const canConfirm = isOwner && (kind !== 'menu' || stage === 'place');
+  const canConfirm = isOwner && (kind !== 'menu' || stage === 'place') && (!decision || decision.permissions.can_select_time || decision.permissions.can_confirm);
   useEffect(() => { if (!canConfirm) { setConfirmationOpen(false); setPlan(null); setConfirmationError(null); } }, [canConfirm]);
   const retry = Boolean(savedRestaurant || plan?.voteSaved);
+  useEffect(() => {
+    if (decision && plan?.revision && plan.revision !== decision.revision && !busy) {
+      setConfirmationOpen(false); setPlan(null); setActionError(roomDecisionErrorMessage({ code: 'S4005' }));
+    }
+  }, [decision, plan, busy]);
   const confirmationHint = retry ? '저장한 식당으로 약속 단계만 다시 전환해요' : !leader ? '정할 식당이 아직 없어요' : !majority ? '과반수 표가 필요해요' : '고른 식당을 확인한 뒤 약속을 확정해요';
   const startConfirmation = () => {
-    if (!canConfirm || busy || (!retry && (loading || loadError))) return;
+    if (!canConfirm || busy || (!retry && (loading || loadError)) || (decision && (!decision.permissions.can_confirm || !decision.meeting_time || decisionLoading))) return;
     if (savedRestaurant) setPlan({ id: null, label: savedRestaurant, voteSaved: true });
     else if (!plan?.voteSaved) {
       if (!leader || !majority) return;
-      setPlan({ id: leader.id, label: leader.label, voteSaved: false });
+      setPlan({ id: leader.id, label: leader.label, voteSaved: false, revision: decision?.revision });
     }
     Keyboard.dismiss(); setConfirmationError(null); setConfirmationOpen(true);
   };
@@ -140,20 +164,37 @@ export default function VotingSheet({ visible, isOwner = false, stage = 'place',
     if (!canConfirm || !roomId || !plan || operation.current) return;
     operation.current = true; setBusy(true); setConfirmationError(null); let voteSaved = plan.voteSaved;
     try {
+      if (decision) {
+        if (!plan.id || !plan.revision || !decision.meeting_time || decisionLoading) return;
+        const result = await confirmRoomAppointment(roomId, plan.id, plan.revision);
+        if (result.error) {
+          if (mounted.current) {
+            const message = roomDecisionErrorMessage(result.error);
+            if (['S4003', 'S4005', 'S4006', 'S4007', 'S4008', 'S4009', 'S4010'].includes(result.error.code)) { setConfirmationOpen(false); setPlan(null); setActionError(['S4006', 'S4010'].includes(result.error.code) ? message + ' 시간을 다시 골라 주세요.' : message); await refreshDecision?.(); await load(); }
+            else setConfirmationError(message);
+          }
+          return;
+        }
+        onConfirm(); onClose(); return;
+      }
       if (!voteSaved) {
         if (!plan.id) return;
         const error = await confirmRoomVote(roomId, plan.id);
-        if (error) { setConfirmationError('식당 선택을 저장하지 못했어요. 투표를 확인하고 다시 시도해 주세요.'); onVoted?.(); return; }
+        if (error) {
+          if (mounted.current) setConfirmationError('식당 선택을 저장하지 못했어요. 투표를 확인하고 다시 시도해 주세요.');
+          if (/^S4/.test((error as { code?: string }).code ?? '')) await onRetrySupport?.();
+          onVoted?.(); return;
+        }
         voteSaved = true; setPlan({ ...plan, voteSaved: true });
       }
       if (kind === 'menu') {
-        // TODO(서버 단계): 식당 저장과 단계 전환을 하나의 원자적 RPC로 합친다.
+        // Pre-S4 only: preserve recovery of the old two-call contract without claiming atomicity.
         const { error } = await advanceRoomStage(roomId, 'confirmed');
-        if (error) { setConfirmationError('식당은 저장됐지만 약속을 확정하지 못했어요. 다시 시도해 주세요.'); return; }
+        if (error) { if (mounted.current) setConfirmationError('식당은 저장됐지만 약속을 확정하지 못했어요. 다시 시도해 주세요.'); if (/^S4/.test((error as { code?: string }).code ?? '')) await onRetrySupport?.(); return; }
       }
       setConfirmationOpen(false); setPlan(null); onConfirm(); onClose();
-    } catch { setConfirmationError(voteSaved ? '식당은 저장됐지만 약속을 확정하지 못했어요. 다시 시도해 주세요.' : '식당 선택을 저장하지 못했어요. 투표를 확인하고 다시 시도해 주세요.'); }
-    finally { operation.current = false; setBusy(false); }
+    } catch { if (mounted.current) setConfirmationError(decision ? '약속을 확정하지 못했어요. 다시 시도해 주세요.' : voteSaved ? '식당은 저장됐지만 약속을 확정하지 못했어요. 다시 시도해 주세요.' : '식당 선택을 저장하지 못했어요. 투표를 확인하고 다시 시도해 주세요.'); }
+    finally { operation.current = false; if (mounted.current) setBusy(false); }
   };
   // A refreshed room can recover an already-confirmed vote even after this component was remounted.
   useEffect(() => {
@@ -166,21 +207,28 @@ export default function VotingSheet({ visible, isOwner = false, stage = 'place',
   const close = () => { if (busy) return; if (confirmationOpen) setConfirmationOpen(false); else if (adding) { setAdding(false); setActionError(null); } else onClose(); };
   const buttonLabel = retry ? '약속 확정 다시 시도' : leader ? leader.label + '으로 정하기' : '정할 식당이 아직 없어요';
   const footer = !adding ? <View style={styles.footer}>
+    {!decision && decisionLoading ? <Text style={styles.hint} accessibilityLiveRegion="polite">서버 기능을 다시 확인하고 있어요. 입력 내용은 유지돼요.</Text> : null}
+    {decision && stage !== 'place' ? <Text style={styles.hint}>약속 확정 또는 정산 단계여서 투표를 바꿀 수 없어요.</Text> : null}
+    {decision && stage === 'place' ? <Text style={styles.hint} accessibilityLiveRegion="polite">투표만으로 자동 확정되지 않아요. 과반 최다 득표 식당을 방장이 확인해요.</Text> : null}
+    {decision && !decision.meeting_time ? <Text style={styles.hint}>약속 확정 전에 한국 시간 기준의 시간을 선택해야 해요.</Text> : null}
+    {decision?.permissions.can_select_time && stage === 'place' && onSelectTime ? <Button label={decision.meeting_time ? '시간 수정하기' : '시간 선택하기'} variant="secondary" disabled={busy} onPress={onSelectTime} /> : null}
     {restaurantLocked ? null : isOwner ? noCandidates && (suggestionStatus === 'error' || suggestionStatus === 'empty') ? null : <View style={styles.hintRow}><Crown size={14} color={colors.sub} /><Text style={styles.hint}>방장이 가장 많은 표를 받은 곳으로 정할 수 있어요.</Text></View>
-      : <View style={styles.mateHint}><Crown size={18} color={colors.sub} /><Text style={styles.mateHintText}>방장이 확정해요. 그동안 투표를 바꿀 수 있어요.</Text></View>}
+      : <View style={styles.mateHint}><Crown size={18} color={colors.sub} /><Text style={styles.mateHintText}>{decision ? '방장이 확정해요. 그동안 투표를 바꿀 수 있어요.' : '이전 서버의 투표 방식을 사용해요. 전원 투표하면 자동으로 정해질 수 있어요.'}</Text></View>}
+    {!decision && isOwner ? <Text style={styles.hint}>이전 서버에서는 전원 투표로 자동 결정될 수 있어요. 방장 확정 여부는 확인할 수 없어요.</Text> : null}
     {canConfirm ? <>{retry || (leader && !majority) ? <Text style={styles.hint} accessibilityLiveRegion="polite">{confirmationHint}</Text> : null}<Button label={buttonLabel} testID="voting-confirm-cta" accessibilityHint={confirmationHint}
-      disabled={busy || (!retry && (loading || loadError || !majority))} onPress={startConfirmation} /></> : null}
+      disabled={busy || (!retry && (loading || loadError || !majority)) || Boolean(decision && (!decision.permissions.can_confirm || !decision.meeting_time || decisionLoading))} onPress={startConfirmation} /></> : null}
   </View> : null;
 
   return <Modal visible={visible} transparent animationType="fade" onRequestClose={close}><SafeAreaProvider>
-    {confirmationOpen && plan ? <PlanConfirmation restaurant={plan.label} when={meetingTimeLabel(confirmedSlot, stage)} memberCount={participantCount ?? memberCount}
-      busy={busy} error={confirmationError} retry={plan.voteSaved} onCancel={close} onConfirm={() => void confirmPlan()} />
+    {confirmationOpen && plan ? <PlanConfirmation restaurant={plan.label} when={meetingTimeLabel(confirmedSlot, stage, meetingTime)} memberCount={decision?.voting.eligible_count ?? participantCount ?? memberCount}
+      busy={busy} error={confirmationError ?? (decisionError ? roomDecisionErrorMessage(decisionError) : null)} retry={plan.voteSaved} onCancel={close} onConfirm={() => void confirmPlan()} />
       : <VotingFrame title={adding ? (kind === 'menu' ? '식당 직접 추가' : '시간 직접 추가') : title}
         subtitle={adding ? (kind === 'menu' ? '가고 싶은 곳을 검색해서 후보에 올려요.' : '추가할 시간을 입력해 주세요.') : subtitle}
         closeLabel={adding ? (kind === 'menu' ? '식당 직접 추가 닫기' : '시간 직접 추가 닫기') : (kind === 'menu' ? '식당 시트 닫기' : '시간 시트 닫기')}
         onClose={close} footer={footer}>
-        {restaurantLocked ? <Text style={styles.savedNotice} accessibilityLiveRegion="polite">식당이 정해졌어요. 방장이 약속을 확정하면 끝나요</Text> : null}
+        {!decision && restaurantLocked ? <Text style={styles.savedNotice} accessibilityLiveRegion="polite">식당이 정해졌어요. 방장이 약속을 확정하면 끝나요</Text> : null}
         {actionError ? <Text accessibilityRole="alert" style={styles.error}>{actionError}</Text> : null}
+        {refreshDecision ? <DecisionRefreshError decision={{ error: decisionError ?? null, reload: refreshDecision }} /> : null}
         {adding ? <>
           <View style={styles.searchField}><TextField style={styles.searchInput} maxLength={120} label={kind === 'menu' ? '식당 검색' : '추가할 시간'} value={query} onChangeText={value => { setQuery(value); if (kind === 'menu' && value.trim().length >= 2) { setResults([]); setSearchState('loading'); } }} placeholder={placeholder} editable={!busy && !restaurantLocked}
             inputAccessory={<Pressable style={styles.iconButton} accessibilityRole="button" accessibilityLabel="검색어 지우기" disabled={busy} onPress={() => setQuery('')}><X size={18} color={colors.sub} /></Pressable>} /><Search size={18} color={colors.sub} style={styles.searchIcon} /></View>
@@ -189,20 +237,20 @@ export default function VotingSheet({ visible, isOwner = false, stage = 'place',
           {searchState === 'ready' && results.length === 0 ? <Text style={styles.note}>검색 결과가 없어요. 식당 이름을 확인해 주세요.</Text> : null}
           <View>{results.map(place => { const exists = options.some(option => votingLabelKey(option.label) === votingLabelKey(place.name)); return <View key={place.id} style={styles.result}>
             <MapPin size={20} color={colors.sub} /><View style={styles.resultText}><Text style={styles.resultName}>{place.name}</Text><Text style={styles.note}>{[place.address, exists ? '후보에 있음' : ''].filter(Boolean).join(' · ')}</Text></View>
-            <Pressable accessibilityRole="button" accessibilityLabel={place.name + (exists ? ' 추가됨' : ' 추가')} accessibilityState={{ disabled: exists || busy || restaurantLocked }} disabled={exists || busy || restaurantLocked}
+            <Pressable accessibilityRole="button" accessibilityLabel={place.name + (exists ? ' 추가됨' : ' 추가')} accessibilityState={{ disabled: exists || busy || restaurantLocked || decisionLoading }} disabled={exists || busy || restaurantLocked || decisionLoading}
               onPress={() => add(place.name)} style={[styles.resultAdd, exists && styles.inactive]}><Text style={styles.resultAddText}>{exists ? '✓ 추가됨' : '추가'}</Text></Pressable>
           </View>; })}</View>
-          {query.trim() && searchState !== 'loading' ? <Button label="이 이름으로 후보 추가" variant="secondary" disabled={busy || options.some(option => votingLabelKey(option.label) === votingLabelKey(query))} onPress={() => add(query.trim())} /> : !query.trim() ? <Text style={styles.note}>{kind === 'menu' ? '식당 이름을 입력해 주세요. 검색은 두 글자부터 가능해요.' : '추가할 시간을 입력해 주세요.'}</Text> : null}
+          {query.trim() && searchState !== 'loading' ? <Button label="이 이름으로 후보 추가" variant="secondary" disabled={busy || decisionLoading || options.some(option => votingLabelKey(option.label) === votingLabelKey(query))} onPress={() => add(query.trim())} /> : !query.trim() ? <Text style={styles.note}>{kind === 'menu' ? '식당 이름을 입력해 주세요. 검색은 두 글자부터 가능해요.' : '추가할 시간을 입력해 주세요.'}</Text> : null}
           {/* TODO(서버 단계): 후보에는 이름만 저장된다. 검색 주소/사진/가격/거리와 AI 출처 저장 계약은 없다. */}
         </> : <>
           {!restaurantLocked ? recommendationControls : null}
           {loading ? <Text style={styles.note}>후보를 불러오는 중이에요</Text> : loadError ? <FailureCard title="후보를 불러오지 못했어요" reason="잠시 후 다시 시도해 주세요." icon={<MapPin size={28} color={colors.sub} />} onRetry={() => void load()} /> : null}
           {!loading && !loadError ? options.map(option => <CandidateRow key={option.id} option={option} highlighted={leader?.id === option.id && option.voters.length > 0} participants={participants}
-            suggestion={suggestions.find(item => votingLabelKey(item.label) === votingLabelKey(option.label))} busy={busy || restaurantLocked} onVote={() => vote(option)}
+            suggestion={suggestions.find(item => votingLabelKey(item.label) === votingLabelKey(option.label))} busy={busy || restaurantLocked || decisionLoading} onVote={() => vote(option)}
             onRemove={isOwner || (Boolean(myId) && option.createdBy === myId) ? () => discard(option) : undefined} />) : null}
           {!loadError && openSuggestions.length ? <Text accessibilityRole="header" style={styles.resultName}>{openSuggestions.some(item => item.source === 'rules') ? '추천 식당' : suggestionTitle ?? '추천 식당'}</Text> : null}
           {!loadError ? openSuggestions.map(item => <CandidateRow key={'ai-' + item.label} option={{ id: item.label, kind, label: item.label, createdBy: null, voters: [], mine: false }}
-            suggestion={item} pendingAddition participants={participants} busy={busy || loading} onVote={() => add(item.label, true)} />) : null}
+            suggestion={item} pendingAddition participants={participants} busy={busy || loading || decisionLoading} onVote={() => add(item.label, true)} />) : null}
           {!restaurantLocked && (suggestionStatus === 'error' || suggestionStatus === 'empty') ? <View style={styles.failure}>
             <View style={styles.failureIcon}><MapPin size={28} color={colors.selectedText} /></View><Text style={styles.failureTitle}>{suggestionStatus === 'empty' ? '근처에서 찾은 곳이 없어요' : '추천을 불러오지 못했어요'}</Text>
             <Text style={styles.failureNote}>{suggestionReason || (suggestionStatus === 'empty' ? '아는 식당을 직접 추가해 주세요.' : '추천을 불러오지 못했어요. 다시 시도해 주세요.') }</Text>

@@ -7,6 +7,8 @@ import {
   type SettlementSummary,
 } from './settlementSummary';
 import { supabase } from './supabase';
+import { fetchS4Capabilities } from './roomDecisions';
+import { normalizeMeetingTime, type MeetingTime } from './meetingTime';
 
 export type RoomParticipant = {
   id: string;
@@ -38,6 +40,11 @@ export type RoomSummary = {
   ownerId: string | null;
   isConfirmed: boolean;
   confirmedSlot: string | null;
+  meetingTime?: MeetingTime | null;
+  decisionRevision?: string | null;
+  appointmentConfirmedAt?: string | null;
+  appointmentConfirmedBy?: string | null;
+  decisionMode?: 'legacy' | 's4';
   expiresAt: string;
   meetingDate: string;
   locationName: string | null;
@@ -86,6 +93,12 @@ type RoomRow = {
   owner_id: string | null;
   is_confirmed: boolean;
   confirmed_slot: string | null;
+  meeting_starts_at?: string | null;
+  meeting_ends_at?: string | null;
+  meeting_time_zone?: string | null;
+  s4_revision?: string;
+  appointment_confirmed_at?: string | null;
+  appointment_confirmed_by?: string | null;
   expires_at: string;
   meeting_date: string;
   location_name: string | null;
@@ -194,17 +207,31 @@ async function sweepExpiredRooms(): Promise<void> {
   await supabase.rpc('delete_expired_rooms');
 }
 
+const ROOM_PROJECTION = 'id, code, title, color, stage, owner_id, is_confirmed, confirmed_slot, expires_at, meeting_date, location_name, confirmed_menu, ';
+const S4_PROJECTION = 'meeting_starts_at, meeting_ends_at, meeting_time_zone, s4_revision::text, appointment_confirmed_at, appointment_confirmed_by, ';
+function decisionFields(row: RoomRow, mode: 'legacy' | 's4') {
+  if (mode === 'legacy') return { meetingTime: null, decisionRevision: null, appointmentConfirmedAt: null, appointmentConfirmedBy: null, decisionMode: mode };
+  if (typeof row.s4_revision !== 'string' || !/^(0|[1-9]\d*)$/.test(row.s4_revision)
+    || row.appointment_confirmed_at === undefined || row.appointment_confirmed_by === undefined) throw new Error('밥약 상태를 확인하지 못했어요. 다시 불러와 주세요.');
+  const absent = row.meeting_starts_at === null && row.meeting_ends_at === null && row.meeting_time_zone === null;
+  return { meetingTime: absent ? null : normalizeMeetingTime({ starts_at: row.meeting_starts_at, ends_at: row.meeting_ends_at, time_zone: row.meeting_time_zone }),
+    decisionRevision: row.s4_revision, appointmentConfirmedAt: row.appointment_confirmed_at, appointmentConfirmedBy: row.appointment_confirmed_by, decisionMode: mode };
+}
+
 export async function fetchMyRooms(): Promise<{
   data: RoomSummary[] | null;
   error: Error | null;
 }> {
+  const support = await fetchS4Capabilities();
+  if (support.mode === 'error') return { data: null, error: support.error };
+  const mode = support.mode;
   /* 기한이 지난 방을 먼저 치운다. 실패해도 목록은 그대로 읽는다 */
   await sweepExpiredRooms().catch(() => undefined);
 
   const { data, error } = await supabase
     .from('rooms')
     .select(
-      'id, code, title, color, stage, owner_id, is_confirmed, confirmed_slot, expires_at, meeting_date, location_name, confirmed_menu, ' +
+      ROOM_PROJECTION + (support.mode === 's4' ? S4_PROJECTION : '') +
         'participants(id, profile_id, name, avatar_color), ' +
         'messages(message, sender_name, created_at)',
     )
@@ -216,9 +243,11 @@ export async function fetchMyRooms(): Promise<{
 
   if (error) return { data: null, error };
 
-  const rooms = (data ?? []).map<RoomSummary>((row) => {
+  let invalidRows = 0;
+  const rooms = (data ?? []).flatMap<RoomSummary>((row) => {
+    try {
     const last = row.messages?.[0];
-    return {
+    return [{
       id: row.id,
       code: row.code,
       title: row.title,
@@ -227,6 +256,7 @@ export async function fetchMyRooms(): Promise<{
       ownerId: row.owner_id,
       isConfirmed: row.is_confirmed,
       confirmedSlot: row.confirmed_slot,
+      ...decisionFields(row, mode),
       expiresAt: row.expires_at,
       meetingDate: row.meeting_date,
       /* 메뉴 확정 RPC가 쓴 서버 상태를 표시한다. 클라이언트가 rooms 를 직접 갱신하지 않는다. */
@@ -236,8 +266,10 @@ export async function fetchMyRooms(): Promise<{
       lastMessage: last
         ? { text: last.message, senderName: last.sender_name, createdAt: last.created_at }
         : null,
-    };
+    }];
+    } catch { invalidRows++; return []; }
   });
+  if (invalidRows && !rooms.length) return { data: null, error: new Error('밥약 시간을 확인하지 못했어요. 다시 불러와 주세요.') };
 
   await attachAvatars(rooms);
 
@@ -249,10 +281,12 @@ export async function fetchRoom(roomId: string): Promise<{
   data: RoomSummary | null;
   error: Error | null;
 }> {
+  const support = await fetchS4Capabilities();
+  if (support.mode === 'error') return { data: null, error: support.error };
   const { data, error } = await supabase
     .from('rooms')
     .select(
-      'id, code, title, color, stage, owner_id, is_confirmed, confirmed_slot, expires_at, meeting_date, location_name, confirmed_menu, ' +
+      ROOM_PROJECTION + (support.mode === 's4' ? S4_PROJECTION : '') +
         'participants(id, profile_id, name, avatar_color), ' +
         'messages(message, sender_name, created_at)',
     )
@@ -263,6 +297,8 @@ export async function fetchRoom(roomId: string): Promise<{
   if (error) return { data: null, error };
   if (!data) return { data: null, error: null };
 
+  let fields;
+  try { fields = decisionFields(data, support.mode); } catch { return { data: null, error: new Error('밥약 시간을 확인하지 못했어요. 다시 불러와 주세요.') }; }
   const room: RoomSummary = {
     id: data.id,
     code: data.code,
@@ -272,6 +308,7 @@ export async function fetchRoom(roomId: string): Promise<{
     ownerId: data.owner_id,
     isConfirmed: data.is_confirmed,
     confirmedSlot: data.confirmed_slot,
+    ...fields,
     expiresAt: data.expires_at,
     meetingDate: data.meeting_date,
     locationName: data.location_name ?? data.confirmed_menu,
@@ -411,7 +448,6 @@ export async function createRoom(input: {
   meetingDate: string;
   expiresAt: string;
   locationName?: string | null;
-  confirmedSlot?: string | null;
   color?: string;
 }): Promise<{ roomId: string | null; code: string | null; error: Error | null }> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -431,8 +467,8 @@ export async function createRoom(input: {
       expires_at: input.expiresAt,
       owner_id: input.ownerId,
       location_name: input.locationName ?? null,
-      confirmed_slot: input.confirmedSlot ?? null,
-      is_confirmed: Boolean(input.confirmedSlot),
+      confirmed_slot: null,
+      is_confirmed: false,
       /* 색을 안 주면 팔레트에서 고른다 — 예전에는 늘 주황이라 방이 다 같아 보였다 */
       color: input.color ?? randomRoomColor(),
     });

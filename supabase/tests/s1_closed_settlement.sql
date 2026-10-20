@@ -7,6 +7,7 @@ select no_plan();
 insert into public.rooms(id,code,title,meeting_date,expires_at,owner_id)
 values('20000000-0000-4000-8000-000000000004','S1CLOSED','Synthetic final completion',current_date+1,clock_timestamp()+interval '1 day','10000001-0000-4000-8000-000000000001');
 insert into public.participants(room_id,profile_id,name) values('20000000-0000-4000-8000-000000000004','10000002-0000-4000-8000-000000000002','Synthetic B');
+select pg_temp.prepare_confirmed_settlement('20000000-0000-4000-8000-000000000004');
 set local role authenticated;
 select pg_temp.as_user('10000001-0000-4000-8000-000000000001');
 insert into pg_temp.s1_ids values('closed-final',public.create_room_settlement_v2('20000000-0000-4000-8000-000000000004','Synthetic final',2000,'Synthetic bank','0000','Synthetic A'));

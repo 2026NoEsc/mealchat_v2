@@ -1,3 +1,4 @@
+import { normalizeAvailabilityRows } from "./s4Availability.ts";
 import { checkRequiredConsent, checkRoomPermission } from "./consentGate.ts";
 import "@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "@supabase/server";
@@ -129,6 +130,8 @@ export default {
         const jwtValidation = validateUserClaims(
           requestContext.jwtClaims,
           Deno.env.get("SUPABASE_URL"),
+          Date.now() / 1000,
+          Deno.env.get("MEALCHAT_LOCAL_AUTH_ISSUER"),
         );
 
         if (!jwtValidation.ok) {
@@ -294,6 +297,7 @@ export default {
             {
               error:
                 availability.error,
+              ...(availability.code?{code:availability.code}:{}),
             },
             {
               status:
@@ -833,7 +837,7 @@ function slotLabel(
 
   const weekday =
     WEEKDAYS[
-      new Date(y, m - 1, d).getDay()
+      new Date(Date.UTC(y, m - 1, d)).getUTCDay()
     ];
 
   return `${m}/${d}(${weekday}) ${
@@ -863,6 +867,7 @@ async function loadRoomAvailability(
     | {
         ok: false;
         error: string;
+        code?: string;
         status: number;
       }
   > {
@@ -884,11 +889,10 @@ async function loadRoomAvailability(
     };
   }
 
-  const rows = Array.isArray(
-      participants,
-    )
-    ? participants
-    : [];
+  const room=await supabaseAdmin.from("rooms").select("expires_at").eq("id",roomId).maybeSingle();
+  const expiry=Date.parse(room.data?.expires_at??'');
+  if(room.error||!room.data||!Number.isFinite(expiry)||expiry<=Date.now())return {ok:false,error:"Not a room member",status:403};
+  const rows=normalizeAvailabilityRows(participants,room.data.expires_at);
 
   const isMember = rows.some(
     (row: {
@@ -904,6 +908,7 @@ async function loadRoomAvailability(
     };
   }
 
+  if(rows.some(row=>row.schedule.slots.length===0))return {ok:false,error:"Availability incomplete",code:"S4004",status:409};
   const totalCount = rows.length;
 
   /* 칸별로 누가 가능한지 — 사람 수만 세면 되므로 인덱스만 담는다 */
@@ -974,6 +979,7 @@ async function loadRoomAvailability(
 
     let start = sorted[0];
     let prev = sorted[0];
+    let continuous=new Set(byCell.get(`${date}-${start}`)??[]);
 
     const close = (
       endHour: number,
@@ -1035,7 +1041,10 @@ async function loadRoomAvailability(
       i < sorted.length;
       i += 1
     ) {
-      if (sorted[i] === prev + 1) {
+      const nextSet=byCell.get(`${date}-${sorted[i]}`)??new Set<number>();
+      const common=new Set([...continuous].filter(p=>nextSet.has(p)));
+      if (sorted[i] === prev + 1 && common.size>0) {
+        continuous=common;
         prev = sorted[i];
         continue;
       }
@@ -1043,6 +1052,7 @@ async function loadRoomAvailability(
       close(prev);
       start = sorted[i];
       prev = sorted[i];
+      continuous=new Set(nextSet);
     }
 
     close(prev);

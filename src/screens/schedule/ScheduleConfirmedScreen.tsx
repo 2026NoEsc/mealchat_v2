@@ -16,6 +16,8 @@ import { fontFamily } from '../../theme/typography';
 import ScheduleFrame from './ScheduleFrame';
 import { recommendationDate } from './scheduleState';
 import type { ScheduleRecommendResponse, SlotPick } from './scheduleTypes';
+import { useRoomDecision } from '../../lib/useRoomDecision';
+import { S4TimeSelection } from './S4ScheduleFlow';
 
 const INVOKE_TIMEOUT_MS = 70_000;
 
@@ -29,6 +31,13 @@ type Params = { roomId?: string; name?: string; invitees?: string[] };
 type Failure = { title: string; message: string; action: 'restart' | 'home' | 'retry' | 'continue' };
 
 export default function ScheduleConfirmedScreen() {
+  const { current } = useNavigation();
+  const params = current.params as Params | undefined;
+  const roomId = params?.roomId ?? null;
+  const decision = useRoomDecision(roomId, Boolean(roomId));
+  return !roomId || decision.mode === 'legacy' ? <LegacyScheduleConfirmedScreen key={`${roomId}:${decision.accountId}`} /> : <S4TimeSelection key={`${roomId}:${decision.accountId}`} roomId={roomId} name={params?.name ?? '새 밥약'} decision={decision} />;
+}
+function LegacyScheduleConfirmedScreen() {
   /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
 
   const { navigate, resetTo, goBackWith, current } = useNavigation();
@@ -113,7 +122,7 @@ export default function ScheduleConfirmedScreen() {
 
     setConfirming(true);
     try {
-      // TODO(서버 단계): 선택 시간 저장 계약. chosen.slot을 저장하는 계약이 없으므로 기존 stage 변경만 유지한다.
+      // Pre-S4 only: a recommendation remains a comparison, never a persisted appointment time.
       const { error } = await advanceRoomStage(roomId, 'place');
       if (error) {
         Alert.alert('식당 정하기로 넘어가지 못했어요', '방장과 참여 상태를 확인한 뒤 다시 시도해 주세요.');
@@ -128,6 +137,7 @@ export default function ScheduleConfirmedScreen() {
 
   return <ScheduleFrame step={3} title="언제가 좋을까요?" subtitle="모인 일정으로 추천한 시간을 살펴보고, 식당을 정하러 가요." onBack={goPrev}
     footer={<Button label={manualContinuation ? '추천 없이 식당 정하기' : '식당 정하러 가기'} loading={confirming} disabled={confirming || loading || (!manualContinuation && (Boolean(failure) || !chosen))} onPress={() => void goToRestaurants()} />}>
+    <Text style={styles.note} accessibilityLiveRegion="polite">시간 저장은 아직 지원하지 않는 서버예요. 추천은 비교용이며, 시간 미정으로 식당 정하기 단계로 이동해요.</Text>
     {loading ? <View style={styles.state}><ActivityIndicator color={colors.primary} /><Text style={styles.note}>가능한 시간을 분석하고 있어요.</Text></View>
       : failure ? <View style={styles.state}>
         <View style={styles.stateIcon}><Clock size={28} color={colors.selectedText} /></View>

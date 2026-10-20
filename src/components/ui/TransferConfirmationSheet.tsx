@@ -3,11 +3,14 @@ import { StyleSheet, Text, View } from 'react-native';
 import BottomSheet from './BottomSheet';
 import { Button } from './Button';
 import { formatAmount } from '../../lib/format';
+import { s4008Message } from '../../lib/roomSettlementPolicy';
 import { v3Colors as colors, v3FeedbackColors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 
 export function settlementUiError(error: unknown): string {
   const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+  if (code === 'S4008' || code === 'SETTLEMENT_REQUIRES_CONFIRMATION') return s4008Message(error, 'settlement');
+  if (code === '22P02' || code === '22023') return '입력 내용을 확인하고 다시 시도해 주세요.';
   if (code === 'S1005' || code === 'SETTLEMENT_DISCLOSURE_CLOSED') return '끝난 정산은 되돌릴 수 없어요. 새 정산을 요청해 주세요.';
   if (code === 'S1001') return '현재 약관에 동의한 뒤 다시 이용해 주세요.';
   if (code === 'P0002') return '이 정산의 계좌를 볼 수 없어요.';

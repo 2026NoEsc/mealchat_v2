@@ -82,12 +82,10 @@ export function roomTimerLabel(
   expiresAt: string,
   settled: boolean,
   now: Date = new Date(),
+  boundedSettlement = false,
 ): string {
-  /*
-   * 정산 전에는 카운트다운이 아니라 규칙을 알려 준다. 기한은 정산이 끝나야
-   * 정해지므로, 그 전에 세는 숫자는 실제 마감과 아무 관계가 없다.
-   */
-  if (!settled) return '정산 후 24시간 뒤 사라져요';
+  // Pre-S4 preserves its old rule. S4 supplies the actual finite retention deadline during settlement.
+  if (!settled && !boundedSettlement) return '정산 후 24시간 뒤 사라져요';
 
   const expires = new Date(expiresAt);
   if (Number.isNaN(expires.getTime())) return '';
@@ -95,9 +93,10 @@ export function roomTimerLabel(
   const ms = expires.getTime() - now.getTime();
   if (ms <= 0) return '이미 종료된 밥약이에요';
 
-  if (ms < DAY_MS) return `${clockText(ms)} 후 방이 사라져요.`;
+  const prefix = !settled ? '정산 중 · ' : '';
+  if (ms < DAY_MS) return `${prefix}${clockText(ms)} 후 방이 사라져요.`;
 
-  return `${durationText(ms)} 뒤 방이 사라져요`;
+  return `${prefix}${durationText(ms)} 뒤 방이 사라져요`;
 }
 
 /** 오전/오후 12시간제. 채팅 말풍선과 목록 시간에 함께 쓴다. */

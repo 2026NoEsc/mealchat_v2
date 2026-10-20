@@ -8,6 +8,8 @@ import MateToggle from '../../components/ui/MateToggle';
 import TextField from '../../components/ui/TextField';
 import { fetchMyFriends, type Friend } from '../../lib/friends';
 import { createRoom, createRoomInvitation } from '../../lib/rooms';
+import { isRoomMembershipClosed, membershipClosedMessage } from '../../lib/roomMembership';
+import { roomCreationDeadline } from '../../lib/meetingTime';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { v3Layout } from '../../theme/scale';
 import { scheduleLayout as layout } from '../../theme/scheduleTokens';
@@ -65,29 +67,33 @@ export default function ScheduleDetailScreen() {
 
     setCreating(true);
     try {
-      /* 조율이 끝나기 전에는 언제 만날지 모른다 — 넉넉히 잡고 확정 때 좁힌다 */
-      const until = new Date();
-      until.setDate(until.getDate() + 7);
-      const meetingDate = until.toISOString().slice(0, 10);
+      // A creation deadline is not an appointment; keep the existing seven-day policy in KST.
+      const deadline = roomCreationDeadline();
 
       const { roomId, error } = await createRoom({
         ownerId: user.id,
         title: name.trim() || '새 밥약',
-        meetingDate,
-        expiresAt: new Date(`${meetingDate}T23:59:59`).toISOString(),
+        ...deadline,
       });
 
       if (error || !roomId) {
-        Alert.alert('방 만들기 실패', error?.message ?? '잠시 후 다시 시도해 주세요.');
+        Alert.alert('방 만들기 실패', '잠시 후 다시 시도해 주세요.');
         return;
       }
 
       const failed: string[] = [];
+      let membershipClosed = false;
       for (const friendId of picked) {
         const result = await createRoomInvitation(roomId, friendId);
+        if (isRoomMembershipClosed(result.error)) { membershipClosed = true; break; }
         if (result.error) failed.push(friendId);
       }
 
+      if (membershipClosed) {
+        Alert.alert('초대할 수 없어요', membershipClosedMessage);
+        navigate('ChatRoom', { roomId, title: name.trim() });
+        return;
+      }
       if (failed.length > 0) {
         Alert.alert(
           '일부 초대 실패',

@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 
 import { notify } from '../lib/confirm';
 import { joinRoomByCode } from '../lib/rooms';
+import { isRoomMembershipClosed, membershipClosedMessage } from '../lib/roomMembership';
 import BottomSheet from './ui/BottomSheet';
 import { Button } from './ui/Button';
 import TextField from './ui/TextField';
@@ -11,7 +12,7 @@ const CODE_LENGTH = 6;
 
 /*
  * join_room_by_code 가 던지는 문구는 영어다. 사람이 읽을 말로 바꾼다.
- * 모르는 문구는 그대로 보여 준다 — 뭉뚱그린 안내보다 원문이 원인을 찾기 쉽다.
+ * 알려진 문구만 번역하며 서버 원문은 노출하지 않는다.
  */
 const JOIN_ERRORS: Record<string, string> = {
   'Invalid invite code': '코드를 다시 확인해 주세요. 없는 초대 코드예요.',
@@ -30,11 +31,13 @@ export default function JoinCodeSheet({
   visible,
   onClose,
   onJoined,
+  onMembershipClosed,
 }: {
   visible: boolean;
   onClose: () => void;
   /** 들어간 방으로 이어 준다 */
   onJoined: (roomId: string) => void;
+  onMembershipClosed?: () => void;
 }) {
   const [code, setCode] = useState('');
   const [joining, setJoining] = useState(false);
@@ -52,8 +55,9 @@ export default function JoinCodeSheet({
     try {
       const { roomId, error } = await joinRoomByCode(code);
       if (error) {
+        if (isRoomMembershipClosed(error)) { close(); onMembershipClosed?.(); notify('입장할 수 없어요', membershipClosedMessage); return; }
         // RPC 가 잘못된 코드·만료를 구분해서 던진다
-        notify('입장할 수 없어요', JOIN_ERRORS[error.message] ?? error.message);
+        notify('입장할 수 없어요', JOIN_ERRORS[error.message] ?? '초대 코드를 처리하지 못했어요. 잠시 후 다시 시도해 주세요.');
         return;
       }
       setCode('');

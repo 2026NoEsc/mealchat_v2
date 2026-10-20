@@ -13,10 +13,18 @@ import { scheduleColors } from '../../theme/scheduleTokens';
 import { v3Colors as colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 import ScheduleFrame from './ScheduleFrame';
+import { useRoomDecision } from '../../lib/useRoomDecision';
+import { S4ScheduleTime } from './S4ScheduleFlow';
 
 type Params = { roomId?: string; name?: string; invitees?: string[] };
 
 export default function ScheduleTimeScreen() {
+  const { current } = useNavigation();
+  const roomId = (current.params as Params | undefined)?.roomId ?? null;
+  const decision = useRoomDecision(roomId, true);
+  return decision.mode === 'legacy' ? <LegacyScheduleTimeScreen key={`${roomId}:${decision.accountId}`} /> : <S4ScheduleTime key={`${roomId}:${decision.accountId}`} roomId={roomId} name={(current.params as Params | undefined)?.name ?? ''} invitees={(current.params as Params | undefined)?.invitees} decision={decision} />;
+}
+function LegacyScheduleTimeScreen() {
   /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
   const { navigate, goBackWith, current } = useNavigation();
 
@@ -81,7 +89,7 @@ export default function ScheduleTimeScreen() {
     setSaving(false);
 
     if (error) {
-      Alert.alert('저장 실패', error.message);
+      Alert.alert('저장 실패', '일정을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.');
       return;
     }
 

@@ -185,6 +185,16 @@ S5 DDL 마이그레이션과 Edge Function 배포가 완료된 직후 다음 순
 4. **Supabase security advisors 재실행**:
    - 운영 프로젝트 Security Advisor를 재실행하여 신규 테이블 RLS 활성화 여부, Security Definer 함수의 `search_path=''` 설정, 과도한 권한 노출 여부를 점검한다.
 
+## S4 운영 반영 전 확인
+
+- [ ] `supabase/tests/s4_legacy_place_inventory.sql`을 대상 DB에서 읽기 전용으로 실행하고 조회 시각·집계 건수를 기록한다. S4 이전 스키마에서도 실행할 수 있다(PostgreSQL 16+). 시간 미선택 place 방 전체/유효 일정이 없는 방/미제출 멤버가 있는 방/실제 멤버가 없는 방 및 미확정 scheduling/place에 열린 bill이 있는 방의 수만 반환하며 식별자·일정 원문을 출력하지 않는다. 운영에서는 아직 실행하지 않았다.
+- [ ] 시간 없는 place 방은 실제 멤버의 일정 제출→방장 시간 선택→현재 투표 검증→최종 확정으로 복구한다. 시간·방장 확정 증거를 backfill하지 않는다.
+- [ ] S4 3개 migration 뒤 `20261019022100_fix_settlement_null_participants.sql`과 `20261019022110_s4_confirmed_settlement_boundary.sql`, `20261020010000_s4_meeting_time_preview.sql`, `20261020020000_s4_settlement_restart_lifecycle.sql`, 최종 보강 `20261020030000_s4_revoke_update_settlement_amount.sql`(금액 RPC 회수·폐쇄 금액 보호·정산 단계 pending 초대 만료)을 포함한 최종 SQL identity를 검토한다. 새 정산은 confirmed 또는 방장 확정 시각이 있는 settling/done에서 생성하고 NULL-profile 표시행은 새 수취인에서 제외한다. 이전 정산 방의 데이터는 보존한다.
+- [ ] 방장 확정 done의 새 bill 생성에서 settling/settled_at=NULL/유한 min(bill 생성+7일, 최초 방장 확정+30일), 완료 뒤 min(완료+24시간, 최초 확정+30일) 정리 기한, 기존 계좌 종료 보존을 확인한다. s4_legacy_place_inventory.sql의 expired_owner_confirmed_done_with_open_bill(복구 제외)·rooms_with_nonfinite_expiry도 사전 집계한다. 복구는 기존 expires_at과 원래 bill+7일/확정+30일이 모두 미래인 방만 허용하며 만료 방을 되살리지 않는다. settling/done의 코드 참가·초대 생성·수락은 S4003/hint=operation=membership로 거절되는지 확인한다. 미완료 만료 방 삭제 후 bill.room_id=NULL 및 기존 수취인 정산 권한 보존을 확인한다. 로컬 Edge issuer 설정은 LOCAL-RUN.md를 따르고 호스팅에는 MEALCHAT_LOCAL_AUTH_ISSUER를 등록하지 않는다.
+- [ ] 직접 시간 선택은 preview_room_meeting_time_v1의 available_count/eligible_count를 표시한 뒤 방장이 결정한다. 저장에는 표시한 preview revision과 같은 구간을 사용하고 S4005이면 재조회·재확인한다. 새 조회 RPC의 STABLE·현재 멤버십·좁은 EXECUTE와 읽기/쓰기 비차단을 확인한다.
+- [ ] 앱이 place의 `permissions.can_submit` 예외, `legacy_settlement_unverified`, `S4011`(요청 이력 상한), 정산 RPC의 `S4008/SETTLEMENT_REQUIRES_CONFIRMATION`을 처리하는지 확인한다. 일정 변경 이력은 사용자1,000/방1,000×max(5,실제 참가자 수)행으로 제한하며 방장 시간 선택·확정은 제외한다. 같은 일정 재제출은 이력을 추가하지 않는다. 기록된 성공 ID replay를 보존한다. S4008은 hint의 operation=settlement/vote_confirmation으로 분기한다. 새 cron 등록은 없다.
+- [ ] 별도 승인된 운영 반영 뒤 migration/function identity·ACL·다중 사용자 격리·읽기/쓰기 경합·정산 gate·앱 왕복을 확인하고 security advisors를 다시 실행한다. 이 문서는 원격 변경 승인이 아니다.
+
 ## Develop 커밋 후 주의
 
 **운영 반영 승인 전까지 Develop에서 `supabase db push`는 금지한다.** M7이 빠진 채 M6의 필수 약관 gate만 적용되면 유효한 current bundle이 없어 S1006으로 전체 서비스 접근이 차단된다. M1~M6만 먼저 배포하지 않는다.

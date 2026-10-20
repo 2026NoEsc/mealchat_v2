@@ -104,7 +104,7 @@ export default function HomeScreen() {
     </View></Modal>
     {rooms.length > 0 && !menuShown ? fab : null}
     <Toast {...toastProps} bottom={96} />
-    <JoinCodeSheet visible={joinOpen} onClose={() => setJoinOpen(false)} onJoined={(roomId) => navigate('ChatRoom', { roomId })} />
+    <JoinCodeSheet visible={joinOpen} onClose={() => setJoinOpen(false)} onMembershipClosed={reload} onJoined={(roomId) => navigate('ChatRoom', { roomId })} />
   </View>;
 }
 const styles = StyleSheet.create({

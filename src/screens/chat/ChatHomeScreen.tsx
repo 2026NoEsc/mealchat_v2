@@ -23,6 +23,8 @@ import {
   type RoomStatus,
 } from '../../lib/roomFormat';
 import { previewText } from '../../lib/emoticon';
+import { notify } from '../../lib/confirm';
+import { isRoomMembershipClosed, membershipClosedMessage } from '../../lib/roomMembership';
 import {
   acceptRoomInvitation,
   declineRoomInvitation,
@@ -115,7 +117,8 @@ export default function ChatHomeScreen() {
 
       if (error) {
         // RPC 가 잘못된 코드·만료를 구분해서 던진다
-        Alert.alert('입장할 수 없어요', error.message);
+        Alert.alert('입장할 수 없어요', isRoomMembershipClosed(error) ? membershipClosedMessage : '초대 코드를 확인하고 다시 시도해 주세요.');
+        if (isRoomMembershipClosed(error)) { setCode(''); reload(); await reloadInvitations(); }
         return;
       }
 
@@ -135,7 +138,8 @@ export default function ChatHomeScreen() {
       const { roomId, error } = await acceptRoomInvitation(invitation.id);
 
       if (error) {
-        Alert.alert('초대를 수락할 수 없어요', error.message);
+        notify('초대를 수락할 수 없어요', isRoomMembershipClosed(error) ? membershipClosedMessage : '잠시 후 다시 시도해 주세요.');
+        if (isRoomMembershipClosed(error)) { await reloadInvitations(); setInvitations(previous => previous.filter(item => item.id !== invitation.id)); reload(); }
         return;
       }
 

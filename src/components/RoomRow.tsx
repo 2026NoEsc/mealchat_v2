@@ -3,8 +3,11 @@ import { previewText } from '../lib/emoticon';
 import { relativeTime } from '../lib/format';
 import { roomStatus } from '../lib/roomFormat';
 import type { RoomStage, RoomSummary } from '../lib/rooms';
+import { formatMeetingTime } from '../lib/meetingTime';
+import { unverifiedSettlementLabel } from '../lib/roomSettlementPolicy';
 import { v3Colors as colors } from '../theme/tokens';
 import { fontFamily } from '../theme/typography';
+import RoomTimer from './ui/RoomTimer';
 const ROOM_ARTS = [require('../../assets/brand/moa.png'), require('../../assets/brand/ddori.png'), require('../../assets/brand/dudu.png'), require('../../assets/brand/welling2.png')];
 // Same room-id assignment as roomCharacterFor; original assets retain Figma's transparent padding.
 function roomArt(id: string) { return ROOM_ARTS[Array.from(id).reduce((sum, char) => sum + char.charCodeAt(0), 0) % ROOM_ARTS.length]; }
@@ -16,12 +19,8 @@ export const HOME_STAGE_LABELS: Record<RoomStage, string> = {
 // TODO(서버 단계): 메뉴 선택 단계가 RoomStage에 추가되면 '메뉴 정하는 중'으로 표시한다.
 
 function meetingLabel(room: RoomSummary) {
-  const slot = room.confirmedSlot?.trim();
-  const date = slot ? new Date(slot) : null;
-  const valid = date && !Number.isNaN(date.getTime());
-  const day = valid ? (date.getMonth() + 1) + '월 ' + date.getDate() + '일 (' + ['일','월','화','수','목','금','토'][date.getDay()] + ') ' + String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0') : '';
   // TODO(서버 단계): 실제 제출 인원 조회가 제공되면 표시한다. 참가 인원으로 대신하지 않는다.
-  const when = day || slot || '';
+  const when = formatMeetingTime(room.meetingTime, room.stage, room.confirmedSlot);
   return [when, room.locationName || '장소 미정'].filter(Boolean).join(' · ');
 }
 
@@ -30,9 +29,10 @@ export default function RoomRow({ room, unreadCount = 0, onPress }: {
   room: RoomSummary; unreadCount?: number; onPress: () => void;
 }) {
   const expired = roomStatus(room) === 'expired';
-  const confirmed = !expired && (room.stage === 'confirmed' || room.stage === 'done');
+  const settlementLabel = unverifiedSettlementLabel(room.stage, Boolean(room.appointmentConfirmedAt), room.decisionMode === 's4');
+  const confirmed = !expired && !settlementLabel && (room.stage === 'confirmed' || room.stage === 'done');
   const active = !expired && (room.stage === 'place' || room.stage === 'settling');
-  const label = expired ? '종료' : HOME_STAGE_LABELS[room.stage];
+  const label = expired ? '종료' : settlementLabel ?? HOME_STAGE_LABELS[room.stage];
   return <Pressable accessibilityRole="button" accessibilityLabel={room.title + ', ' + label} onPress={onPress}
     style={({ pressed }) => [styles.card, pressed && styles.pressed]}>
     <View style={styles.avatar}><Image source={roomArt(room.id)} resizeMode="contain" style={styles.image} /></View>
@@ -41,7 +41,9 @@ export default function RoomRow({ room, unreadCount = 0, onPress }: {
         <Text style={styles.title} numberOfLines={1}>{room.title}</Text>
         <View style={[styles.chip, confirmed && styles.safe, active && styles.active]}><Text style={[styles.stage, confirmed && styles.safeText, active && styles.activeText]}>{label}</Text></View>
       </View>
-      <Text style={styles.meta} numberOfLines={1}>{meetingLabel(room)}</Text>
+      <Text style={styles.meta} numberOfLines={2}>{meetingLabel(room)}</Text>
+      {room.decisionMode === 's4' && (room.stage === 'settling' || room.stage === 'done') ?
+        <RoomTimer expiresAt={room.expiresAt} settled={room.stage === 'done'} boundedSettlement /> : null}
       <Text style={styles.preview} numberOfLines={1}>{room.lastMessage ? room.lastMessage.senderName + ': ' + previewText(room.lastMessage.text) : '아직 대화가 없어요'}</Text>
     </View>
     <View style={styles.right}>

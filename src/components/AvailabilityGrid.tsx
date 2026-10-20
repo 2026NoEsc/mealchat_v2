@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { cellKey, HOURS, isPastCell, type DayItem } from '../lib/scheduleSlots';
+import { isPastKstCell, kstDateKey } from '../lib/meetingTime';
 import { fs, s, v3Layout } from '../theme/scale';
 import { colors, shadows, v3Colors } from '../theme/tokens';
 import TimeCell from './ui/TimeCell';
@@ -21,15 +22,19 @@ export default function AvailabilityGrid({
   others,
   onToggle,
   variant = 'legacy',
+  timeZone = 'local',
+  now,
 }: {
   variant?: 'legacy' | 'v3';
+  timeZone?: 'local' | 'Asia/Seoul';
+  now?: Date;
   days: DayItem[];
   picked: Set<string>;
   /** 다른 사람이 고른 칸 — 회색으로 겹쳐 보인다 */
   others?: Set<string>;
   onToggle: (date: string, hour: number) => void;
 }) {
-  if (variant === 'v3') return <V3AvailabilityGrid days={days} picked={picked} others={others} onToggle={onToggle} />;
+  if (variant === 'v3') return <V3AvailabilityGrid days={days} picked={picked} others={others} onToggle={onToggle} timeZone={timeZone} now={now} />;
   return (
     <View style={styles.card}>
       <View style={styles.row}>
@@ -141,13 +146,12 @@ const styles = StyleSheet.create({
 });
 
 /** The chat sheet keeps the legacy default; only the new meeting opts into v3. */
-function V3AvailabilityGrid({ days, picked, others, onToggle }: { days: DayItem[]; picked: Set<string>; others?: Set<string>; onToggle: (date: string, hour: number) => void }) {
+function V3AvailabilityGrid({ days, picked, others, onToggle, timeZone, now = new Date() }: { days: DayItem[]; picked: Set<string>; others?: Set<string>; onToggle: (date: string, hour: number) => void; timeZone: 'local' | 'Asia/Seoul'; now?: Date }) {
   const { width } = useWindowDimensions();
   const [viewport, setViewport] = useState(Math.max(0, width - 2 * layout.pagePadding - 22));
   const cellWidth = Math.max(v3Layout.minTouchTarget, Math.min(layout.timeWidth, (viewport - layout.timeLabel - 4 * days.length) / Math.max(1, days.length)));
   const minimum = layout.timeLabel + days.length * (cellWidth + 4);
-  const now = new Date();
-  const today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+  const today = timeZone === 'Asia/Seoul' ? kstDateKey(now) : now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
   return <View style={v3Styles.card}>
     <ScrollView horizontal showsHorizontalScrollIndicator={false} onLayout={event => setViewport(event.nativeEvent.layout.width)} contentContainerStyle={[v3Styles.content, { minWidth: minimum }]}>
       <View style={v3Styles.table}>
@@ -158,7 +162,7 @@ function V3AvailabilityGrid({ days, picked, others, onToggle }: { days: DayItem[
             const key = cellKey(day.date, hour);
             const on = picked.has(key);
             const shared = Boolean(others?.has(key));
-            const past = isPastCell(day.date, hour);
+            const past = timeZone === 'Asia/Seoul' ? isPastKstCell(day.date, hour, now) : isPastCell(day.date, hour);
             // TODO(서버 단계): othersSlots는 메이트의 '가능' 칸이다. 바쁜 시간으로 바꾸거나 선택을 금지하지 않는다.
             return <TimeCell key={key} state={on ? 'mine' : shared ? 'shared' : 'free'} shared={shared} width={cellWidth} disabled={past}
               label={day.month + '월 ' + day.day + '일 ' + hour + '시 ~ ' + (hour + 1) + '시' + (on ? ', 내가 가능' : '') + (shared ? ', 메이트 가능' : '') + (day.date === today ? ', 오늘' : '') + (past ? ', 지난 시간' : '')}

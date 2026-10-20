@@ -76,7 +76,7 @@ export async function fetchRoomVoting(
 
   const options = items.map<VotingOption>((item) => {
     const voters = (participantResult.data ?? []).filter((participant) =>
-      votedIds(participant.voted_items).includes(item.id),
+      participant.profile_id !== null && votedIds(participant.voted_items).includes(item.id),
     );
 
     return {

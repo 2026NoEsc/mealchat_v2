@@ -1,32 +1,33 @@
 import { CalendarDays, MapPin, Users, Utensils } from 'lucide-react-native';
 import { StyleSheet, Text, View } from 'react-native';
 import type { RoomStage } from '../../lib/rooms';
+import { formatMeetingTime, type MeetingTime } from '../../lib/meetingTime';
+import { unverifiedSettlementLabel } from '../../lib/roomSettlementPolicy';
 import { v3Colors as colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 import { Button } from './Button';
 
-/** Only confirmed_slot represents a saved appointment time. Never use meetingDate here. */
-export function meetingTimeLabel(slot: string | null | undefined, stage: RoomStage): string {
-  if (!slot?.trim()) return stage !== 'scheduling' ? '시간 미정' : '시간 확정 전';
-  const value = slot.trim();
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return (date.getMonth() + 1) + '월 ' + date.getDate() + '일 (' + ['일','월','화','수','목','금','토'][date.getDay()] + ') ' + String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
+/** Only the structured interval is canonical. A legacy start/text never supplies a guessed end time. */
+export function meetingTimeLabel(slot: string | null | undefined, stage: RoomStage, time?: MeetingTime | null): string {
+  return formatMeetingTime(time, stage, slot);
 }
 
 /** Phone 496:1141/1217. Current contract exposes restaurants, not a separate food menu. */
-export default function MeetingCard({ slot, stage, location, memberCount, onChooseRestaurant, isOwner = false, compact = false, confirmedRestaurant }: {
-  slot?: string | null; stage: RoomStage; location?: string | null; memberCount: number; onChooseRestaurant: () => void; isOwner?: boolean; compact?: boolean; confirmedRestaurant?: string | null;
+export default function MeetingCard({ slot, stage, location, memberCount, onChooseRestaurant, isOwner = false, compact = false, confirmedRestaurant, meetingTime, ownerConfirmed = false, s4 = false }: {
+  slot?: string | null; stage: RoomStage; location?: string | null; memberCount: number; onChooseRestaurant: () => void; isOwner?: boolean; compact?: boolean; confirmedRestaurant?: string | null; meetingTime?: MeetingTime | null; ownerConfirmed?: boolean; s4?: boolean;
 }) {
   const canChoose = stage === 'place';
-  if (compact) return <View testID="meeting-card-compact" style={[styles.card, styles.compact]}><Text style={styles.value} numberOfLines={1}>{[meetingTimeLabel(slot, stage), location?.trim() || '장소 미정', memberCount + '명'].join(' · ')}</Text></View>;
+  const settlementLabel = unverifiedSettlementLabel(stage, ownerConfirmed, s4);
+  if (compact) return <View testID="meeting-card-compact" style={[styles.card, styles.compact]}>{settlementLabel ? <Text style={styles.note}>{settlementLabel}</Text> : null}<Text style={styles.value} numberOfLines={2}>{[meetingTimeLabel(slot, stage, meetingTime), location?.trim() || '장소 미정', memberCount + '명'].join(' · ')}</Text></View>;
   // TODO(서버 단계): 메뉴/식당 분리 계약 후 메뉴 상태·메뉴 변경·다음 단계 카드를 표시한다.
   return <View style={styles.card}>
     <View style={styles.facts}>
-      <View style={styles.fact}><CalendarDays size={16} color={colors.sub} /><Text style={styles.value}>{meetingTimeLabel(slot, stage)}</Text></View>
+      <View style={styles.fact}><CalendarDays size={16} color={colors.sub} /><Text style={styles.value}>{meetingTimeLabel(slot, stage, meetingTime)}</Text></View>
       <View style={styles.fact}><MapPin size={16} color={colors.sub} /><Text style={styles.value}>{location?.trim() || '장소 미정'}</Text></View>
       <View style={styles.fact}><Users size={16} color={colors.sub} /><Text style={styles.value}>{memberCount}명</Text></View>
     </View>
+    {s4 && stage === 'place' && meetingTime && !ownerConfirmed ? <Text style={styles.note}>시간을 선택했어요. 식당까지 정하면 약속이 확정돼요.</Text> : null}
+    {settlementLabel ? <Text style={styles.note}>{settlementLabel} · 이전 정산의 약속 확정 여부는 확인할 수 없어요.</Text> : s4 && !ownerConfirmed && stage === 'confirmed' ? <Text style={styles.note}>이전 확정 상태예요. 방장 확정 여부는 확인할 수 없어요.</Text> : null}
     {stage === 'scheduling' || stage === 'place' ? <>
       <View style={styles.divider} />
       <View style={styles.restaurant}><Utensils size={16} color={colors.selectedText} /><View style={styles.body}>
@@ -34,7 +35,7 @@ export default function MeetingCard({ slot, stage, location, memberCount, onChoo
         <Text style={styles.note}>{stage === 'scheduling' ? '일정이 정해지면 시작할 수 있어요' : '가고 싶은 식당에 투표해 주세요'}</Text>
       </View></View>
       <Button label="식당 정하기" style={styles.action} disabled={!canChoose} onPress={onChooseRestaurant} />
-      {isOwner && stage === 'place' ? <Button label={confirmedRestaurant?.trim() ? '약속 확정 다시 시도' : '약속 확정'} variant="secondary" style={styles.action} onPress={onChooseRestaurant} /> : null}
+      {isOwner && stage === 'place' ? <Button label={!s4 && confirmedRestaurant?.trim() ? '약속 확정 다시 시도' : '약속 확정'} variant="secondary" style={styles.action} onPress={onChooseRestaurant} /> : null}
     </> : null}
   </View>;
 }

@@ -287,3 +287,29 @@ Deno.test('user claim validation fails closed for issuer, audience, role, expiry
       missingUrl.error === 'Supabase URL is not configured',
   );
 });
+
+Deno.test('CLI issuer override is exact, explicit, and cannot be enabled on hosted HTTPS', () => {
+  const issuer = 'http://127.0.0.1:54321/auth/v1';
+  const claims = { ...validClaims, iss: issuer };
+  assertEquals(validateUserClaims(claims, 'http://kong:8000', NOW).ok, false);
+  assertEquals(validateUserClaims(claims, 'http://kong:8000', NOW, issuer).ok, true);
+  assertEquals(validateUserClaims({ ...claims, iss: 'http://127.0.0.1:55321/auth/v1' }, 'http://kong:8000', NOW, issuer).ok, false);
+  assertEquals(validateUserClaims(validClaims, SUPABASE_URL, NOW, issuer).ok, false);
+  assertEquals(validateUserClaims(validClaims, SUPABASE_URL, NOW).ok, true);
+  assertEquals(validateUserClaims({ ...claims, iss: 'http://localhost:55321/auth/v1' }, 'http://kong:8000', NOW, 'http://localhost:55321/auth/v1').ok, true);
+});
+Deno.test('unsafe local issuer configuration fails closed without weakening claim checks', () => {
+  const issuer = 'http://127.0.0.1:54321/auth/v1';
+  for (const bad of ['', 'http://evil.invalid:54321/auth/v1', 'http://127.0.0.1:54321/auth/v1/',
+    'http://127.0.0.1:54321/auth/v1?x=1', 'http://127.0.0.1:54321/auth/v1#x',
+    'http://user@localhost:54321/auth/v1', 'http://localhost:65536/auth/v1',
+    'http://localhost:0/auth/v1', 'http://localhost:54321/other', 'https://localhost:54321/auth/v1',
+    'http://127.0.0.1.evil.invalid:54321/auth/v1']) {
+    const result = validateUserClaims({ ...validClaims, iss: issuer }, 'http://kong:8000', NOW, bad);
+    assert(!result.ok && result.status === 500);
+  }
+  for (const patch of [{ role: 'service_role' }, { aud: 'anon' }, { exp: NOW }, { sub: 'bad' }, { is_anonymous: true }]) {
+    const result = validateUserClaims({ ...validClaims, iss: issuer, ...patch }, 'http://kong:8000', NOW, issuer);
+    assert(!result.ok && result.status === 401);
+  }
+});

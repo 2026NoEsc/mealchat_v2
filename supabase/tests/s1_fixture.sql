@@ -71,10 +71,16 @@ insert into public.follows(follower_id,following_id,role) values('10000003-0000-
 insert into public.follows(follower_id,following_id,role) values('10000001-0000-4000-8000-000000000001','10000008-0000-4000-8000-000000000008','mate');
 insert into public.health_code_catalog(category,code,label) values('allergy','test_allergy','Synthetic allergy'),('dietary_restriction','test_diet','Synthetic diet');
 update public.profile_private set bank_name='Synthetic bank',account_number='0000000000',birth_date='1995-02-03',personal_data='{"gender":"female","bio":"Synthetic bio"}',start_location_name='Synthetic origin',start_latitude=37,start_longitude=127 where id='10000001-0000-4000-8000-000000000001';
+-- Trusted fixture setup only: legacy-confirmed rooms exercise S1 settlement contracts after S4.
+create function pg_temp.prepare_confirmed_settlement(r uuid) returns void language plpgsql as $$ begin
+ if to_regprocedure('private.s4_settlement_allowed(public.rooms)') is not null then update public.rooms set stage='confirmed' where id=r; end if;
+end; $$;
+select pg_temp.prepare_confirmed_settlement('20000000-0000-4000-8000-000000000001');
+select pg_temp.prepare_confirmed_settlement('20000000-0000-4000-8000-000000000002');
 set local role authenticated;
 select pg_temp.as_user('10000001-0000-4000-8000-000000000001');
-insert into pg_temp.s1_ids values('bill',public.create_room_settlement_v2('20000000-0000-4000-8000-000000000001','Synthetic bill',6000,'Synthetic bank','0000000000','Synthetic A'));
 insert into pg_temp.s1_ids values('pending_invite',public.create_room_invitation('20000000-0000-4000-8000-000000000001','10000008-0000-4000-8000-000000000008'));
+insert into pg_temp.s1_ids values('bill',public.create_room_settlement_v2('20000000-0000-4000-8000-000000000001','Synthetic bill',6000,'Synthetic bank','0000000000','Synthetic A'));
 reset role;
 insert into public.participants(room_id,profile_id,name) values('20000000-0000-4000-8000-000000000001','10000005-0000-4000-8000-000000000005','Synthetic E');
 delete from public.participants where room_id='20000000-0000-4000-8000-000000000001' and profile_id='10000006-0000-4000-8000-000000000006';

@@ -115,8 +115,13 @@ select pg_temp.as_user('10000006-0000-4000-8000-000000000006');
 select pg_temp.check(pg_temp.sqlstate_of($q$select public.set_settlement_completed((select id from public.dutch_pay_members where bill_id=(select v from pg_temp.s1_ids where k='bill') and profile_id=auth.uid()),false)$q$)='S1005','closed bill rejects completion undo without changing recipient state');
 select pg_temp.check(public.get_settlement_payment_details((select v from pg_temp.s1_ids where k='bill'))->>'status'='completed','rejected completion undo keeps disclosure closed');
 select pg_temp.as_user('10000001-0000-4000-8000-000000000001');
+select (to_regprocedure('private.s4_settlement_allowed(public.rooms)') is not null) as s4_settlement_guard \gset
+\if :s4_settlement_guard
+select pg_temp.check(pg_temp.sqlstate_of($q$select public.create_room_settlement_v2('20000000-0000-4000-8000-000000000001','again',6000,'Synthetic bank','0000000000','Synthetic A')$q$)='S4008','completed room cannot start a new bill through the S4 confirmation guard');
+\else
 insert into pg_temp.s1_ids values('new_after_closed',public.create_room_settlement_v2('20000000-0000-4000-8000-000000000001','again',6000,'Synthetic bank','0000000000','Synthetic A'));
 select pg_temp.check((select v from pg_temp.s1_ids where k='new_after_closed')<>(select v from pg_temp.s1_ids where k='bill'),'closed bill is excluded and an explicit new request creates a new bill');
+\endif
 select pg_temp.check(public.get_settlement_payment_details((select v from pg_temp.s1_ids where k='bill'))->>'status'='completed','old disclosure stays permanently closed after a new request');
 reset role;
 select pg_temp.check((select bank_name='' and account_number='' and account_holder='' from public.dutch_pay_bills where id=(select v from pg_temp.s1_ids where k='bill')),'completion physically erases all snapshot account fields');
@@ -263,6 +268,7 @@ set local role authenticated;
 select pg_temp.as_user('10000009-0000-4000-8000-000000000009');
 reset role;
 insert into public.rooms(id,code,title,meeting_date,expires_at,owner_id) values('20000000-0000-4000-8000-000000000009','S1SOLO','Synthetic solo',current_date+1,clock_timestamp()+interval '1 day','10000009-0000-4000-8000-000000000009');
+select pg_temp.prepare_confirmed_settlement('20000000-0000-4000-8000-000000000009');
 set local role authenticated;
 insert into pg_temp.s1_ids values('solo',public.create_room_settlement_v2('20000000-0000-4000-8000-000000000009','solo',1000,'Synthetic bank','0000000000','Synthetic solo'));
 select pg_temp.check(public.get_settlement_payment_details((select v from pg_temp.s1_ids where k='solo'))->>'status'='completed','one-person insert completion closes disclosure');

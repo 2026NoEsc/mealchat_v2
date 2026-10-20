@@ -31,6 +31,7 @@ import { parseEmoticonToken } from '../../lib/emoticon';
 import { notify } from '../../lib/confirm';
 import { roomNoticeOf, type RoomNotice } from '../../lib/roomNotice';
 import { dayKey, dayLabel, timeLabel } from '../../lib/roomFormat';
+import { canInviteToRoom } from '../../lib/roomMembership';
 import {
   sendRoomMessage,
   sendRoomSticker,
@@ -193,12 +194,12 @@ export default function ChatRoomScreen() {
 
   const roomId = params?.roomId ?? null;
 
-  const { room, reload: reloadRoom } = useRoom(roomId);
+  const { room, reload: reloadRoom, error: roomError } = useRoom(roomId);
   /*
    * 목록에서 들어오면 파라미터에 제목이 실려 있어 곧바로 보여줄 수 있고,
    * 홈의 정산 링크처럼 roomId 만 들고 들어오는 경로도 있어 불러온 값으로 채운다.
    */
-  const title = params?.title ?? room?.title ?? '밥약';
+  const title = room?.title ?? params?.title ?? '밥약';
   const { messages: remoteMessages, status, reload } = useRoomMessages(roomId);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -215,7 +216,10 @@ export default function ChatRoomScreen() {
   const isOwner = Boolean(user?.id && room?.ownerId && user.id === room.ownerId);
 
   const [sheet, setSheet] = useState<SheetKey>(params?.openSheet ?? null);
-  const recommendation = useRestaurantRecommendations({ roomId, userId: user?.id ?? null, enabled: sheet === 'menu' && stage === 'place' && !room?.confirmedMenu, members: (room?.participants ?? []).map(p => p.profileId).sort().join(',') });
+  const recommendation = useRestaurantRecommendations({ roomId, userId: user?.id ?? null, enabled: sheet === 'menu' && stage === 'place' && (room?.decisionMode === 's4' || !room?.confirmedMenu), members: (room?.participants ?? []).map(p => p.profileId).sort().join(',') });
+  useEffect(() => {
+    if (room?.decisionMode === 's4' && ['confirmed', 'settling', 'done'].includes(stage) && (sheet === 'schedule' || sheet === 'menu')) setSheet(null);
+  }, [room?.decisionMode, stage, sheet]);
   const [emoticonOpen, setEmoticonOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   const panelOpen = actionsOpen || emoticonOpen;
@@ -346,10 +350,11 @@ export default function ChatRoomScreen() {
       <View style={{ height: insets.top }} />
       <View style={styles.header}>
         <Pressable onPress={goBack} style={styles.iconButton} accessibilityRole="button" accessibilityLabel="뒤로"><ChevronLeft size={24} color={colors.ink} /></Pressable>
-        <View style={styles.headerCenter}><View style={styles.headerTitleRow}><Text style={styles.headerTitle} numberOfLines={1}>{title}</Text><View style={styles.countChip}><Text style={styles.countText}>{room ? room.participants.length : '-'}</Text></View></View>{room && (stage === 'settling' || stage === 'done') ? <RoomTimer expiresAt={room.expiresAt} settled={stage === 'done'} /> : null}</View>
+        <View style={styles.headerCenter}><View style={styles.headerTitleRow}><Text style={styles.headerTitle} numberOfLines={1}>{title}</Text><View style={styles.countChip}><Text style={styles.countText}>{room ? room.participants.length : '-'}</Text></View></View>{room && (stage === 'settling' || stage === 'done') ? <RoomTimer expiresAt={room.expiresAt} settled={stage === 'done'} boundedSettlement={room.decisionMode === 's4'} /> : null}</View>
         <Pressable onPress={() => navigate('RoomDetail', { roomId, title })} style={styles.iconButton} accessibilityRole="button" accessibilityLabel="방 상세정보"><MoreVertical size={22} color={colors.ink} /></Pressable>
       </View>
-      {room ? <View style={styles.pinned}><MeetingCard compact={panelOpen || keyboard > 0} isOwner={isOwner} confirmedRestaurant={room.confirmedMenu} slot={room.confirmedSlot} stage={stage} location={room.locationName} memberCount={room.participants.length} onChooseRestaurant={() => chooseAction('menu')} /></View> : null}
+      {roomError ? <FailureCard title={room ? '방 정보를 새로 불러오지 못했어요' : '방 정보를 불러오지 못했어요'} reason={room ? '마지막으로 확인한 내용을 보고 있어요.' : '잠시 후 다시 시도해 주세요.'} onRetry={reloadRoom} /> : null}
+      {room ? <View style={styles.pinned}><MeetingCard compact={panelOpen || keyboard > 0} isOwner={isOwner} confirmedRestaurant={room.confirmedMenu} slot={room.confirmedSlot} meetingTime={room.meetingTime} ownerConfirmed={Boolean(room.appointmentConfirmedAt)} s4={room.decisionMode === 's4'} stage={stage} location={room.locationName} memberCount={room.participants.filter(p => p.profileId !== null).length} onChooseRestaurant={() => chooseAction('menu')} /></View> : null}
 
       <FlatList
         ref={scrollRef}
@@ -413,16 +418,18 @@ export default function ChatRoomScreen() {
           <Send size={20} color={colors.ink} />
         </Pressable>
       </View>
-      {actionsOpen ? <ActionTray stage={stage} onChoose={chooseAction} bottomInset={keyboard > 0 ? 0 : insets.bottom} /> : null}
+      {actionsOpen ? <ActionTray stage={stage} canOpenSchedule={stage === 'scheduling' || (room?.decisionMode === 's4' && stage === 'place' && (!room.meetingTime || isOwner))} onChoose={chooseAction} bottomInset={keyboard > 0 ? 0 : insets.bottom} /> : null}
       {emoticonOpen ? <EmoticonPanel disabled={sending} bottomInset={keyboard > 0 ? 0 : insets.bottom} onClose={() => setEmoticonOpen(false)} onPick={sticker => {
         if (sendingRef.current) return;
         setEmoticonOpen(false); void sendSticker(sticker.id);
       }} /> : null}
 
       <ScheduleSheet
+        roomName={title}
         visible={sheet === 'schedule'}
         roomId={roomId}
         isOwner={isOwner}
+        participants={room?.participants}
         onClose={() => setSheet(null)}
         onStateChanged={() => {
           reload();
@@ -436,6 +443,8 @@ export default function ChatRoomScreen() {
         isOwner={isOwner}
         stage={stage}
         confirmedSlot={room?.confirmedSlot}
+        meetingTime={room?.meetingTime}
+        onSelectTime={() => { setSheet(null); navigate('ScheduleConfirmed', { roomId, name: title }); }}
         participantCount={room?.participants.length}
         confirmedRestaurant={room?.confirmedMenu}
         participants={room?.participants}
@@ -459,6 +468,9 @@ export default function ChatRoomScreen() {
         onVoted={() => void reloadRoom()}
       />
       <SettlementSheet
+        roomStage={room?.stage ?? null}
+        decisionMode={room?.decisionMode}
+        appointmentConfirmedAt={room?.appointmentConfirmedAt}
         participants={room?.participants ?? []}
         roomId={roomId}
         visible={sheet === 'settlement'}
@@ -472,6 +484,7 @@ export default function ChatRoomScreen() {
         visible={sheet === 'members'}
         participants={room?.participants ?? []}
         code={room?.code ?? null}
+        canInvite={canInviteToRoom(room?.stage)}
         myId={user?.id ?? null}
         ownerId={room?.ownerId ?? null}
         onClose={() => setSheet(null)}

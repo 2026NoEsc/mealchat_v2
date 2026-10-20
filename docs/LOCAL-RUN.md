@@ -87,6 +87,26 @@ HTTP 예외는 개발 빌드 + 정확히 `1`인 opt-in + 승인된 호스트를 
 
 사설 IP로 연결할 때는 같은 네트워크의 다른 기기로 평문 토큰이 오갈 수 있으니 로컬 테스트 계정만 사용하세요.
 
+### 로컬 Edge의 Auth issuer와 내부 API 주소
+
+CLI Edge 안의 `SUPABASE_URL=http://kong:8000`은 컨테이너 통신 주소다. 로컬 Auth가 발급하는 JWT의 `iss`는 공개 API 주소(예: `http://127.0.0.1:54321/auth/v1`)이므로 두 URL에서 issuer를 동일하게 유도하면 정상 토큰도 401이다. `schedule-recommend`는 이 차이를 명시적인 **로컬 전용** `MEALCHAT_LOCAL_AUTH_ISSUER`로 처리한다. 토큰/요청 헤더에서 기대 issuer를 추측하지 않는다.
+
+승인된 로컬 스택을 시작한 뒤, 실제 Auth 공개 origin에 맞는 값 하나만 설정한다. 다음 파일에는 공개 issuer 한 줄만 있고 provider 키는 넣지 않는다. 기존 `.env`를 열거나 복사하지 않고 명시적 `--env-file`로 기본 dotenv 탐색을 대체한다.
+
+```powershell
+$TaskEdgePublicConfig = Join-Path $env:TEMP 'mealchat-edge-local.public'
+'MEALCHAT_LOCAL_AUTH_ISSUER=http://127.0.0.1:54321/auth/v1' | Set-Content -Encoding ascii -LiteralPath $TaskEdgePublicConfig
+npx supabase functions serve schedule-recommend --env-file $TaskEdgePublicConfig
+```
+
+격리 프로젝트가 55321이면 위 issuer의 포트와 CLI `--workdir`도 그 프로젝트로 맞춘다. 앱 URL이 localhost/에뮬레이터/LAN 주소라고 JWT issuer도 그 값으로 바꾸지 않는다. issuer는 Auth의 공개 주소 설정을 기준으로 하며 토큰 원문·키를 출력하지 않는다. 종료하면 임시 공개 설정 파일을 삭제한다.
+
+이 설정은 서버 `SUPABASE_URL`이 정확히 CLI 내부 `http://kong:8000`이고 issuer가 정확한 loopback HTTP origin(`127.0.0.1` 또는 `localhost`, 명시적 포트)의 `/auth/v1`일 때만 허용한다. 다른 호스트·경로·query·wildcard·범위 밖 포트는 허용하지 않고, HTTPS 호스팅에서 이 설정을 주입하면 500으로 닫힌다. 설정하지 않은 경우 기존 issuer 정확 일치를 유지한다. `withSupabase({auth:'user'})`의 서명 검증, sub/exp/aud/role/비익명 검사, 검증된 사용자 ID 대조, S1 동의·방 권한은 모두 유지한다. `verify_jwt` 변경이나 인증 생략으로 해결하지 않는다.
+
+기본 호스팅의 기대 issuer는 `https://<project-ref>.supabase.co/auth/v1`이고 통상 플랫폼의 `SUPABASE_URL`과 일치한다. API 통신 URL과 Auth issuer가 다른 reverse proxy/self-host/custom-domain 구성에서는 원래 가정이 다시 깨질 수 있다. 임의 API alias를 issuer로 취급하지 말고 실제 Auth issuer와 공식 배포 설정을 확인한다. 호스팅에는 이 로컬 변수를 등록하지 않는다. 근거: [JWT claims](https://supabase.com/docs/guides/auth/jwt-fields), [Edge 인증](https://supabase.com/docs/guides/functions/auth), [공개 origin과 내부 Kong 구분](https://supabase.com/docs/guides/ai-tools/byo-mcp), [custom domain의 Auth issuer](https://supabase.com/docs/guides/platform/custom-domains).
+
+공급자 키 없는 재연결에서는 인증 이후 S1 gate 또는 `GEMINI_API_KEY` 미설정 오류에 도달하는 것까지만 확인한다. 500 키 누락을 추천 성공으로 보고하지 않는다. 실제 Tmap/Gemini를 호출하지 않고 회귀하려면 `node --test supabase/tests/s4_edge.test.mjs supabase/tests/s5_edge.test.mjs supabase/tests/s1_edge_gate.test.mjs`와 `npx deno test --no-config supabase/functions/schedule-recommend/pipeline_test.ts`를 실행한다. Edge VM은 mock 없는 실네트워크를 차단한다.
+
 ### 4-2. 마이그레이션과 로컬 S1 seed 적용
 
 연결 대상이 폐기 가능한 로컬 컨테이너인지 먼저 확인하세요. 다음 명령은 로컬 DB 데이터를 지우고 저장소의 migrations와 seed를 차례로 적용합니다.

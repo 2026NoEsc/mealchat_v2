@@ -65,6 +65,15 @@ select pg_temp.as_user('10000001-0000-4000-8000-000000000001');
 select pg_temp.check(pg_temp.sqlstate_of($q$select public.invite_friend_to_room('a1a1a1a1-1111-1111-1111-111111111111','10000008-0000-4000-8000-000000000008')$q$)='42501','one-way follow cannot force admission');
 select pg_temp.check(not exists(select 1 from public.participants where room_id='a1a1a1a1-1111-1111-1111-111111111111' and profile_id='10000008-0000-4000-8000-000000000008'),'denied forced invite creates no participant');
 select pg_temp.check(public.get_visible_profile('10000008-0000-4000-8000-000000000008')->>'relationship'='identity_only','denied forced invite preserves identity_only');
+-- S4 rejects both legacy signatures until the appointment is confirmed.
+select pg_temp.check(pg_temp.sqlstate_of($q$select public.create_room_settlement('a1a1a1a1-1111-1111-1111-111111111111','Legacy dinner',20000,'Test bank','100-200','Additive A')$q$)='S4008','v1 rejects settlement before confirmation');
+select pg_temp.check(pg_temp.sqlstate_of($q$select public.create_room_settlement_v2('a1a1a1a1-2222-2222-2222-222222222222','Current dinner',30000,'Test bank','300-400','Additive A')$q$)='S4008','v2 rejects settlement before confirmation');
+reset role;
+-- Trusted owner-confirmed fixtures, matching supabase/tests/s4_restart.sql.
+-- The settlement calls below still run as the authenticated fixture owner.
+update public.rooms set stage='confirmed',appointment_confirmed_at=clock_timestamp(),appointment_confirmed_by=owner_id
+where id in('a1a1a1a1-1111-1111-1111-111111111111','a1a1a1a1-2222-2222-2222-222222222222');
+set local role authenticated;
 insert into pg_temp.s1_ids values('compat-v1',public.create_room_settlement('a1a1a1a1-1111-1111-1111-111111111111','Legacy dinner',20000,'Test bank','100-200','Additive A'));
 select pg_temp.check(public.create_room_settlement('a1a1a1a1-1111-1111-1111-111111111111','Legacy dinner',20000,'Test bank','100-200','Additive A')=(select v from pg_temp.s1_ids where k='compat-v1'),'v1 retry reuses active bill');
 select pg_temp.check(pg_temp.sqlstate_of($q$insert into public.notifications(room_id,title,message,bank_name,account_number,amount) values('a1a1a1a1-1111-1111-1111-111111111111','Legacy notification','Legacy notification','Test bank','100-200',10000)$q$)='42501','legacy notification insert returns 42501');
@@ -80,6 +89,7 @@ select pg_temp.check((select count(*)=0 from public.messages where room_id='a1a1
 select pg_temp.check((select count(*)=1 from public.messages where room_id='a1a1a1a1-1111-1111-1111-111111111111' and kind='system' and event_key is null),'v1 member system message remains available');
 select pg_temp.check((select count(*)=2 from public.dutch_pay_members where bill_id=(select v from pg_temp.s1_ids where k='compat-v1')),'v1 fixes two recipients');
 insert into pg_temp.s1_ids values('compat-v2',public.create_room_settlement_v2('a1a1a1a1-2222-2222-2222-222222222222','Current dinner',30000,'Test bank','300-400','Additive A'));
+select pg_temp.check(public.create_room_settlement_v2('a1a1a1a1-2222-2222-2222-222222222222','Current dinner',30000,'Test bank','300-400','Additive A')=(select v from pg_temp.s1_ids where k='compat-v2'),'v2 retry reuses active bill');
 select pg_temp.check((select count(*)=1 from public.dutch_pay_bills where id=(select v from pg_temp.s1_ids where k='compat-v2')),'v2 creates one bill');
 select pg_temp.check((select count(*)=2 from public.dutch_pay_members where bill_id=(select v from pg_temp.s1_ids where k='compat-v2')),'v2 fixes two recipients');
 select pg_temp.check((select count(*)=1 from public.notifications where settlement_id=(select v from pg_temp.s1_ids where k='compat-v2')),'v2 emits one linked notification');
@@ -94,7 +104,7 @@ $exitCode = $LASTEXITCODE
 $ErrorActionPreference = $previousErrorAction
 if ($exitCode -ne 0) { throw ($lines -join [Environment]::NewLine) }
 $checks = @($lines | Where-Object { $_ -match '^ok - ' })
-if ($checks.Count -ne 26) { throw "Expected 26 fixture/compatibility checks, got $($checks.Count)." }
+if ($checks.Count -ne 29) { throw "Expected 29 fixture/compatibility checks, got $($checks.Count)." }
 [pscustomobject]@{
   Phase = 'S1 v1/v2 compatibility and closed privilege boundary'
   Checks = $checks.Count

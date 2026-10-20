@@ -118,6 +118,12 @@ describe('participantMeta', () => {
 });
 
 describe('roomTimerLabel', () => {
+  it('shows the actual S4 settlement deadline, including shortened absolute caps, without inventing one', () => {
+    expect(roomTimerLabel('2026-08-25T12:00:00', false, NOW, true)).toBe('정산 중 · 7일 뒤 방이 사라져요');
+    expect(roomTimerLabel('2026-08-18T12:30:00', false, NOW, true)).toBe('정산 중 · 00:30:00 후 방이 사라져요.');
+    expect(roomTimerLabel('infinity', false, NOW, true)).toBe('');
+    expect(roomTimerLabel('2026-08-17T12:00:00', false, NOW, true)).toBe('이미 종료된 밥약이에요');
+  });
   it('정산 전에는 카운트다운 대신 규칙을 알려 준다', () => {
     expect(roomTimerLabel('2026-08-25T12:00:00', false, NOW)).toBe('정산 후 24시간 뒤 사라져요');
   });

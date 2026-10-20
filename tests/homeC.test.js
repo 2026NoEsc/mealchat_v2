@@ -1,4 +1,5 @@
 const React = require('react');
+jest.mock('../src/lib/roomDecisions', () => ({ ...jest.requireActual('../src/lib/roomDecisions'), fetchS4Capabilities: jest.fn(async () => ({ mode: 'legacy', error: null })) }));
 const { act, create } = require('react-test-renderer');
 const { AccessibilityInfo, Animated, BackHandler, Clipboard, Linking, Modal, Platform, StyleSheet, Text, TextInput } = require('react-native');
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }), SafeAreaProvider: ({ children }) => children }));
@@ -69,7 +70,7 @@ it('offers creation and invite-code entry in the empty state and hides the FAB',
   useMyRooms.mockReturnValue({ rooms: [], status: 'ready', reload });
   const root = await render(HomeScreen); expect(text(root)).toContain('아직 잡힌 밥약이 없어요.'); expect(target(root, '새 밥약 또는 초대 코드')).toBeUndefined();
   await press(root, '새 밥약 만들기'); expect(navigation.navigate).toHaveBeenCalledWith('ScheduleDetail');
-  await press(root, '초대 코드 입력'); expect(root.findByType(JoinCodeSheet).props.visible).toBe(true);
+  await press(root, '초대 코드 입력'); expect(root.findByType(JoinCodeSheet).props.visible).toBe(true); expect(root.findByType(JoinCodeSheet).props.onMembershipClosed).toBe(reload);
 });
 it('retries a real load error and keeps the previous room list visibly stale', async () => {
   useMyRooms.mockReturnValue({ rooms: [room], status: 'error', reload }); const root = await render(HomeScreen);
@@ -136,6 +137,17 @@ it('retries the shared failure card', async () => { const retry = jest.fn(); con
 it('preserves the single invite input and existing join call', async () => {
   joinRoomByCode.mockResolvedValue({ roomId: 'joined', error: null }); const onJoined = jest.fn(); const root = await render(JoinCodeSheet, { visible: true, onClose: jest.fn(), onJoined });
   expect(root.findAllByType(TextInput)).toHaveLength(1); await act(async () => root.findByType(TextInput).props.onChangeText(' ab12cd ')); await press(root, '입장'); expect(joinRoomByCode).toHaveBeenCalledWith('AB12CD'); expect(onJoined).toHaveBeenCalledWith('joined');
+});
+it('closes a rejected S4 membership code entry with a safe explanation and no false join', async () => {
+  const notify = jest.spyOn(require('../src/lib/confirm'), 'notify').mockImplementation(() => {});
+  const onClose = jest.fn(), onJoined = jest.fn(), onMembershipClosed = jest.fn();
+  joinRoomByCode.mockResolvedValue({ roomId: null, error: { code: 'S4003', hint: 'operation=membership', message: 'private server diagnostic' } });
+  const root = await render(JoinCodeSheet, { visible: true, onClose, onJoined, onMembershipClosed });
+  await act(async () => root.findByType(TextInput).props.onChangeText('TEST42')); await press(root, '입장');
+  expect(onClose).toHaveBeenCalledTimes(1); expect(onJoined).not.toHaveBeenCalled();
+  expect(onMembershipClosed).toHaveBeenCalledTimes(1);
+  expect(root.findByType(TextInput).props.value).toBe('');
+  expect(notify).toHaveBeenCalledWith('입장할 수 없어요', require('../src/lib/roomMembership').membershipClosedMessage);
 });
 it('keeps payment and member actions tied to existing data and only the current member', async () => {
   const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true); const root = await render(SettlementsScreen);
@@ -377,4 +389,33 @@ it('preserves clipboard success and iOS announcement when a copy observer throws
     expect(copy).toHaveBeenCalledWith('REAL42'); expect(onCopied).toHaveBeenCalledTimes(1);
     expect(text(root)).toContain('복사됨'); expect(text(root)).not.toContain('복사 실패'); expect(announce).toHaveBeenCalledWith('복사됨');
   } finally { Platform.OS = previous; }
+});
+
+it('shows the shared finite deadline on S4 home rows and refreshes it after restart/completion', async () => {
+  jest.useFakeTimers(); jest.setSystemTime(new Date('2026-10-20T00:00:00Z'));
+  const props = { room: { ...room, stage: 'settling', decisionMode: 's4', appointmentConfirmedAt: '2026-10-19T00:00:00Z', expiresAt: '2026-10-27T00:00:00Z' }, onPress: jest.fn() };
+  const root = await render(RoomRow, props);
+  const timer = () => root.findAllByType(Text).find(n => n.props.testID === 'room-expiry-timer').props.children;
+  expect(timer()).toBe('정산 중 · 7일 뒤 방이 사라져요');
+  // A server refresh can shorten retention to the absolute 30-day cap.
+  props.room = { ...props.room, expiresAt: '2026-10-20T12:00:00Z' };
+  await act(async () => renderer.update(React.createElement(RoomRow, props)));
+  expect(timer()).toBe('정산 중 · 12:00:00 후 방이 사라져요.');
+  await act(async () => jest.advanceTimersByTime(1000));
+  expect(timer()).toBe('정산 중 · 11:59:59 후 방이 사라져요.');
+  props.room = { ...props.room, stage: 'done' };
+  await act(async () => renderer.update(React.createElement(RoomRow, props)));
+  expect(timer()).toBe('11:59:59 후 방이 사라져요.');
+  jest.setSystemTime(new Date('2026-10-20T12:00:00Z'));
+  await act(async () => jest.advanceTimersByTime(1000));
+  expect(timer()).toBe('이미 종료된 밥약이에요');
+});
+it.each(['scheduling', 'place', 'confirmed'])('does not show a provisional home deadline before settlement: %s', async stage => {
+  const root = await render(RoomRow, { room: { ...room, stage, decisionMode: 's4' }, onPress: jest.fn() });
+  expect(root.findAllByType(Text).filter(n => n.props.testID === 'room-expiry-timer')).toHaveLength(0);
+});
+it('does not apply S4 finite settlement retention to a legacy home row', async () => {
+  const root = await render(RoomRow, { room: { ...room, stage: 'settling', decisionMode: 'legacy' }, onPress: jest.fn() });
+  expect(text(root)).not.toContain('후 방이 사라져요');
+  expect(root.findAllByType(Text).filter(n => n.props.testID === 'room-expiry-timer')).toHaveLength(0);
 });

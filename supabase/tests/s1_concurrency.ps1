@@ -71,6 +71,8 @@ try {
     $FinishUpdate = User-Sql $UserA "select public.set_settlement_completed(id,true) from public.dutch_pay_members where bill_id='$Bill';"
     Race-Sql $AccountUpdate $FinishUpdate
     Assert-Sql "(select payment_disclosure_closed_at is not null and bank_name='' and account_number='' and account_holder='' from public.dutch_pay_bills where id='$Bill')" 'account update before completion cannot survive the completion commit'
+    # Separate confirmed appointment fixture for the next independent settlement race.
+    Invoke-S1Sql "do `$fixture`$ begin if to_regprocedure('private.s4_settlement_allowed(public.rooms)') is not null then update public.rooms set stage='confirmed' where id='$Room'; end if; end; `$fixture`$;" $Container | Out-Null
     Invoke-S1Sql ("begin;" + (User-Sql $UserA "select public.create_room_settlement_v2('$Room','Synthetic finalization race',3000,'Synthetic bank','2222','Synthetic A');") + 'commit;') $Container | Out-Null
     $Bill = (Invoke-S1Sql "select id from public.dutch_pay_bills where room_id='$Room' and payment_disclosure_closed_at is null;" $Container).Trim()
     $FinishUpdate = User-Sql $UserA "select public.set_settlement_completed(id,true) from public.dutch_pay_members where bill_id='$Bill';"

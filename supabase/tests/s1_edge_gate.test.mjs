@@ -25,6 +25,7 @@ for (const [label, payload, status] of [
       providerCalls++; throw new Error('Unexpected provider call');
     };
     const requireMock = (id) => {
+      if (id === './s4Availability.ts') return { normalizeAvailabilityRows: () => { throw new Error('Blocked handler must not normalize'); } };
       if (id === '@supabase/server') return { withSupabase: (_options, handler) => handler };
       if (id === './consentGate.ts') return { checkRequiredConsent: (...args) => checkRequiredConsent(...args, mockFetch) };
       if (id === './pipeline.ts') return {

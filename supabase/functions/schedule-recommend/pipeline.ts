@@ -83,6 +83,7 @@ export function validateUserClaims(
   value: unknown,
   supabaseUrl: string | undefined,
   nowUnixSeconds = Date.now() / 1000,
+  localAuthIssuer?: string,
 ): UserClaimsValidation {
   const normalizedUrl = supabaseUrl?.trim().replace(/\/+$/, '');
   if (!normalizedUrl) {
@@ -91,6 +92,18 @@ export function validateUserClaims(
       status: 500,
       error: 'Supabase URL is not configured',
     };
+  }
+
+  // CLI transport uses Kong, while Auth signs its public loopback issuer.
+  // Only an operator-provided, exact issuer is allowed, and only on the CLI gateway.
+  // Hosted HTTPS deployments fail closed if this local-only setting leaks into them.
+  let expectedIssuer = `${normalizedUrl}/auth/v1`;
+  if (localAuthIssuer !== undefined) {
+    const local = /^http:\/\/(127\.0\.0\.1|localhost):([1-9][0-9]{0,4})\/auth\/v1$/.exec(localAuthIssuer);
+    if (normalizedUrl !== 'http://kong:8000' || !local || Number(local[2]) > 65535) {
+      return { ok: false, status: 500, error: 'Local Auth issuer configuration is invalid' };
+    }
+    expectedIssuer = localAuthIssuer;
   }
 
   if (!value || typeof value !== 'object') {
@@ -104,7 +117,7 @@ export function validateUserClaims(
   if (typeof claims.exp !== 'number' || !Number.isFinite(claims.exp) || claims.exp <= nowUnixSeconds) {
     return { ok: false, status: 401, error: 'Authentication token is expired or invalid' };
   }
-  if (claims.iss !== `${normalizedUrl}/auth/v1`) {
+  if (claims.iss !== expectedIssuer) {
     return { ok: false, status: 401, error: 'Authentication token issuer is invalid' };
   }
 

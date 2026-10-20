@@ -51,10 +51,11 @@ insert into public.follows(follower_id,following_id,role) values('10000003-0000-
 insert into public.follows(follower_id,following_id,role) values('10000001-0000-4000-8000-000000000001','10000008-0000-4000-8000-000000000008','mate');
 insert into public.health_code_catalog(category,code,label) values('allergy','test_allergy','Synthetic allergy'),('dietary_restriction','test_diet','Synthetic diet');
 update public.profile_private set bank_name='Synthetic bank',account_number='0000000000',birth_date='1995-02-03',personal_data='{"gender":"female","bio":"Synthetic bio"}',start_location_name='Synthetic origin',start_latitude=37,start_longitude=127 where id='10000001-0000-4000-8000-000000000001';
+do $$ begin if to_regprocedure('private.s4_settlement_allowed(public.rooms)') is not null then update public.rooms set stage='confirmed' where id in('20000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000002'); end if; end; $$;
 set local role authenticated;
 select pg_temp.as_user('10000001-0000-4000-8000-000000000001');
-insert into pg_temp.s1_ids values('bill',public.create_room_settlement_v2('20000000-0000-4000-8000-000000000001','Synthetic bill',6000,'Synthetic bank','0000000000','Synthetic A'));
 insert into pg_temp.s1_ids values('pending_invite',public.create_room_invitation('20000000-0000-4000-8000-000000000001','10000008-0000-4000-8000-000000000008'));
+insert into pg_temp.s1_ids values('bill',public.create_room_settlement_v2('20000000-0000-4000-8000-000000000001','Synthetic bill',6000,'Synthetic bank','0000000000','Synthetic A'));
 reset role;
 insert into public.participants(room_id,profile_id,name) values('20000000-0000-4000-8000-000000000001','10000005-0000-4000-8000-000000000005','Synthetic E');
 delete from public.participants where room_id='20000000-0000-4000-8000-000000000001' and profile_id='10000006-0000-4000-8000-000000000006';
@@ -447,6 +448,13 @@ select set_config(
   true
 );
 
+-- Prepare a confirmed historical fixture for the independent settlement compatibility assertions.
+select (to_regprocedure('private.s4_settlement_allowed(public.rooms)') is not null) as s4_settlement_guard \gset
+\if :s4_settlement_guard
+reset role;
+update public.rooms set stage='confirmed' where id=(select id from pg_temp.test_ids where key='room');
+set local role authenticated;
+\endif
 insert into pg_temp.test_ids (key, id)
 select 'bill', public.create_room_settlement_v2(
   (select id from pg_temp.test_ids where key = 'room'),
@@ -564,6 +572,17 @@ select set_config(
   true
 );
 
+-- S4 fixture adaptation only: the historical test orders settlement before joining and voting.
+-- Its 70 assertions remain, but a fresh place/time fixture is required by S4's closed-stage guards.
+-- Real submit/select/confirm and no-rewind behavior are exercised separately in s4_voting_atomicity.sql.
+select (to_regprocedure('public.get_s4_capabilities()') is not null) as s4_enabled \gset
+\if :s4_enabled
+reset role;
+update public.rooms set stage='place',meeting_starts_at=((clock_timestamp() at time zone 'Asia/Seoul')::date+1+time '11:00') at time zone 'Asia/Seoul',meeting_ends_at=((clock_timestamp() at time zone 'Asia/Seoul')::date+1+time '12:00') at time zone 'Asia/Seoul',meeting_time_zone='Asia/Seoul' where id=(select id from pg_temp.test_ids where key='room');
+update public.participants set schedule=jsonb_build_object('slots',jsonb_build_array(to_char((clock_timestamp() at time zone 'Asia/Seoul')::date+1,'YYYY-MM-DD')||'-11')) where room_id=(select id from pg_temp.test_ids where key='room');
+set local role authenticated;
+\endif
+
 insert into pg_temp.test_ids (key, id)
 select 'invite_c', public.create_room_invitation(
   (select id from pg_temp.test_ids where key = 'room'),
@@ -604,6 +623,7 @@ select set_config(
   true
 );
 
+
 insert into pg_temp.test_ids (key, id)
 select 'menu_option', public.add_voting_item(
   (select id from pg_temp.test_ids where key = 'room'),
@@ -630,7 +650,7 @@ select is(
     (select id from pg_temp.test_ids where key = 'room'),
     (select id from pg_temp.test_ids where key = 'menu_option')
   )),
-  '22023',
+  case when to_regprocedure('public.get_s4_capabilities()') is null then '22023' else 'S4008' end,
   'one of three votes cannot confirm a strict majority'
 );
 
@@ -677,7 +697,7 @@ select is(
 select is(
   (select count(*) from public.messages
    where room_id = (select id from pg_temp.test_ids where key = 'room')
-     and event_key like 'vote-confirmed:%:menu:%'),
+     and event_key like case when to_regprocedure('public.get_s4_capabilities()') is null then 'vote-confirmed:%:menu:%' else 'appointment-confirmed:%' end),
   1::bigint,
   'vote confirmation creates one fixed system event'
 );
@@ -695,7 +715,7 @@ select is(
 select is(
   (select count(*) from public.messages
    where room_id = (select id from pg_temp.test_ids where key = 'room')
-     and event_key like 'vote-confirmed:%:menu:%'),
+     and event_key like case when to_regprocedure('public.get_s4_capabilities()') is null then 'vote-confirmed:%:menu:%' else 'appointment-confirmed:%' end),
   1::bigint,
   'repeated vote confirmation does not duplicate the system event'
 );

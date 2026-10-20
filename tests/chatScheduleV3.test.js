@@ -1,4 +1,5 @@
 const React = require('react');
+jest.mock('../src/lib/useRoomDecision', () => ({ useRoomDecision: () => ({ mode: 'legacy', data: null, error: null, loading: false, reload: jest.fn() }) }));
 const { act, create } = require('react-test-renderer');
 const { AccessibilityInfo, Platform, Text, StyleSheet } = require('react-native');
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaProvider: ({ children }) => children, useSafeAreaInsets: () => ({ top: 24, bottom: 16, left: 0, right: 0 }) }));
@@ -249,11 +250,11 @@ it.each(['place', 'confirmed', 'settling', 'done'])('hides schedule actions and 
   expect(saveMyAvailability).not.toHaveBeenCalled(); expect(advanceRoomStage).not.toHaveBeenCalled();
 });
 
-it('formats an ISO confirmed time with the shared meetingTimeLabel', async () => {
+it('keeps a legacy ISO start as previous text without inferring its end time', async () => {
   room.confirmedSlot = '2026-10-16T18:00:00+09:00';
   const root = await render();
   expect(text(root)).toContain(meetingTimeLabel(room.confirmedSlot, room.stage));
-  expect(text(root)).not.toContain(room.confirmedSlot);
+  expect(text(root)).toContain('이전 시간 표기: ' + room.confirmedSlot);
 });
 
 it('does not invent a mine row when the participant list does not contain the signed-in profile', async () => {

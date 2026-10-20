@@ -15,7 +15,8 @@ import Toast, { useToast } from '../../components/ui/Toast';
 import { settlementUiError, TransferConfirmationContent } from '../../components/ui/TransferConfirmationSheet';
 import { notify } from '../../lib/confirm';
 import { formatAmount } from '../../lib/format';
-import type { RoomParticipant } from '../../lib/rooms';
+import type { RoomParticipant, RoomStage } from '../../lib/rooms';
+import { canStartSettlement, settlementConfirmationRequired, unverifiedSettlementLabel } from '../../lib/roomSettlementPolicy';
 import { canEditSettlement, createRoomSettlement, fetchRoomSettlements, setSettlementCompleted, type Settlement, type SettlementMember } from '../../lib/settlements';
 import { pickActiveSettlement } from '../../lib/settlementSummary';
 import { useNavigation } from '../../navigation/NavigationContext';
@@ -27,7 +28,7 @@ import { SettlementPaymentAccountView } from '../settlement/SettlementPaymentAcc
 
 type SheetProps = { visible: boolean; onClose: () => void; onStateChanged?: () => void };
 /** Phone 527:1747 / 562:1879 / 590:1896. Existing amount and mutation contracts remain unchanged. */
-export function SettlementSheet({ visible, roomId, participants = [], onClose, onStateChanged }: SheetProps & { roomId: string | null; participants?: RoomParticipant[] }) {
+export function SettlementSheet({ visible, roomId, roomStage = null, appointmentConfirmedAt, decisionMode, participants = [], onClose, onStateChanged }: SheetProps & { roomId: string | null; roomStage?: RoomStage | null; appointmentConfirmedAt?: string | null; decisionMode?: 'legacy' | 's4'; participants?: RoomParticipant[] }) {
   const { user } = useAuth(); const { bundle, status: profileStatus, reload: reloadProfile } = useMyProfile(); const { navigate, replace, current } = useNavigation();
   const params = current?.params as { settlementAmountText?: string; awaitingSettlementAccount?: boolean } | undefined;
   const [storedSettlement, setSettlement] = useState<Settlement | null>(null);
@@ -38,6 +39,8 @@ export function SettlementSheet({ visible, roomId, participants = [], onClose, o
   const [busy, setBusy] = useState(false); const operation = useRef(false);
   const mounted = useRef(true), currentRoom = useRef(roomId), currentUser = useRef(user?.id);
   currentRoom.current = roomId; currentUser.current = user?.id;
+  const currentStage = useRef(roomStage); currentStage.current = roomStage;
+  const currentOwnerConfirmed = useRef(Boolean(appointmentConfirmedAt)); currentOwnerConfirmed.current = Boolean(appointmentConfirmedAt);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [pendingMember, setPendingMember] = useState<SettlementMember | null>(null);
   const [completionError, setCompletionError] = useState<string | null>(null);
@@ -63,7 +66,10 @@ export function SettlementSheet({ visible, roomId, participants = [], onClose, o
   const finished = members.length > 0 && members.every(member => member.isCompleted);
   const payment = useSettlementPayment(settlement?.id ?? null, visible && loadStatus === 'ready' && !finished);
   const disclosureClosed = payment.data?.status === 'completed';
-  const editable = canEditSettlement(settlement, user?.id ?? null) && !finished && !disclosureClosed;
+  const canCreate = canStartSettlement(roomStage, Boolean(appointmentConfirmedAt));
+  const editable = canEditSettlement(settlement, user?.id ?? null) && !finished && !disclosureClosed && (canCreate || (Boolean(settlement) && (roomStage === 'settling' || roomStage === 'done')));
+  const unverifiedLabel = roomStage ? unverifiedSettlementLabel(roomStage, Boolean(appointmentConfirmedAt), decisionMode === 's4') : null;
+  const settlementParticipants = participants.filter(participant => participant.profileId !== null);
   const splitCount = settlement?.splitCount ?? members.length ?? 1;
   const each = splitCount > 0 ? Math.ceil(amount / splitCount) : amount;
   // Match the settlement list: completion always confirms the loaded bill, never an input draft.
@@ -90,9 +96,10 @@ export function SettlementSheet({ visible, roomId, participants = [], onClose, o
         if (!currentPayment || currentPayment.status === 'completed') return;
       }
       if (!mounted.current || currentRoom.current !== roomId || currentUser.current !== user?.id) return;
+      if (!settlement && !canStartSettlement(currentStage.current, currentOwnerConfirmed.current)) return;
       const { error } = await createRoomSettlement({ roomId, title: '식사 정산', amount, bankName, accountNumber, accountHolder: bundle?.profile.name ?? null });
       if (currentRoom.current !== roomId || currentUser.current !== user?.id) return;
-      if (error) { if (mounted.current) notify('정산 요청 실패', settlementUiError(error)); return; }
+      if (error) { if (mounted.current) { notify('정산 요청 실패', settlementUiError(error)); if ((error as Error & { code?: string }).code === 'S4008') onStateChanged?.(); } return; }
       onStateChanged?.(); if (mounted.current) { setReloadToken(token => token + 1); onClose(); }
     } catch { if (mounted.current) notify('정산 요청 실패', '요청을 보내지 못했어요. 잠시 후 다시 시도해 주세요.'); }
     finally { operation.current = false; if (mounted.current) setBusy(false); }
@@ -132,11 +139,13 @@ export function SettlementSheet({ visible, roomId, participants = [], onClose, o
   return <BottomSheet visible={visible} title={pendingMember ? '' : 'N빵 정산'} subtitle={pendingMember ? undefined : '결제 금액을 넣으면 참여한 사람 수로 나눠요.'} onClose={() => { if (!busy) { if (pendingMember) closeConfirmation(); else onClose(); } }}>
     {pendingMember ? <TransferConfirmationContent recipient={members.find(member => member.profileId === settlement?.creatorId)?.name || null} amount={confirmationAmount} busy={busy} error={completionError} onClose={closeConfirmation} onConfirm={() => void toggleMine(pendingMember, true)} /> : <ScrollView style={styles.scroll} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
       {loadStatus === 'error' ? <FailureCard title="정산을 불러오지 못했어요" reason="이전 정산을 확인한 뒤 요청할 수 있어요." onRetry={() => setReloadToken(n => n + 1)} /> : null}
+      {unverifiedLabel ? <Text style={styles.note}>{unverifiedLabel} · 이전 정산의 약속 확정 여부는 확인할 수 없어요.</Text> : null}
+      {!settlement && !canCreate ? <Text style={styles.note}>{roomStage ? settlementConfirmationRequired : '방의 약속 확정 상태를 확인한 뒤 정산을 시작할 수 있어요.'}</Text> : null}
       <View style={styles.amountField}><Text style={styles.label}>총 결제금액</Text><View style={styles.amountBox}><TextInput accessibilityLabel="총 결제금액" value={amountText.replace(/[^0-9]/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, ',')} onChangeText={setAmountText} editable={editable && !busy && loadStatus === 'ready'} keyboardType="number-pad" placeholder="0" placeholderTextColor={colors.sub} style={styles.amountInput} /><Text style={styles.unit}>원</Text></View></View>
       {/* TODO(서버 단계): 영수증 인식 기능이 없어 촬영/자동 입력 버튼을 표시하지 않는다. */}
-      <View><Text style={styles.sectionTitle}>{settlement ? '정산 현황' : '참여 멤버'}</Text>
+      <View><Text style={styles.sectionTitle}>{settlement ? '정산 현황' : `참여 멤버 ${settlementParticipants.length}명`}</Text>
         {settlement ? members.map(member => <SettleMember key={member.id} layout="row" name={member.name} seed={member.profileId ?? member.id} completed={member.isCompleted} mine={member.profileId === user?.id} disabled={busy || finished || (disclosureClosed && member.isCompleted) || loadStatus !== 'ready' || member.profileId !== user?.id} onPress={member.profileId === user?.id ? () => void toggleMine(member) : undefined} />)
-          : participants.length ? participants.map(member => <View key={member.id} style={styles.member} accessible accessibilityLabel={member.name + ', 정산 참여 · 선택 변경 불가'}><Avatar name={member.name} seed={member.profileId ?? member.id} url={member.avatarUrl} size={32} /><Text style={styles.memberName}>{member.name}{member.profileId === user?.id ? ' (나)' : ''}</Text><View style={styles.checkArea}><View style={styles.check}><Check size={16} color={colors.ink} /></View></View></View>)
+          : settlementParticipants.length ? settlementParticipants.map(member => <View key={member.id} style={styles.member} accessible accessibilityLabel={member.name + ', 정산 참여 · 선택 변경 불가'}><Avatar name={member.name} seed={member.profileId ?? member.id} url={member.avatarUrl} size={32} /><Text style={styles.memberName}>{member.name}{member.profileId === user?.id ? ' (나)' : ''}</Text><View style={styles.checkArea}><View style={styles.check}><Check size={16} color={colors.ink} /></View></View></View>)
             : <Text style={styles.note}>요청을 보내면 서버에서 참여 멤버를 확인해요.</Text>}
       </View>
       {/* TODO(서버 단계): 참가자 선택·제외는 서버 계약 없이 조작하지 않는다. 신규 정산의 분모는 생성 응답 전 추정하지 않는다. */}
@@ -145,22 +154,23 @@ export function SettlementSheet({ visible, roomId, participants = [], onClose, o
       {editable ? !bundle ? <View><Text style={styles.note}>{profileStatus === 'error' ? '받을 계좌를 확인하지 못했어요. 프로필을 다시 불러와 주세요.' : '받을 계좌를 확인하고 있어요'}</Text>{profileStatus === 'error' ? <Button variant="secondary" label="계좌 다시 확인" onPress={() => reloadProfile?.()} /> : null}</View> : hasAccount ? <View style={styles.account}><Info size={16} color={colors.sub} /><Text accessibilityLabel={accountAccessibilityLabel} style={styles.note}>받을 계좌: {bankName} {maskedAccount} (프로필에 등록된 내 계좌)</Text></View>
         : <View style={styles.warning}><View style={styles.account}><Wallet size={18} color={v3FeedbackColors.error} /><View style={styles.grow}><Text style={styles.warningTitle}>받을 계좌가 아직 없어요</Text><Text style={styles.warningNote}>계좌를 등록해야 메이트가 바로 보낼 수 있어요.</Text></View></View><Button variant="secondary" style={styles.register} label="계좌 등록하기" disabled={busy} onPress={registerAccount} /></View> : null}
       {finished ? <Text style={styles.note}>정산이 끝났어요. 되돌릴 수 없어요.</Text> : null}
+      {(finished || disclosureClosed) && canCreate ? <Button variant="secondary" label="새 정산 요청하기" disabled={busy || loadStatus !== 'ready'} onPress={() => { setSettlement(null); setAmountText(''); }} /> : null}
       {editable ? <Text style={styles.note}>정산을 요청하면 이 계좌를 정산이 끝날 때까지 정산 참여자와 생성자에게 공개해요. 프로필의 계좌 공개 설정과는 별개예요.</Text> : null}
       {editable ? <Button label={!bundle ? '계좌 확인 중' : !hasAccount ? '계좌를 먼저 등록해 주세요' : settlement ? '정산 내용 수정' : '정산 요청 보내기'} loading={busy} disabled={!hasAccount || amount <= 0 || !roomId || loadStatus !== 'ready' || Boolean(settlement && payment.status !== 'ready')} onPress={() => void request()} />
-        : !finished && !disclosureClosed ? <Text style={styles.note}>정산 내용은 만든 사람만 수정할 수 있어요.</Text> : null}
+        : settlement && !finished && !disclosureClosed ? <Text style={styles.note}>정산 내용은 만든 사람만 수정할 수 있어요.</Text> : null}
     </ScrollView>}<Toast {...toastProps} bottom={Math.max(16, height - 164)} />
   </BottomSheet>;
 }
-export function MembersSheet({ visible, participants, code, myId, ownerId = null, onClose }: {
-  visible: boolean; participants: RoomParticipant[]; code: string | null; myId: string | null; ownerId?: string | null; onClose: () => void;
+export function MembersSheet({ visible, participants, code, myId, ownerId = null, canInvite = true, onClose }: {
+  visible: boolean; participants: RoomParticipant[]; code: string | null; myId: string | null; ownerId?: string | null; canInvite?: boolean; onClose: () => void;
 }) {
   const [inviting, setInviting] = useState(false);
-  useEffect(() => { if (!visible) setInviting(false); }, [visible]);
+  useEffect(() => { if (!visible || !canInvite) setInviting(false); }, [visible, canInvite]);
   // One modal changes its contents, avoiding overlapping iOS sheet presentations.
-  return <BottomSheet visible={visible} title={inviting ? '메이트 초대' : '멤버 ' + participants.length + '명'} subtitle={inviting ? inviteSubtitle : '초대 코드를 보내면 메이트가 바로 들어와요.'} onClose={() => inviting ? setInviting(false) : onClose()}>
-    {inviting && code ? <MateInviteContent code={code} /> : <><InviteCodeBox code={code} /><ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+  return <BottomSheet visible={visible} title={inviting && canInvite ? '메이트 초대' : '멤버 ' + participants.length + '명'} subtitle={canInvite ? inviteSubtitle : '정산이 시작되어 메이트를 더 초대할 수 없어요.'} onClose={() => inviting ? setInviting(false) : onClose()}>
+    {inviting && canInvite && code ? <MateInviteContent code={code} /> : <>{canInvite ? <InviteCodeBox code={code} /> : null}<ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
       {participants.length === 0 ? <Text style={styles.note}>참여 멤버를 불러오지 못했어요</Text> : participants.map(participant => <RoomMemberRow key={participant.id} participant={participant} myId={myId} ownerId={ownerId} />)}
-    </ScrollView>{code ? <Button variant="secondary" label="＋ 메이트 초대" onPress={() => setInviting(true)} /> : null}</>}
+    </ScrollView>{canInvite && code ? <Button variant="secondary" label="＋ 메이트 초대" onPress={() => setInviting(true)} /> : null}</>}
   </BottomSheet>;
 }
 const styles = StyleSheet.create({

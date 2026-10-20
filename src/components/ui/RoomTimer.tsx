@@ -4,15 +4,15 @@ import { roomTimerLabel } from '../../lib/roomFormat';
 import { v3Colors as colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 
-/** [결정] 정산 중에는 만료 규칙, 정산 완료 뒤에는 기존 실제 expiresAt 타이머를 복원한다. */
-export default function RoomTimer({ expiresAt, settled }: { expiresAt: string; settled: boolean }) {
-  const [label, setLabel] = useState(() => roomTimerLabel(expiresAt, settled));
+/** S4 uses the server's finite deadline, including the settlement/absolute retention caps. */
+export default function RoomTimer({ expiresAt, settled, boundedSettlement = false }: { expiresAt: string; settled: boolean; boundedSettlement?: boolean }) {
+  const [label, setLabel] = useState(() => roomTimerLabel(expiresAt, settled, new Date(), boundedSettlement));
   useEffect(() => {
-    setLabel(roomTimerLabel(expiresAt, settled));
-    if (!settled) return;
-    const timer = setInterval(() => setLabel(roomTimerLabel(expiresAt, settled)), 1000);
+    setLabel(roomTimerLabel(expiresAt, settled, new Date(), boundedSettlement));
+    if (!settled && !boundedSettlement) return;
+    const timer = setInterval(() => setLabel(roomTimerLabel(expiresAt, settled, new Date(), boundedSettlement)), 1000);
     return () => clearInterval(timer);
-  }, [expiresAt, settled]);
+  }, [expiresAt, settled, boundedSettlement]);
   return label ? <Text testID="room-expiry-timer" style={styles.timer}>{label}</Text> : null;
 }
 const styles = StyleSheet.create({ timer: { fontFamily: fontFamily.medium, fontSize: 12, lineHeight: 18, color: colors.sub } });
