@@ -14,6 +14,7 @@ import PasswordChangeScreen from '../screens/profile/PasswordChangeScreen';
 import ProfileHomeScreen from '../screens/profile/ProfileHomeScreen';
 import ScheduleConfirmedScreen from '../screens/schedule/ScheduleConfirmedScreen';
 import SettlementsScreen from '../screens/settlement/SettlementsScreen';
+import SettlementDetailScreen from '../screens/settlement/SettlementDetailScreen';
 import ScheduleDetailScreen from '../screens/schedule/ScheduleDetailScreen';
 import ScheduleHomeScreen from '../screens/schedule/ScheduleHomeScreen';
 import ScheduleTimeScreen from '../screens/schedule/ScheduleTimeScreen';
@@ -93,6 +94,8 @@ function renderScreen(name: RouteName) {
       return <ScheduleConfirmedScreen />;
     case 'Settlements':
       return <SettlementsScreen />;
+    case 'SettlementDetail':
+      return <SettlementDetailScreen />;
     case 'Chat':
       return <ChatHomeScreen />;
     case 'ChatRoom':

@@ -31,7 +31,7 @@ try {
  if ($LASTEXITCODE -ne 0) { throw 'Inventory test copy failed' }
 } finally {if(Test-Path -LiteralPath $InventoryTemp){Remove-Item -LiteralPath $InventoryTemp}}
 $Total=0
-foreach ($Name in @('s4_decisions.sql','s4_security.sql','s4_boundaries.sql','s4_voting_atomicity.sql','s4_quorum.sql','s4_review.sql','s4_request_limits.sql','s4_followup.sql','s4_preview.sql','s4_restart.sql','s4_final_review.sql','s4_amount_revocation.sql','s4_invitation_cleanup.sql')) {
+foreach ($Name in @('s4_decisions.sql','s4_security.sql','s4_boundaries.sql','s4_voting_atomicity.sql','s4_quorum.sql','s4_review.sql','s4_request_limits.sql','s4_followup.sql','s4_preview.sql','s4_restart.sql','s4_final_review.sql','s4_amount_revocation.sql','s4_invitation_cleanup.sql','s4_paid_settlement_lock.sql')) {
  $Result=Invoke-S1Sql "\i /tmp/s4_regression/$Name" $Container
  $Count=@($Result -split "\r?\n" | Where-Object { $_ -match '^ok(?:\s|$)' }).Count
  if ($Count -eq 0) { throw "No assertions: $Name" }

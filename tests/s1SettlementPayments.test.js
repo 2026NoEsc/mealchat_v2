@@ -60,6 +60,22 @@ it('loads only one expanded account even when the list contains several open bil
   expect(calls.filter(call => call.name === 'get_settlement_payment_details').map(call => call.args.p_bill_id)).toEqual(['bill', 'second']);
   expect(button('두 번째 정산 계좌 접기')).toBeDefined(); expect(button('식사 정산 정산 계좌 보기')).toBeDefined();
 });
+it('opens the detail transfer question after launching the bank app without marking a share complete', async () => {
+  const opened = jest.fn();
+  await mount(Account, { billId: 'bill', amount: 13000, canSend: true, presentation: 'detail', onTransferOpened: opened });
+  await press('토스로 13,000원 보내기');
+  expect(Linking.openURL).toHaveBeenCalledTimes(1); expect(opened).toHaveBeenCalledTimes(1);
+  expect(supabase.rpc).not.toHaveBeenCalled();
+  expect(calls.filter(call => call.name === 'get_settlement_payment_details').length).toBeGreaterThanOrEqual(2);
+});
+it('does not open a transfer question if disclosure closes while the external app is opening', async () => {
+  let finish; const opened = jest.fn(); Linking.openURL.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const props = { billId: 'bill', amount: 13000, canSend: true, presentation: 'detail', onTransferOpened: opened };
+  await mount(Account, props); await press('토스로 13,000원 보내기');
+  await act(async () => renderer.update(React.createElement(Account, { ...props, completed: true })));
+  await act(async () => finish(true));
+  expect(opened).not.toHaveBeenCalled(); expect(supabase.rpc).not.toHaveBeenCalled();
+});
 it('uses only the bill-scoped RPC for S1 account data and omits account columns from bill lists and notifications', async () => {
   expect((await api.fetchSettlementPaymentDetails('bill')).data.details.accountNumber).toBe(details.account_number);
   expect(calls).toEqual([{ name: 'get_settlement_payment_details', args: { p_bill_id: 'bill' } }]); expect(supabase.from).not.toHaveBeenCalled();

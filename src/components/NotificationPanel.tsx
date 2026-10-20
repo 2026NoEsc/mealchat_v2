@@ -11,8 +11,20 @@ import { fontFamily } from '../theme/typography';
 
 const FILTERS = ['전체', '일정', '정산', '메이트'] as const;
 type Filter = (typeof FILTERS)[number];
-export function noticeKind(notice: RoomNotification): Exclude<Filter, '전체'> { return notice.amount > 0 ? '정산' : '일정'; }
-// TODO(서버 단계): 알림 종류 컬럼과 메이트 이벤트가 생기면 금액 분류를 교체한다.
+
+/**
+ * [결정] title/message 텍스트 매칭은 사용자 정의 방 이름(예: '정산 모임')을 오분류하므로,
+ * 구조적 신호(amount > 0 또는 settlementId 존재)로만 정산을 판정한다.
+ * TODO(서버 단계): 알림 종류 컬럼 및 메이트 이벤트가 생기면 분류를 교체한다 (메이트 탭은 빈 상태 유지).
+ */
+export function noticeKind(notice: RoomNotification): Exclude<Filter, '전체'> {
+  return (notice.amount > 0 || Boolean(notice.settlementId)) ? '정산' : '일정';
+}
+
+/** [결정] 구조적 신호 기반: 정산 알림은 Receipt, 그 외(일정 등)는 CalendarDays */
+export function noticeIcon(notice: RoomNotification) {
+  return (notice.amount > 0 || Boolean(notice.settlementId)) ? Receipt : CalendarDays;
+}
 
 /** Figma 521:1513 / 599:2425 / 599:2587: top panel, single filter and per-date unread state. */
 export default function NotificationPanel({ notices, allRead, readAt, onClose, onMarkAllRead, onPressNotice }: {
@@ -48,7 +60,7 @@ export default function NotificationPanel({ notices, allRead, readAt, onClose, o
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
         {visible.length === 0 ? <Text style={styles.empty}>{filter === '메이트' ? '아직 메이트 알림이 없어요' : notices.length === 0 ? '아직 알림이 없어요' : '이 분류에는 알림이 없어요'}</Text> : visible.map((notice) => {
           const unread = !allRead && (readAt === undefined || hasUnreadNotices([notice], readAt));
-          const Icon = noticeKind(notice) === '정산' ? Receipt : CalendarDays;
+          const Icon = noticeIcon(notice);
           const actionable = Boolean(onPressNotice && (notice.roomId?.trim() || notice.settlementId));
           const label = [unread ? '안 읽음' : '읽음', notice.title, notice.message, ...(notice.amount > 0 ? [formatAmount(notice.amount)] : []), relativeTime(notice.createdAt)].join(', ');
           const body = <>
@@ -61,7 +73,7 @@ export default function NotificationPanel({ notices, allRead, readAt, onClose, o
           return actionable ? <Pressable key={notice.id} accessibilityRole="button" accessibilityLabel={label} onPress={() => onPressNotice?.(notice)} style={rowStyle}>{body}</Pressable>
             : <View key={notice.id} accessible accessibilityLabel={label} style={rowStyle}>{body}</View>;
         })}
-        {/* TODO(서버 단계): 최근 30일 조회를 보장하면 기간 문구를 표시한다. 현재 API는 최신 30건이다. */}
+        {/* [결정] 서버 조회(src/lib/settlements.ts:208-211)는 기간 없이 최신 30건이므로 '최근 알림을 보여드려요' 유지. 서버가 30일 범위를 보장하면 Figma 원문 '최근 30일의 알림을 보여드려요'로 교체 예정 */}
         <Text style={styles.footer}>최근 알림을 보여드려요</Text>
       </ScrollView>
     </Animated.View>

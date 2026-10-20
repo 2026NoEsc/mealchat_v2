@@ -27,6 +27,9 @@ export type Settlement = {
   totalAmount: number;
   splitCount: number;
   createdAt: string;
+  meetingDate?: string | null;
+  locationName?: string | null;
+  paymentDisclosureClosed?: boolean;
   members: SettlementMember[];
 };
 
@@ -45,6 +48,7 @@ type BillRow = {
   total_amount: number;
   split_count: number;
   created_at: string;
+  payment_disclosure_closed_at?: string | null;
   rooms: { title: string } | { title: string }[] | null;
   dutch_pay_members: MemberRow[] | null;
 };
@@ -52,6 +56,11 @@ type BillRow = {
 const SELECT =
   'id, room_id, creator_id, title, total_amount, split_count, ' +
   'created_at, rooms(title), dutch_pay_members(id, profile_id, name, is_completed)';
+
+const DETAIL_SELECT =
+  'id, room_id, creator_id, title, total_amount, split_count, ' +
+  'created_at, payment_disclosure_closed_at, rooms(title, meeting_date, location_name, confirmed_menu), ' +
+  'dutch_pay_members(id, profile_id, name, is_completed)';
 
 function toSettlement(row: BillRow): Settlement {
   /* PostgREST 는 관계를 객체로 줄 때도 배열로 줄 때도 있다 */
@@ -66,6 +75,7 @@ function toSettlement(row: BillRow): Settlement {
     totalAmount: row.total_amount,
     splitCount: row.split_count,
     createdAt: row.created_at,
+    paymentDisclosureClosed: Boolean(row.payment_disclosure_closed_at),
     members: (row.dutch_pay_members ?? []).map((member) => ({
       id: member.id,
       profileId: member.profile_id,
@@ -282,4 +292,20 @@ export async function fetchMySettlementsDetailed(): Promise<{
 
   if (error) return { data: null, error };
   return { data: (data ?? []).map(toSettlement), error: null };
+}
+
+/** Account columns stay exclusively behind the existing bill-scoped disclosure RPC. */
+export async function fetchSettlementDetail(billId: string): Promise<{
+  data: Settlement | null; error: Error | null;
+}> {
+  const { data, error } = await supabase.from('dutch_pay_bills')
+    .select(DETAIL_SELECT)
+    .eq('id', billId).maybeSingle<Omit<BillRow, 'rooms'> & {
+      rooms: ({ title: string; meeting_date?: string; location_name?: string | null; confirmed_menu?: string | null })
+        | { title: string; meeting_date?: string; location_name?: string | null; confirmed_menu?: string | null }[] | null;
+    }>();
+  if (error || !data || data.id !== billId) return { data: null, error: error ?? new Error('Settlement unavailable') };
+  const room = Array.isArray(data.rooms) ? data.rooms[0] : data.rooms;
+  return { data: { ...toSettlement(data), meetingDate: room?.meeting_date ?? null,
+    locationName: room?.location_name ?? room?.confirmed_menu ?? null }, error: null };
 }

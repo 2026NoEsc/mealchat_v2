@@ -287,7 +287,7 @@ it('opens a bill-linked notification after its room disappears without requiring
   fetchMyNotifications.mockResolvedValue({ data: [notice], error: null });
   const root = await render(ProviderScene); await act(async () => notificationContext.open());
   await press(root, noticeLabel(notice, true));
-  expect(navigation.navigate).toHaveBeenCalledWith('Settlements'); expect(root.findAllByType(NotificationPanel)).toHaveLength(0);
+  expect(navigation.navigate).toHaveBeenCalledWith('SettlementDetail', { billId: 'bill' }); expect(root.findAllByType(NotificationPanel)).toHaveLength(0);
 });
 it.each(['success', 'error', 'reject'])('optimistically marks provider notifications read and handles %s', async mode => {
   let resolve, reject;
@@ -360,7 +360,7 @@ it('prevents duplicate completion requests and keeps confirmation open on failur
   await act(async () => { const button = target(root, '보냈어요'); button.props.onPress(); button.props.onPress(); });
   expect(setSettlementCompleted).toHaveBeenCalledTimes(1);
   await act(async () => finish(Error('private backend detail')));
-  expect(text(root)).toContain('정산을 변경하지 못했어요'); expect(text(root)).not.toContain('private backend detail');
+  expect(text(root)).toContain('정산 상태를 바꾸지 못했어요'); expect(text(root)).not.toContain('private backend detail');
   await press(root, '보냈어요'); expect(setSettlementCompleted).toHaveBeenCalledTimes(2);
 });
 it.each([true, false])('shows only working settlement-more actions; requester=%s', async requester => {
@@ -368,9 +368,9 @@ it.each([true, false])('shows only working settlement-more actions; requester=%s
   fetchMySettlementsDetailed.mockResolvedValue({ data: [{ ...bill, creatorId: requester ? 'me' : 'mate' }], error: null });
   const root = await render(SettlementsScreen); await press(root, '회사 팀 점심 정산 더보기');
   expect(target(root, '채팅방으로 가기')).toBeDefined();
-  expect(Boolean(target(root, '금액이 이상해요 · 채팅방에 묻기'))).toBe(!requester);
+  expect(Boolean(target(root, '금액이 이상해요 · 채팅방에서 묻기'))).toBe(!requester);
   for (const label of ['정산 취소', '금액 · 참여 멤버 고치기', '재알림']) expect(target(root, label)).toBeUndefined();
-  await press(root, '정산 내용 복사'); expect(copy).toHaveBeenCalledWith('회사 팀 점심\n총 52,000원 · 1인당 13,000원'); expect(copy.mock.calls[0][0]).not.toContain('3333');
+  expect(target(root, '정산 내용 복사')).toBeUndefined(); expect(copy).not.toHaveBeenCalled();
   await press(root, '채팅방으로 가기'); expect(navigation.navigate).toHaveBeenCalledWith('ChatRoom', { roomId: 'room', title: '조선칼국수' });
 });
 it('preserves undo for an already-completed own share instead of asking the sent-money question', async () => {

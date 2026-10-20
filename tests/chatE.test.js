@@ -509,13 +509,15 @@ it.each(['scheduling', 'place', 'settling', 'done', null])('cannot start a new s
   expect(target(root, '정산 요청 보내기')).toBeUndefined(); expect(target(root, '계좌 등록하기')).toBeUndefined();
   expect(createRoomSettlement).not.toHaveBeenCalled();
 });
-it('keeps an existing unverified legacy bill editable without creating a new confirmed appointment', async () => {
+it('keeps an existing unverified legacy bill read-only and links its detail without creating a new appointment', async () => {
   useMyProfile.mockReturnValue(accountProfile);
   fetchRoomSettlements.mockResolvedValue({ data: [{ id: 'old', roomId: 'room', creatorId: 'me', title: '기존 정산', totalAmount: 52000, splitCount: 2, members: [{ id: 'mine', profileId: 'me', name: '나', isCompleted: false }] }], error: null });
   const root = await render(RealSettlementSheet, { visible: true, roomId: 'room', roomStage: 'settling', decisionMode: 's4', onClose: jest.fn() });
   expect(text(root)).toContain('확정 미확인 · 정산 중');
-  expect(target(root, '정산 내용 수정').props.disabled).toBe(false);
-  await press(root, '정산 내용 수정'); expect(createRoomSettlement).toHaveBeenCalledTimes(1);
+  expect(target(root, '정산 내용 수정')).toBeUndefined();
+  expect(root.findAllByType(TextInput)).toHaveLength(0);
+  await press(root, '정산 상세 보기'); expect(createRoomSettlement).not.toHaveBeenCalled();
+  expect(navigation.navigate).toHaveBeenCalledWith('SettlementDetail', { billId: 'old', entry: 'ChatRoom' });
 });
 it('maps settlement S4008 separately from voting S4008 and refreshes a stale confirmed room', async () => {
   useMyProfile.mockReturnValue(accountProfile); const changed = jest.fn();
@@ -594,7 +596,7 @@ it('retains the existing bill split and completion contract while preventing edi
   useMyProfile.mockReturnValue(accountProfile);
   fetchRoomSettlements.mockResolvedValue({ data: [{ id: 'bill', creatorId: 'mate', totalAmount: 52000, splitCount: 4, members: [{ id: 'mine', profileId: 'me', name: '나', isCompleted: false }, { id: 'other', profileId: 'mate', name: '모아', isCompleted: true }] }], error: null });
   const root = await render(RealSettlementSheet, { visible: true, roomStage: 'confirmed', roomId: 'room', onClose: jest.fn() });
-  expect(text(root)).toContain('13,000원'); expect(text(root)).toContain('3333-01-2345678'); expect(root.findByType(TextInput).props.editable).toBe(false);
+  expect(text(root)).toContain('13,000원'); expect(text(root)).toContain('3333-01-2345678'); expect(root.findAllByType(TextInput)).toHaveLength(0);
   expect(require('../src/lib/settlements').fetchSettlementPaymentDetails).toHaveBeenCalledWith('bill');
   expect(target(root, '정산 내용 수정')).toBeUndefined(); await press(root, '나 (나), 대기');
   expect(completeSheetMember).not.toHaveBeenCalled(); expect(text(root)).toContain('13,000원');
@@ -622,7 +624,7 @@ it('keeps a completed creator bill read-only without a payment fetch, profile ac
   bill.members = bill.members.map(member => ({ ...member, isCompleted: true }));
   fetchRoomSettlements.mockResolvedValue({ data: [bill], error: null }); useMyProfile.mockReturnValue(accountProfile);
   const root = await render(RealSettlementSheet, { visible: true, roomStage: 'confirmed', roomId: 'room', onClose: jest.fn() });
-  expect(root.findByType(TextInput).props.editable).toBe(false);
+  expect(root.findAllByType(TextInput)).toHaveLength(0);
   expect(text(root)).toContain('정산이 끝났어요. 되돌릴 수 없어요.');
   expect(text(root)).not.toContain('받을 계좌:');
   expect(text(root)).not.toContain('정산을 요청하면 이 계좌를');
@@ -631,11 +633,16 @@ it('keeps a completed creator bill read-only without a payment fetch, profile ac
   expect(target(root, '토스로 보내기')).toBeUndefined();
   expect(require('../src/lib/settlements').fetchSettlementPaymentDetails).not.toHaveBeenCalled();
 });
-it.each([['creator', true], ['undo', false]])('preserves immediate completion behavior for %s', async (kind, expected) => {
+it.each([['creator', true], ['undo', false]])('confirms undo while keeping the creator completion immediate: %s', async (kind, expected) => {
   const bill = sheetBill(kind === 'creator' ? { creatorId: 'me' } : { members: [{ id: 'mine', profileId: 'me', name: '나', isCompleted: true }, { id: 'other', profileId: 'mate', name: '모아', isCompleted: false }] });
   fetchRoomSettlements.mockResolvedValue({ data: [bill], error: null }); useMyProfile.mockReturnValue(accountProfile);
   const root = await render(RealSettlementSheet, { visible: true, roomStage: 'confirmed', roomId: 'room', onClose: jest.fn() });
   await press(root, kind === 'creator' ? '나 (나), 대기' : '나 (나), 완료');
+  if (kind === 'undo') {
+    expect(completeSheetMember).not.toHaveBeenCalled(); expect(text(root)).toContain('실제 송금은 취소되지 않아요');
+    await press(root, '그대로 둘게요'); expect(completeSheetMember).not.toHaveBeenCalled();
+    await press(root, '나 (나), 완료'); await press(root, '대기로 바꾸기');
+  }
   expect(completeSheetMember).toHaveBeenCalledWith('mine', expected); expect(target(root, '보냈어요')).toBeUndefined();
 });
 it('keeps sender confirmation open on permission failure, hides backend details, and supports retry', async () => {
@@ -643,7 +650,7 @@ it('keeps sender confirmation open on permission failure, hides backend details,
   completeSheetMember.mockResolvedValueOnce({ code: '42501', message: 'private SQL detail' }); const changed = jest.fn();
   const root = await render(RealSettlementSheet, { visible: true, roomStage: 'confirmed', roomId: 'room', onClose: jest.fn(), onStateChanged: changed });
   await press(root, '나 (나), 대기'); expect(text(root)).toContain('모아에게'); await press(root, '보냈어요');
-  expect(text(root)).toContain('정산 내용은 만든 사람만 수정할 수 있어요.'); expect(text(root)).not.toContain('private'); expect(changed).not.toHaveBeenCalled();
+  expect(text(root)).toContain('이 상태는 바꿀 수 없어요.'); expect(text(root)).not.toContain('private'); expect(changed).not.toHaveBeenCalled();
   await press(root, '보냈어요'); expect(completeSheetMember).toHaveBeenCalledTimes(2); expect(changed).toHaveBeenCalledTimes(1); expect(target(root, '보냈어요')).toBeUndefined();
 });
 it('blocks duplicate sender confirmation and cancellation while the completion call is pending', async () => {
@@ -667,7 +674,7 @@ it.each([[4, 13000], [3, 17334], [0, 52000]])('uses loaded server total and spli
   navigation.current.params = { roomId: 'room', settlementAmountText: '70000', awaitingSettlementAccount: true };
   fetchRoomSettlements.mockResolvedValue({ data: [sheetBill({ splitCount })], error: null });
   const root = await render(RealSettlementSheet, { visible: true, roomStage: 'confirmed', roomId: 'room', onClose: jest.fn() });
-  expect(root.findByType(TextInput).props.value).toBe('52,000');
+  expect(root.findAllByType(TextInput)).toHaveLength(0); expect(text(root)).toContain('52,000원');
   expect(navigation.current.params.settlementAmountText).toBe('70000');
   await press(root, '나 (나), 대기');
   expect(text(root)).toContain(expected.toLocaleString('ko-KR') + '원');

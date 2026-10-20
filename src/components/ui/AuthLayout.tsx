@@ -1,20 +1,31 @@
 import { ArrowLeft } from 'lucide-react-native';
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { v3Layout } from '../../theme/scale';
 import { v3Colors as colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 
+const wordmarkStart = require('../../../assets/brand/wordmark-start.png');
+
 /** Phone handoff: 519:1229 top bar, 519:1262 signup header and shared footer. */
-export function AuthTopBar({ title, onBack }: { title?: string; onBack?: () => void }) {
+export function AuthTopBar({
+  title,
+  onBack,
+  alignTitle = 'center',
+}: {
+  title?: string;
+  onBack?: () => void;
+  alignTitle?: 'left' | 'center';
+}) {
   return <View style={authStyles.topBar}>
     {onBack ? <Pressable accessibilityRole="button" accessibilityLabel="뒤로" onPress={onBack}
       style={({ pressed }) => [authStyles.iconButton, pressed && authStyles.pressed]}>
       <ArrowLeft size={24} color={colors.ink} aria-hidden={true} />
     </Pressable> : <View style={authStyles.iconButton} />}
-    <Text accessibilityRole="header" style={authStyles.barTitle}>{title}</Text>
+    {/* [결정] 기본 정렬은 중앙(center)이며, 호출 화면(예: LoginScreen)에서 alignTitle prop으로 지정 */}
+    <Text accessibilityRole="header" style={[authStyles.barTitle, alignTitle === 'left' ? authStyles.barTitleLeft : authStyles.barTitleCenter]}>{title}</Text>
     <View style={authStyles.iconButton} />
   </View>;
 }
@@ -46,10 +57,15 @@ export function AuthFooter({ children }: { children: ReactNode }) {
   return <View style={[authStyles.footer, { paddingBottom: Math.max(24, insets.bottom) }]}>{children}</View>;
 }
 
-/** Existing bundled wordmark font; no separate wordmark bitmap is in assets. */
+/** [결정] Figma 519:1219 규격에 따라 주황 워드마크 이미지 적용 (X01) */
 export function BrandWordmark({ loading = false }: { loading?: boolean }) {
-  return <Text accessibilityLabel="MealChat" allowFontScaling={false} numberOfLines={1}
-    style={[styles.wordmark, loading && styles.loadingWordmark]}>MEALCHAT</Text>;
+  return <Image
+    source={wordmarkStart}
+    accessible
+    accessibilityLabel="MealChat"
+    resizeMode="contain"
+    style={[styles.wordmark, loading && styles.loadingWordmark]}
+  />;
 }
 
 export const authStyles = StyleSheet.create({
@@ -61,7 +77,9 @@ export const authStyles = StyleSheet.create({
   label: { fontFamily: fontFamily.medium, fontSize: 13, lineHeight: 20, color: colors.sub },
   topBar: { minHeight: v3Layout.headerHeight, padding: 8, flexDirection: 'row', alignItems: 'center', gap: 4 },
   iconButton: { width: v3Layout.minTouchTarget, height: v3Layout.minTouchTarget, alignItems: 'center', justifyContent: 'center' },
-  barTitle: { flex: 1, textAlign: 'center', fontFamily: fontFamily.bold, fontSize: 17, lineHeight: 24, color: colors.ink },
+  barTitle: { flex: 1, fontFamily: fontFamily.bold, fontSize: 17, lineHeight: 24, color: colors.ink },
+  barTitleLeft: { textAlign: 'left' },
+  barTitleCenter: { textAlign: 'center' },
   footer: { backgroundColor: colors.bg, paddingTop: 12, paddingHorizontal: 20, paddingBottom: 24, gap: 4 },
   iconBadge: { width: 56, height: 56, borderRadius: 20, backgroundColor: colors.selectedBg, alignItems: 'center', justifyContent: 'center' },
   pressed: { opacity: 0.8 },
@@ -75,6 +93,6 @@ const styles = StyleSheet.create({
   progressPart: { flex: 1, height: 4, borderRadius: 2, backgroundColor: colors.border },
   progressActive: { backgroundColor: colors.primary },
   signupTitle: { paddingTop: 8, gap: 6 },
-  wordmark: { width: 160, height: 34, fontSize: 32, lineHeight: 34, fontFamily: fontFamily.wordmark, color: colors.ink, textAlign: 'center' },
-  loadingWordmark: { width: 150, height: 32, fontSize: 30, lineHeight: 32 },
+  wordmark: { width: 160, height: 34 },
+  loadingWordmark: { width: 150, height: 32 },
 });

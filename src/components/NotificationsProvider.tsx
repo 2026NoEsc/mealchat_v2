@@ -113,7 +113,8 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
             onPressNotice={(notice) => {
               if (!notice.roomId?.trim() && !notice.settlementId) return;
               close();
-              if (notice.settlementId || notice.amount > 0) navigate('Settlements');
+              if (notice.settlementId) navigate('SettlementDetail', { billId: notice.settlementId });
+              else if (notice.amount > 0) navigate('Settlements');
               else navigate('ChatRoom', { roomId: notice.roomId });
               // Accounts never come from notifications; the destination reads bill-scoped payment details.
             }}

@@ -9,6 +9,7 @@ import { v3Colors as colors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 
 const logo = require('../../../assets/brand/logo-main.png');
+const startupCharacters = require('../../../assets/brand/startup-characters.png');
 
 /** Phone 519:1216. Footer stays visible while the hero can scroll on small phones. */
 export default function SignupStartScreen() {
@@ -20,8 +21,14 @@ export default function SignupStartScreen() {
       <BrandWordmark />
       <Text style={styles.title}>‘밥 한 끼 먹자’가 진짜 약속이 되는 곳</Text>
       <Text style={styles.subtitle}>일정 맞추기부터 메뉴, 정산까지 채팅방 하나로</Text>
-      {/* Figma blobs 340×190: 대응하는 기존 자산이 없어 생성하지 않고 공간을 유지한다. */}
-      <View style={styles.blobsSpace} accessible={false} />
+      {/* [결정] Figma 519:1222 규격에 따라 340×190 시작 캐릭터 일러스트(startup-characters) 배치 (장식 이미지이므로 스크린 리더 미노출) */}
+      <Image
+        source={startupCharacters}
+        style={styles.blobsImage}
+        resizeMode="contain"
+        accessible={false}
+        aria-hidden={true}
+      />
     </ScrollView>
     <AuthFooter>
       <View style={styles.actions}>
@@ -37,7 +44,7 @@ const styles = StyleSheet.create({
   logo: { width: 96, height: 96, borderRadius: 24 },
   title: { fontFamily: fontFamily.medium, fontSize: 17, lineHeight: 26, color: colors.ink, textAlign: 'center' },
   subtitle: { fontFamily: fontFamily.body, fontSize: 14, lineHeight: 22, color: colors.sub, textAlign: 'center' },
-  blobsSpace: { width: '100%', maxWidth: 340, height: 190, borderRadius: 16 },
+  blobsImage: { width: 340, maxWidth: '100%', height: 190 },
   actions: { gap: 10 },
   login: { minHeight: v3Layout.minTouchTarget, paddingVertical: 8 },
 });

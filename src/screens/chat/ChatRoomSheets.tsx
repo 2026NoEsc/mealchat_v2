@@ -9,12 +9,14 @@ import { chatFeedbackColors } from '../../components/ui/chatTokens';
 import FailureCard from '../../components/ui/FailureCard';
 import InviteCodeBox from '../../components/ui/InviteCodeBox';
 import { MateInviteContent, inviteSubtitle } from '../../components/ui/MateInviteSheet';
+import MateProfileSheet from '../../components/ui/MateProfileSheet';
 import RoomMemberRow from '../../components/ui/RoomMemberRow';
 import SettleMember from '../../components/ui/SettleMember';
 import Toast, { useToast } from '../../components/ui/Toast';
 import { settlementUiError, TransferConfirmationContent } from '../../components/ui/TransferConfirmationSheet';
 import { notify } from '../../lib/confirm';
 import { formatAmount } from '../../lib/format';
+import { settlementCompletionError } from '../../lib/settlementAccess';
 import type { RoomParticipant, RoomStage } from '../../lib/rooms';
 import { canStartSettlement, settlementConfirmationRequired, unverifiedSettlementLabel } from '../../lib/roomSettlementPolicy';
 import { canEditSettlement, createRoomSettlement, fetchRoomSettlements, setSettlementCompleted, type Settlement, type SettlementMember } from '../../lib/settlements';
@@ -25,6 +27,7 @@ import { v3Colors as colors, v3FeedbackColors } from '../../theme/tokens';
 import { fontFamily } from '../../theme/typography';
 import { useSettlementPayment } from '../settlement/useSettlementPayment';
 import { SettlementPaymentAccountView } from '../settlement/SettlementPaymentAccount';
+import { SettlementStatusConfirmationContent } from '../settlement/SettlementStatusConfirmationSheet';
 
 type SheetProps = { visible: boolean; onClose: () => void; onStateChanged?: () => void };
 /** Phone 527:1747 / 562:1879 / 590:1896. Existing amount and mutation contracts remain unchanged. */
@@ -67,7 +70,7 @@ export function SettlementSheet({ visible, roomId, roomStage = null, appointment
   const payment = useSettlementPayment(settlement?.id ?? null, visible && loadStatus === 'ready' && !finished);
   const disclosureClosed = payment.data?.status === 'completed';
   const canCreate = canStartSettlement(roomStage, Boolean(appointmentConfirmedAt));
-  const editable = canEditSettlement(settlement, user?.id ?? null) && !finished && !disclosureClosed && (canCreate || (Boolean(settlement) && (roomStage === 'settling' || roomStage === 'done')));
+  const editable = !settlement && canEditSettlement(settlement, user?.id ?? null) && canCreate;
   const unverifiedLabel = roomStage ? unverifiedSettlementLabel(roomStage, Boolean(appointmentConfirmedAt), decisionMode === 's4') : null;
   const settlementParticipants = participants.filter(participant => participant.profileId !== null);
   const splitCount = settlement?.splitCount ?? members.length ?? 1;
@@ -88,26 +91,33 @@ export function SettlementSheet({ visible, roomId, roomStage = null, appointment
     }
   }, [visible, params?.awaitingSettlementAccount, hasAccount, editable, loadStatus, showToast]);
   const request = async () => {
-    if (!roomId || amount <= 0 || !editable || !hasAccount || operation.current || loadStatus !== 'ready') return;
+    if (settlement || !roomId || amount <= 0 || !editable || !hasAccount || operation.current || loadStatus !== 'ready') return;
     operation.current = true; setBusy(true);
     try {
-      if (settlement) {
-        const currentPayment = await payment.refresh();
-        if (!currentPayment || currentPayment.status === 'completed') return;
-      }
       if (!mounted.current || currentRoom.current !== roomId || currentUser.current !== user?.id) return;
       if (!settlement && !canStartSettlement(currentStage.current, currentOwnerConfirmed.current)) return;
-      const { error } = await createRoomSettlement({ roomId, title: '식사 정산', amount, bankName, accountNumber, accountHolder: bundle?.profile.name ?? null });
+      const { billId, error } = await createRoomSettlement({ roomId, title: '식사 정산', amount, bankName, accountNumber, accountHolder: bundle?.profile.name ?? null });
       if (currentRoom.current !== roomId || currentUser.current !== user?.id) return;
-      if (error) { if (mounted.current) { notify('정산 요청 실패', settlementUiError(error)); if ((error as Error & { code?: string }).code === 'S4008') onStateChanged?.(); } return; }
-      onStateChanged?.(); if (mounted.current) { setReloadToken(token => token + 1); onClose(); }
+      if (error) { if (mounted.current) {
+        notify('정산 요청 실패', settlementUiError(error));
+        if ((error as Error & { code?: string }).code === 'S4008') onStateChanged?.();
+        if ((error as Error & { code?: string }).code === '42501' && error.message === 'SETTLEMENT_LOCKED_AFTER_PAYMENT') setReloadToken(token => token + 1);
+      } return; }
+      onStateChanged?.(); if (mounted.current) {
+        onClose();
+        if (billId) {
+          replace('ChatRoom', { ...current.params, roomId, openSheet: undefined, awaitingSettlementAccount: undefined, settlementAmountText: undefined });
+          navigate('SettlementDetail', { billId, entry: 'ChatRoom' });
+        }
+        else notify('정산 요청 확인 필요', '정산 번호를 확인하지 못했어요. 정산 목록에서 다시 확인해 주세요.');
+      }
     } catch { if (mounted.current) notify('정산 요청 실패', '요청을 보내지 못했어요. 잠시 후 다시 시도해 주세요.'); }
     finally { operation.current = false; if (mounted.current) setBusy(false); }
   };
   const toggleMine = async (member: SettlementMember, confirmed = false) => {
-    if (operation.current || finished || (disclosureClosed && member.isCompleted) || member.profileId !== user?.id || loadStatus !== 'ready') return;
-    // Sender completion needs confirmation; undo and the requester's own share stay immediate.
-    if (!member.isCompleted && settlement?.creatorId !== user?.id && !confirmed) {
+    if (operation.current || finished || disclosureClosed || member.profileId !== user?.id || loadStatus !== 'ready') return;
+    // Both undo and sender completion require confirmation in this same modal.
+    if (!confirmed && (member.isCompleted || settlement?.creatorId !== user?.id)) {
       setCompletionError(null); setPendingMember(member); return;
     }
     operation.current = true; setBusy(true); setCompletionError(null);
@@ -116,15 +126,15 @@ export function SettlementSheet({ visible, roomId, roomStage = null, appointment
       if (currentRoom.current !== roomId || currentUser.current !== user?.id) return;
       if (error) {
         if (!mounted.current) return;
-        if (confirmed) setCompletionError(settlementUiError(error));
-        else notify('변경 실패', settlementUiError(error));
+        if (confirmed) setCompletionError(settlementCompletionError(error));
+        else notify('변경 실패', settlementCompletionError(error));
         return;
       }
       onStateChanged?.(); if (mounted.current) { setPendingMember(null); setReloadToken(token => token + 1); }
     } catch {
       if (!mounted.current) return;
-      if (confirmed) setCompletionError(settlementUiError(null));
-      else notify('변경 실패', '변경하지 못했어요. 잠시 후 다시 시도해 주세요.');
+      if (confirmed) setCompletionError(settlementCompletionError(null));
+      else notify('변경 실패', settlementCompletionError(null));
     }
     finally { operation.current = false; if (mounted.current) setBusy(false); }
   };
@@ -136,12 +146,13 @@ export function SettlementSheet({ visible, roomId, roomStage = null, appointment
   };
   const closeConfirmation = () => { if (!busy) { setPendingMember(null); setCompletionError(null); } };
   // Change content in one modal instead of stacking iOS sheet presentations.
-  return <BottomSheet visible={visible} title={pendingMember ? '' : 'N빵 정산'} subtitle={pendingMember ? undefined : '결제 금액을 넣으면 참여한 사람 수로 나눠요.'} onClose={() => { if (!busy) { if (pendingMember) closeConfirmation(); else onClose(); } }}>
-    {pendingMember ? <TransferConfirmationContent recipient={members.find(member => member.profileId === settlement?.creatorId)?.name || null} amount={confirmationAmount} busy={busy} error={completionError} onClose={closeConfirmation} onConfirm={() => void toggleMine(pendingMember, true)} /> : <ScrollView style={styles.scroll} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+  return <BottomSheet visible={visible} title={pendingMember?.isCompleted ? '송금 완료 표시를 되돌릴까요?' : pendingMember ? '' : 'N빵 정산'} subtitle={pendingMember ? undefined : '결제 금액을 넣으면 참여한 사람 수로 나눠요.'} onClose={() => { if (!busy) { if (pendingMember) closeConfirmation(); else onClose(); } }}>
+    {pendingMember ? pendingMember.isCompleted ? <SettlementStatusConfirmationContent kind="undo" busy={busy} error={completionError} onClose={closeConfirmation} onConfirm={() => void toggleMine(pendingMember, true)} /> : <TransferConfirmationContent recipient={members.find(member => member.profileId === settlement?.creatorId)?.name || null} amount={confirmationAmount} busy={busy} error={completionError} onClose={closeConfirmation} onConfirm={() => void toggleMine(pendingMember, true)} /> : <ScrollView style={styles.scroll} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
       {loadStatus === 'error' ? <FailureCard title="정산을 불러오지 못했어요" reason="이전 정산을 확인한 뒤 요청할 수 있어요." onRetry={() => setReloadToken(n => n + 1)} /> : null}
       {unverifiedLabel ? <Text style={styles.note}>{unverifiedLabel} · 이전 정산의 약속 확정 여부는 확인할 수 없어요.</Text> : null}
       {!settlement && !canCreate ? <Text style={styles.note}>{roomStage ? settlementConfirmationRequired : '방의 약속 확정 상태를 확인한 뒤 정산을 시작할 수 있어요.'}</Text> : null}
-      <View style={styles.amountField}><Text style={styles.label}>총 결제금액</Text><View style={styles.amountBox}><TextInput accessibilityLabel="총 결제금액" value={amountText.replace(/[^0-9]/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, ',')} onChangeText={setAmountText} editable={editable && !busy && loadStatus === 'ready'} keyboardType="number-pad" placeholder="0" placeholderTextColor={colors.sub} style={styles.amountInput} /><Text style={styles.unit}>원</Text></View></View>
+      {/* [결정] S6 금액 수정 UI는 숨긴다. 기존 정산은 금액을 읽기 전용으로 보여 준다. */}
+      <View style={styles.amountField}><Text style={styles.label}>총 결제금액</Text><View style={styles.amountBox}>{settlement ? <Text style={styles.amountInput}>{formatAmount(settlement.totalAmount)}</Text> : <><TextInput accessibilityLabel="총 결제금액" value={amountText.replace(/[^0-9]/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, ',')} onChangeText={setAmountText} editable={editable && !busy && loadStatus === 'ready'} keyboardType="number-pad" placeholder="0" placeholderTextColor={colors.sub} style={styles.amountInput} /><Text style={styles.unit}>원</Text></>}</View></View>
       {/* TODO(서버 단계): 영수증 인식 기능이 없어 촬영/자동 입력 버튼을 표시하지 않는다. */}
       <View><Text style={styles.sectionTitle}>{settlement ? '정산 현황' : `참여 멤버 ${settlementParticipants.length}명`}</Text>
         {settlement ? members.map(member => <SettleMember key={member.id} layout="row" name={member.name} seed={member.profileId ?? member.id} completed={member.isCompleted} mine={member.profileId === user?.id} disabled={busy || finished || (disclosureClosed && member.isCompleted) || loadStatus !== 'ready' || member.profileId !== user?.id} onPress={member.profileId === user?.id ? () => void toggleMine(member) : undefined} />)
@@ -156,8 +167,11 @@ export function SettlementSheet({ visible, roomId, roomStage = null, appointment
       {finished ? <Text style={styles.note}>정산이 끝났어요. 되돌릴 수 없어요.</Text> : null}
       {(finished || disclosureClosed) && canCreate ? <Button variant="secondary" label="새 정산 요청하기" disabled={busy || loadStatus !== 'ready'} onPress={() => { setSettlement(null); setAmountText(''); }} /> : null}
       {editable ? <Text style={styles.note}>정산을 요청하면 이 계좌를 정산이 끝날 때까지 정산 참여자와 생성자에게 공개해요. 프로필의 계좌 공개 설정과는 별개예요.</Text> : null}
-      {editable ? <Button label={!bundle ? '계좌 확인 중' : !hasAccount ? '계좌를 먼저 등록해 주세요' : settlement ? '정산 내용 수정' : '정산 요청 보내기'} loading={busy} disabled={!hasAccount || amount <= 0 || !roomId || loadStatus !== 'ready' || Boolean(settlement && payment.status !== 'ready')} onPress={() => void request()} />
-        : settlement && !finished && !disclosureClosed ? <Text style={styles.note}>정산 내용은 만든 사람만 수정할 수 있어요.</Text> : null}
+      {settlement ? <Button label="정산 상세 보기" disabled={busy || loadStatus !== 'ready'} onPress={() => {
+        onClose(); replace('ChatRoom', { ...current.params, roomId, openSheet: undefined, awaitingSettlementAccount: undefined, settlementAmountText: undefined });
+        navigate('SettlementDetail', { billId: settlement.id, entry: 'ChatRoom' });
+      }} /> : null}
+      {editable ? <Button label={!bundle ? '계좌 확인 중' : !hasAccount ? '계좌를 먼저 등록해 주세요' : '정산 요청 보내기'} loading={busy} disabled={!hasAccount || amount <= 0 || !roomId || loadStatus !== 'ready'} onPress={() => void request()} /> : null}
     </ScrollView>}<Toast {...toastProps} bottom={Math.max(16, height - 164)} />
   </BottomSheet>;
 }
@@ -165,11 +179,22 @@ export function MembersSheet({ visible, participants, code, myId, ownerId = null
   visible: boolean; participants: RoomParticipant[]; code: string | null; myId: string | null; ownerId?: string | null; canInvite?: boolean; onClose: () => void;
 }) {
   const [inviting, setInviting] = useState(false);
+  const { navigate, current } = useNavigation();
+  const roomId = typeof current.params?.roomId === 'string' ? current.params.roomId : null;
+  const contextKey = `${myId ?? ''}:${roomId ?? ''}`;
+  const [selection, setSelection] = useState<{ context: string; id: string } | null>(null);
+  const selected = visible && selection?.context === contextKey ? participants.find(participant => participant.id === selection.id) : undefined;
   useEffect(() => { if (!visible || !canInvite) setInviting(false); }, [visible, canInvite]);
+  useEffect(() => { setSelection(null); }, [visible, contextKey]);
+  const selectMember = (participant: RoomParticipant) => {
+    // [결정] E0479: 본인은 프로필 홈, E0480~E0482: 타인은 같은 모달의 메이트 프로필.
+    if (myId && participant.profileId === myId) { onClose(); navigate('Profile'); }
+    else setSelection({ context: contextKey, id: participant.id });
+  };
   // One modal changes its contents, avoiding overlapping iOS sheet presentations.
-  return <BottomSheet visible={visible} title={inviting && canInvite ? '메이트 초대' : '멤버 ' + participants.length + '명'} subtitle={canInvite ? inviteSubtitle : '정산이 시작되어 메이트를 더 초대할 수 없어요.'} onClose={() => inviting ? setInviting(false) : onClose()}>
-    {inviting && canInvite && code ? <MateInviteContent code={code} /> : <>{canInvite ? <InviteCodeBox code={code} /> : null}<ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
-      {participants.length === 0 ? <Text style={styles.note}>참여 멤버를 불러오지 못했어요</Text> : participants.map(participant => <RoomMemberRow key={participant.id} participant={participant} myId={myId} ownerId={ownerId} />)}
+  return <BottomSheet visible={visible} title={selected ? '' : inviting && canInvite ? '메이트 초대' : '멤버 ' + participants.length + '명'} subtitle={selected ? undefined : canInvite ? inviteSubtitle : '정산이 시작되어 메이트를 더 초대할 수 없어요.'} onClose={() => selected ? setSelection(null) : inviting ? setInviting(false) : onClose()}>
+    {selected ? <MateProfileSheet key={`${contextKey}:${selected.id}:${selected.profileId ?? ''}`} visible embedded profileId={selected.profileId} roomId={roomId} myId={myId} name={selected.name} avatarUrl={selected.avatarUrl} onClose={() => setSelection(null)} /> : inviting && canInvite && code ? <MateInviteContent code={code} /> : <>{canInvite ? <InviteCodeBox code={code} /> : null}<ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+      {participants.length === 0 ? <Text style={styles.note}>참여 멤버를 불러오지 못했어요</Text> : participants.map(participant => <RoomMemberRow key={participant.id} participant={participant} myId={myId} ownerId={ownerId} onPress={() => selectMember(participant)} />)}
     </ScrollView>{canInvite && code ? <Button variant="secondary" label="＋ 메이트 초대" onPress={() => setInviting(true)} /> : null}</>}
   </BottomSheet>;
 }

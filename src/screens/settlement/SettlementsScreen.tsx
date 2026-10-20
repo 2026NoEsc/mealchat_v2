@@ -8,7 +8,7 @@ import { useAuth } from '../../auth/AuthProvider';
 import FailureCard from '../../components/ui/FailureCard';
 import { TextButton } from '../../components/ui/Button';
 import SettleMember from '../../components/ui/SettleMember';
-import TransferConfirmationSheet, { settlementUiError } from '../../components/ui/TransferConfirmationSheet';
+import TransferConfirmationSheet from '../../components/ui/TransferConfirmationSheet';
 import SettlementMoreSheet from '../../components/ui/SettlementMoreSheet';
 import { formatAmount } from '../../lib/format';
 import { notify } from '../../lib/confirm';
@@ -19,6 +19,7 @@ import {
   type SettlementMember,
 } from '../../lib/settlements';
 import { isSettled } from '../../lib/settlementSummary';
+import { settlementCompletionError } from '../../lib/settlementAccess';
 import SettlementPaymentAccount from './SettlementPaymentAccount';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { v3Layout } from '../../theme/scale';
@@ -44,7 +45,7 @@ export default function SettlementsScreen() {
   /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
   const topInset = useTopInset();
 
-  const { goBack, navigate } = useNavigation();
+  const { resetTo, navigate } = useNavigation();
   const { user } = useAuth();
   const userId = user?.id ?? null;
 
@@ -95,15 +96,15 @@ export default function SettlementsScreen() {
       const error = await setSettlementCompleted(member.id, !member.isCompleted);
       if (!mounted.current || currentOwner.current !== userId) return;
       if (error) {
-        const message = settlementUiError(error);
+        const message = settlementCompletionError(error);
         if (pending) setConfirmationError(message); else notify('변경 실패', message);
         return;
       }
       setPending(null); await load();
     } catch {
       if (!mounted.current || currentOwner.current !== userId) return;
-      if (pending) setConfirmationError('완료로 표시하지 못했어요. 다시 시도해 주세요.');
-      else notify('변경 실패', '변경하지 못했어요. 잠시 후 다시 시도해 주세요.');
+      if (pending) setConfirmationError(settlementCompletionError(null));
+      else notify('변경 실패', settlementCompletionError(null));
     } finally { completing.current = false; if (mounted.current) setBusy(false); }
   };
   const chooseMember = (settlement: Settlement, member: SettlementMember) => {
@@ -123,7 +124,8 @@ export default function SettlementsScreen() {
   const done = ownedSettlements.filter((settlement) => isSettled(settlement));
   return <View style={styles.screen}>
     <View style={{ height: topInset }} />
-    <View style={styles.header}><Pressable onPress={goBack} style={styles.back} accessibilityRole="button" accessibilityLabel="뒤로"><ChevronLeft size={24} color={colors.ink} /></Pressable><Text style={styles.headerTitle}>정산</Text></View>
+    {/* [결정] Figma E0396은 정산 목록(521:1575)의 뒤로가기를 홈(521:1248)으로 연결하므로 Home으로 복귀한다. */}
+    <View style={styles.header}><Pressable onPress={() => resetTo('Home')} style={styles.back} accessibilityRole="button" accessibilityLabel="뒤로"><ChevronLeft size={24} color={colors.ink} /></Pressable><Text style={styles.headerTitle}>정산</Text></View>
     <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
       <Text style={styles.summary}>{status === 'loading' ? '불러오는 중...' : status === 'error' ? '정산을 불러오지 못했어요' : settlements.length === 0 ? '아직 정산이 없어요' : '진행 중 ' + open.length + '건 · 완료 ' + done.length + '건'}</Text>
       {status === 'error' ? <FailureCard title="정산을 불러오지 못했어요" reason="정산 정보를 확인하지 못했어요. 다시 불러와 주세요." icon={<AlertCircle size={26} color={colors.sub} />} onRetry={() => void load()} /> : null}
@@ -140,6 +142,7 @@ export default function SettlementsScreen() {
             </View>
             <View style={styles.amountBox}><Text style={styles.small}>1인당</Text><Text style={styles.each}>{formatAmount(each)}</Text><Text style={styles.small}>총 {formatAmount(settlement.totalAmount)}</Text></View>
           </View>
+          <TextButton label="정산 상세 보기" accessibilityLabel={settlement.title + ' 정산 상세 보기'} onPress={() => navigate('SettlementDetail', { billId: settlement.id, entry: 'Settlements' })} />
           <Pressable accessibilityRole="button" accessibilityLabel={settlement.title + ' 정산 더보기'} disabled={status !== 'ready' || busy} onPress={() => setMoreId(settlement.id)} style={styles.more}><MoreVertical size={22} color={colors.ink} /></Pressable>
           {!settled ? <TextButton label={expandedId === settlement.id ? '정산 계좌 접기' : '정산 계좌 보기'} accessibilityLabel={settlement.title + (expandedId === settlement.id ? ' 정산 계좌 접기' : ' 정산 계좌 보기')} onPress={() => setExpandedId(expandedId === settlement.id ? null : settlement.id)} /> : null}
           {settled || expandedId === settlement.id ? <SettlementPaymentAccount billId={settlement.id} amount={each} recipient={settlement.members.find(member => member.profileId !== null && member.profileId === settlement.creatorId)?.name} canSend={mineToPay(settlement, userId)} disabled={status !== 'ready' || busy} completed={settled} /> : null}

@@ -6,10 +6,12 @@ import DestructiveDialog from '../../components/ui/DestructiveDialog';
 import FailureCard from '../../components/ui/FailureCard';
 import InviteCodeBox from '../../components/ui/InviteCodeBox';
 import MateInviteSheet from '../../components/ui/MateInviteSheet';
+import MateProfileSheet from '../../components/ui/MateProfileSheet';
 import { meetingTimeLabel } from '../../components/ui/MeetingCard';
 import RoomMemberRow from '../../components/ui/RoomMemberRow';
 import RoomTimer from '../../components/ui/RoomTimer';
 import { canInviteToRoom } from '../../lib/roomMembership';
+import type { RoomParticipant } from '../../lib/rooms';
 import { leaveRoom } from '../../lib/rooms';
 import { unverifiedSettlementLabel } from '../../lib/roomSettlementPolicy';
 import { useNavigation } from '../../navigation/NavigationContext';
@@ -39,7 +41,10 @@ export default function RoomDetailScreen() {
   const members = room?.participants ?? [];
   const isOwner = Boolean(user?.id && room?.ownerId && user.id === room.ownerId);
   const settling = room?.stage === 'settling';
+  const isScheduleLocked = ['confirmed', 'settling', 'done'].includes(room?.stage ?? '');
+  const scheduleValue = meetingTimeLabel(room?.confirmedSlot, room?.stage ?? 'scheduling', room?.meetingTime);
   const [inviting, setInviting] = useState(false);
+  const [selectedMate, setSelectedMate] = useState<RoomParticipant | null>(null);
   const canInvite = canInviteToRoom(room?.stage);
   useEffect(() => { if (!canInvite) setInviting(false); }, [canInvite]);
   const [deletionOpen, setDeletionOpen] = useState(false);
@@ -66,11 +71,42 @@ export default function RoomDetailScreen() {
     <View style={styles.header}><Pressable accessibilityRole="button" accessibilityLabel="뒤로" style={styles.iconButton} onPress={goBack}><ChevronLeft size={24} color={colors.ink} /></Pressable><Text style={styles.headerTitle}>방 상세정보</Text></View>
     <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
       {status === 'error' ? <FailureCard title="방 정보를 불러오지 못했어요" reason="잠시 후 다시 시도해 주세요." icon={<Info size={26} color={colors.sub} />} onRetry={reload} /> : null}
-      {canInvite || !room ? <View style={styles.card}><InviteCodeBox code={room?.code ?? null} loading={!room && status !== 'error'} /></View> : null}
+      {/* [결정] Figma 528:1533 / 561:1742: 초대 코드 영역 클릭 시 메이트 초대 시트(MateInviteSheet) 오픈 연결 */}
+      {canInvite || !room ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={room?.code ? `초대 코드 ${room.code}` : '초대 코드'}
+          accessibilityHint="두 번 탭하면 메이트 초대 창을 열어요"
+          disabled={!canInvite || !room?.code}
+          onPress={() => { if (canInvite && room?.code) setInviting(true); }}
+          style={styles.card}
+        >
+          <InviteCodeBox code={room?.code ?? null} loading={!room && status !== 'error'} />
+        </Pressable>
+      ) : null}
       <View style={[styles.card, styles.appointment]}>
         {room?.decisionMode === 's4' && (settling || room.stage === 'done') ? <RoomTimer expiresAt={room.expiresAt} settled={room.stage === 'done'} boundedSettlement /> : null}
         {room && unverifiedSettlementLabel(room.stage, Boolean(room.appointmentConfirmedAt), room.decisionMode === 's4') ? <Text style={styles.hint}>{unverifiedSettlementLabel(room.stage, Boolean(room.appointmentConfirmedAt), true)} · 이전 정산의 약속 확정 여부는 확인할 수 없어요.</Text> : null}
-        <View style={styles.infoRow}><CalendarDays size={20} color={colors.sub} /><View style={styles.valueBox}><Text style={styles.label}>일정</Text><Text style={[styles.value, !room?.meetingTime && !room?.confirmedSlot?.trim() && styles.unset]}>{meetingTimeLabel(room?.confirmedSlot, room?.stage ?? 'scheduling', room?.meetingTime)}</Text></View></View>
+        {/* [결정] Figma 528:1544 / 561:1753: 일정 행 클릭 시 일정 조율 시트로 연결. 확정 이후 단계(confirmed/settling/done)에서는 일정 수정이 불가하므로 비활성화 */}
+        <Pressable
+          accessibilityRole={isScheduleLocked ? undefined : 'button'}
+          accessibilityLabel={`일정, ${scheduleValue}`}
+          accessibilityHint={isScheduleLocked ? '약속이 확정되어 일정을 변경할 수 없어요' : '두 번 탭하면 일정 조율 시트를 열어요'}
+          accessibilityState={{ disabled: isScheduleLocked }}
+          disabled={isScheduleLocked || !roomId}
+          onPress={() => {
+            if (roomId && !isScheduleLocked) navigate('ChatRoom', { roomId, title, openSheet: 'schedule' });
+          }}
+          style={styles.infoRow}
+        >
+          <CalendarDays size={20} color={colors.sub} />
+          <View style={styles.valueBox}>
+            <Text style={styles.label}>일정</Text>
+            <Text style={[styles.value, !room?.meetingTime && !room?.confirmedSlot?.trim() && styles.unset]}>
+              {scheduleValue}
+            </Text>
+          </View>
+        </Pressable>
         {/* TODO(서버 단계): confirmed_menu는 식당 이름이며 RoomSummary에 별도 메뉴가 없다. 메뉴 줄은 계약이 생기면 표시한다. */}
         <View style={styles.infoRow}><MapPin size={20} color={colors.sub} /><View style={styles.valueBox}><Text style={styles.label}>장소</Text><Text style={[styles.value, !room?.locationName?.trim() && styles.unset]}>{room?.locationName?.trim() || '아직 정하지 않았어요'}</Text></View>
           {room && room.stage === 'place' && !room.locationName?.trim() && roomId ? <Pressable accessibilityRole="button" accessibilityLabel="장소 정하기" style={styles.choose} onPress={() => openChatSheet('menu')}><Text style={styles.chooseText}>정하기</Text></Pressable> : null}
@@ -79,7 +115,22 @@ export default function RoomDetailScreen() {
       <View style={[styles.card, styles.memberCard]}>
         <View style={styles.memberHead}><Text style={styles.cardTitle}>{room ? '메이트 ' + members.length + '명' : '메이트'}</Text>{canInvite && roomId && room?.code ? <Pressable accessibilityRole="button" accessibilityLabel="메이트 초대" style={styles.invite} onPress={() => setInviting(true)}><Plus size={16} color={colors.selectedText} /><Text style={styles.chooseText}>초대</Text></Pressable> : null}</View>
         {room && !canInvite ? <Text style={styles.hint}>정산이 시작되어 메이트를 더 초대할 수 없어요.</Text> : null}
-        {members.length ? members.map(member => <RoomMemberRow key={member.id} participant={member} myId={user?.id ?? null} ownerId={room?.ownerId ?? null} />) : <Text style={styles.hint}>{room || status === 'error' ? '참여 멤버를 불러오지 못했어요' : '메이트를 불러오는 중이에요'}</Text>}
+        {/* [결정] Figma 528:1573 / 561:1782: 멤버 행 클릭 시 타인은 메이트 프로필 시트, 본인은 프로필 홈(Profile)으로 연결 */}
+        {members.length ? members.map(member => (
+          <RoomMemberRow
+            key={member.id}
+            participant={member}
+            myId={user?.id ?? null}
+            ownerId={room?.ownerId ?? null}
+            onPress={() => {
+              if (user?.id && member.profileId === user.id) {
+                navigate('Profile');
+              } else {
+                setSelectedMate(member);
+              }
+            }}
+          />
+        )) : <Text style={styles.hint}>{room || status === 'error' ? '참여 멤버를 불러오지 못했어요' : '메이트를 불러오는 중이에요'}</Text>}
       </View>
       {/* [결정] leave_room은 settling에서만 막으므로, 다른 단계에 정산 완료 조건을 안내하지 않는다. */}
       {isOwner ? <>
@@ -92,6 +143,19 @@ export default function RoomDetailScreen() {
       {/* TODO(서버 단계): 메이트의 방 나가기 계약이 없으므로 버튼을 표시하지 않는다. */}
     </ScrollView>
     {canInvite && room?.code ? <MateInviteSheet visible={inviting} code={room.code} onClose={() => setInviting(false)} /> : null}
+    <MateProfileSheet
+      visible={Boolean(selectedMate)}
+      profileId={selectedMate?.profileId ?? null}
+      roomId={roomId}
+      myId={user?.id ?? null}
+      name={selectedMate?.name}
+      avatarUrl={selectedMate?.avatarUrl}
+      onClose={() => setSelectedMate(null)}
+      onEditProfile={() => {
+        setSelectedMate(null);
+        navigate('Profile');
+      }}
+    />
     <DestructiveDialog visible={deletionOpen} busy={leaving} error={deletionError} onClose={() => setDeletionOpen(false)} onConfirm={() => void confirmDeletion()} />
   </View>;
 }

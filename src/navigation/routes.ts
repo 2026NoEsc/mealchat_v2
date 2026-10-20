@@ -29,7 +29,18 @@ export type RouteName =
   | 'PrivacyPolicy'
   | 'PrivacyRevision'
   | 'AppInfo'
-  | 'Settlements';
+  | 'Settlements'
+  | 'SettlementDetail';
+
+/** Notifications and list entries pass IDs only; account data never enters route state. */
+export function settlementDetailRoute(billId: string): Route {
+  return { name: 'SettlementDetail', params: { billId } };
+}
+
+/** P06 E0803/E0816 -> list, E0818/E0825/E0831 -> requester chat. */
+export function settlementDetailBackRoute(requester: boolean, roomId: string | null): Route {
+  return requester && roomId ? { name: 'ChatRoom', params: { roomId } } : { name: 'Settlements' };
+}
 
 export type Route = {
   name: RouteName;

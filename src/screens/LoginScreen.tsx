@@ -38,7 +38,7 @@ export default function LoginScreen() {
     finally { setSubmitting(false); }
   };
   return <KeyboardSafeScreen style={[authStyles.screen, { paddingTop: insets.top }]}>
-    <AuthTopBar title="로그인" onBack={() => canGoBack ? goBack() : replace('SignupStart')} />
+    <AuthTopBar title="로그인" alignTitle="left" onBack={() => canGoBack ? goBack() : replace('SignupStart')} />
     <ScrollView style={authStyles.scroll} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
       <View style={styles.greeting}>
         <Image source={logo} style={styles.logo} resizeMode="contain" accessible={false} />
