@@ -31,22 +31,29 @@ function respond(version) {
 }
 function versionOf(id, kind) { return kind === 'room' ? values[id].room.title : values[id].data.revision; }
 beforeEach(() => {
+  client = undefined; connect = undefined;
   jest.useFakeTimers(); jest.clearAllMocks(); setConsentAccess('A', 'accepted');
-  client = new RealtimeClient('ws://127.0.0.1:1/realtime/v1', { params: { apikey: 'synthetic-offline-test' } });
+  client = new RealtimeClient('ws://127.0.0.1:1/realtime/v1', {
+    params: { apikey: 'synthetic-offline-test' },
+    transport: class OfflineWebSocket {},
+  });
   connect = jest.spyOn(client, 'connect').mockImplementation(() => { throw Error('Network is forbidden in this test'); });
   jest.spyOn(client, 'disconnect').mockResolvedValue(undefined);
   // Only subscription transport is replaced. Real channel() reuse, on() guards,
   // filters, removeChannel() and teardown run from the installed realtime-js.
   subscribe = jest.spyOn(RealtimeChannel.prototype, 'subscribe').mockImplementation(function () { this.state = 'joined'; return this; });
   unsubscribe = jest.spyOn(RealtimeChannel.prototype, 'unsubscribe').mockImplementation(async function () { close(this); return 'ok'; });
-  supabase.channel.mockImplementation(name => client.channel(name));
-  supabase.removeChannel.mockImplementation(channel => client.removeChannel(channel));
+  const testClient = client;
+  supabase.channel.mockImplementation(name => testClient.channel(name));
+  supabase.removeChannel.mockImplementation(channel => testClient.removeChannel(channel));
   respond(1);
 });
 afterEach(async () => {
   if (renderer) await act(async () => renderer.unmount()); renderer = undefined;
-  for (const channel of client.getChannels().slice()) await client.removeChannel(channel);
-  expect(connect).not.toHaveBeenCalled();
+  if (client) {
+    for (const channel of client.getChannels().slice()) await client.removeChannel(channel);
+    expect(connect).not.toHaveBeenCalled();
+  }
   jest.restoreAllMocks(); jest.useRealTimers();
 });
 describe.each(['room', 's4'])('%s hook realtime ownership', kind => {
