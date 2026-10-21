@@ -17,12 +17,12 @@ Figma 디자인(`xBf3b09D6Bj1dTiCixt25e`)을 React Native 앱으로 옮기는 �
 | 언어 | TypeScript 5.9 (strict) |
 | 아이콘 | `lucide-react-native` + `react-native-svg` |
 | 네비게이션 | **라이브러리 없음** — 원본에 react-navigation 계열이 없어 Context 기반으로 직접 구현 |
-| 백엔드 | Supabase Auth 기반 구현 완료, 데이터 CRUD 보안 마이그레이션 대기 |
+| 백엔드 | Supabase Auth·RLS 마이그레이션은 로컬 29개 기준이며, 운영 적용 상태는 linked CLI로 재확인 필요 |
 
 `.npmrc` 에 `legacy-peer-deps=true` 가 필요하다.
 `lucide-react-native@0.300.0` 이 React 19 를 peer 로 허용하지 않아서 없으면 설치가 실패한다.
 
-### Supabase 진행 상태 (2026-08-17)
+### Supabase 진행 상태 (2026-08-23)
 
 - `src/lib/supabase.ts` 는 publishable key, AsyncStorage 세션, AppState 토큰 갱신을 구성한다.
 - `src/auth/` 는 이메일 로그인·회원가입·비밀번호 재설정·딥링크 세션 교환과 가입 초안을 담당한다.
@@ -51,13 +51,18 @@ Figma 디자인(`xBf3b09D6Bj1dTiCixt25e`)을 React Native 앱으로 옮기는 �
   | 가입 이메일 확인 | `mealchat://auth/callback` |
   | 비밀번호 재설정 | `mealchat://auth/reset` |
 
-  둘 다 Dashboard 의 Auth Redirect URLs 에 등록해야 하고, Expo Go 개발용
+  둘 다 Dashboard 의 Auth Redirect URLs 에 등록해야 한다. 두 standalone URL은
+  **2026-08-22 운영 Dashboard에 등록·저장됐다.** Expo Go 개발용
   `exp://…/--/auth/callback`·`exp://…/--/auth/reset` 도 함께 등록한다.
+- 2026-08-23 실제 테스트 계정 두 개에서 가입 메일 확인과 비밀번호 로그인을 완료했다.
+  비밀번호 재설정은 요청을 만든 앱의 PKCE verifier가 필요하므로 실제 MealChat 앱에서
+  시작해 딥링크 교환까지 검증해야 한다.
 - 재설정 링크로 들어오면 `App.tsx` 가 네비게이터 대신
   [NewPasswordScreen](../src/screens/auth/NewPasswordScreen.tsx) 을 띄운다.
   새 비밀번호를 정하기 전에는 본문으로 통과시키지 않는다 — 그러지 않으면
   재설정 링크가 그냥 매직링크 로그인이 되어 버린다.
-- Dashboard 에서 leaked-password protection 을 켜야 한다.
+- Dashboard 의 leaked-password protection 은 Pro 이상에서만 사용할 수 있다.
+  현재 Free 플랜에서는 비활성화 상태이므로 플랜 변경을 별도로 승인한 뒤 켜야 한다.
 
 #### 마이그레이션 상태
 
@@ -72,6 +77,27 @@ Docker Desktop 이 있으면 `npx supabase start` 로 로컬 스택을 띄우고
 | `20260817144252_terms_consent_records.sql` | 적용됨 |
 | `20260817172900_room_invitations.sql` | 적용됨 |
 | `20260817173500_private_profile_split.sql` | 적용됨 |
+
+이 표는 Auth 하드닝 시점의 다섯 건까지다. 이후 기능 작업으로 열한 건이 더 쌓였고
+(`terms_reconsent_rpc` · `open_room_features` · `room_voting` · `invite_friend_to_room` ·
+`leave_room_rpc` · `avatar_storage` · `toggle_vote_legacy_items` ·
+`drop_pre_rpc_settlement` · `one_open_settlement_per_room` · `notifications_read_at` ·
+`system_messages`)이 추가됐다. 이후 방 상태·추천·정산 보정까지 포함하면
+현재 로컬 `supabase/migrations/`에는 29개가 있다. 원격 적용 개수는 이 문서의 숫자를
+복사하지 말고 `npx supabase migration list --linked`로 현재 linked 프로젝트에서 확인한다.
+
+`20260823091028_rpc_hardening_cutover.sql`은 구버전 앱의 호출을 차단하는 단계라서
+일반 `db push` 경로에 두지 않고 `supabase/deferred_migrations/`에 보관한다. 신버전
+최소 지원 버전 전환과 구버전 호출 0건을 확인한 뒤 별도 승인으로 적용한다.
+
+같은 날의 RPC·RLS·Edge Function 재검토 결과와 미해결 위험은
+[보안 감사 기록](./security-audit-2026-08-22.md)에 남겼다.
+
+> `20260820120000_toggle_vote_legacy_items` 를 넣은 커밋은 제목에 "(미적용)" 이라고
+> 적혀 있다. 커밋 시점에는 사실이었고 같은 날 승인을 받아 push 했다. 적용 여부는
+> 커밋 메시지가 아니라 아래 명령으로 확인한다.
+
+원격 적용 여부는 표를 믿지 말고 `npx supabase migration list --linked` 로 직접 확인한다.
 
 운영 적용 전에 `db dump --data-only` 로 받은 실제 데이터를 로컬 baseline DB 에 복원하고
 그 위에 네 건을 `migration up` 으로 돌려 리허설했다. 테이블이 비어 있지 않았기 때문에
@@ -103,10 +129,11 @@ baseline 은 원격에 이미 존재하던 스키마를 `db dump` 로 보존한 
 `participants` 직접 INSERT 권한은 없다. `public.join_room_by_code(code)` 가 코드와
 `expires_at` 를 서버에서 검증하고, 호출자 `profiles` 에서 `name` 을 채워 넣는다
 (`participants.name` 은 기본값 없는 NOT NULL 이다). 방을 만들면 트리거가 방장을
-자동으로 참가자에 넣는다. 나가기는 자기 행 DELETE 정책으로 가능하고,
-남을 내보내는 기능은 아직 없다.
+자동으로 참가자에 넣는다. 현재 `leave_room`은 방장 전용 방 닫기 RPC이며, 방장 외 호출은
+`42501`로 거절되고 미완료 정산 수취인이 있으면 방장 호출도 거절된다. 방장 외 멤버의 자기
+탈퇴를 별도 RPC로 제공할지는 제품 결정으로 남겨 두며, 직접 participant DELETE는 허용하지 않는다.
 
-#### Dashboard 에서만 되는 설정 ⚠️ 미완
+#### Dashboard 에서만 되는 설정 ⚠️ 일부 미완
 
 마이그레이션으로도, `supabase config push` 로도 안전하게 할 수 없다.
 `config push` 는 설정 하나만 고르는 방법이 없어 `[auth]` 전체를 밀어 넣는데,
@@ -120,6 +147,8 @@ mealchat://auth/callback
 mealchat://auth/reset
 ```
 
+**2026-08-22 운영 Dashboard에 두 URL을 등록·저장했다.**
+
 Expo Go 로 개발할 때는 `exp://<주소>:8081/--/auth/callback` 형태도 함께 넣는다.
 `npx expo start` 가 찍어 주는 주소를 쓰면 된다.
 
@@ -128,8 +157,10 @@ Expo Go 로 개발할 때는 `exp://<주소>:8081/--/auth/callback` 형태도 �
 
 **2. 유출 비밀번호 차단** — Authentication → Policies → Password Protection 에서
 "Check against HaveIBeenPwned" 를 켠다. Security Advisor 가 지적한 항목이다.
+다만 현재 프로젝트는 Free 플랜이고 이 기능은 Pro 이상에서만 제공된다. 이번 작업에서는
+결제·플랜 변경을 하지 않았으므로 여전히 꺼져 있다. 플랜 변경은 별도 승인을 받아야 한다.
 
-두 가지 모두 바꾼 뒤에는 실제로 신규 가입을 해서 확인 메일 링크가 앱으로 돌아오는지
+남은 설정을 마친 뒤에는 실제로 신규 가입을 해서 확인 메일 링크가 앱으로 돌아오는지
 확인한다. 등록된 URL 과 앱이 만드는 URL 이 한 글자라도 다르면 조용히 실패한다.
 
 #### 운영 DB 현재 상태
@@ -144,7 +175,12 @@ Expo Go 로 개발할 때는 `exp://<주소>:8081/--/auth/callback` 형태도 �
 
 #### 아직 남은 일
 
-- **Dashboard 설정 두 가지가 남았다.** 아래 "Dashboard 에서만 되는 설정" 참고.
+- **유출 비밀번호 차단이 남았다.** 현재 Free 플랜에서는 켤 수 없으므로 Pro 플랜 변경을
+  별도 승인한 뒤 적용해야 한다. Redirect URL 두 개는 2026-08-22 등록했다.
+- **실제 가입·이메일 확인·로그인은 두 테스트 계정에서 통과했다.** 각 계정의
+  `profiles`·`profile_private` 자동 생성과 두 세션의 방·메시지·참가자 격리도 통과했다.
+  임시 방은 `.delete()` 성공 표시를 믿지 않고 `leave_room` 결과와 재조회로 0개까지
+  확인했다. 남은 Auth E2E는 실제 앱에서 시작하는 비밀번호 재설정·딥링크다.
 - **이메일 확인이 켜져 있으면 가입 시점에 계좌·생년월일이 저장되지 않는다.**
   `profile_private` 쓰기는 세션을 요구하는데 확인 대기 중에는 세션이 없다.
   사용자 메타데이터로 넘기면 JWT 에 실려 나가므로 그 방법은 쓰지 않는다.
@@ -154,10 +190,18 @@ Expo Go 로 개발할 때는 `exp://<주소>:8081/--/auth/callback` 형태도 �
   각자 들고 있다. 무엇을 복사할지 정하는 별도 작업이 필요하다.
 - 초대 코드는 대소문자를 구분한다. 무시하게 하려면 `lower(code)` UNIQUE 인덱스가
   먼저 필요한데 기존 코드끼리 충돌하면 생성이 실패하므로 별도 작업이다.
-- `EXPO_PUBLIC_GEMINI_API_KEY`, `EXPO_PUBLIC_KAKAO_REST_API_KEY` 는 `.env` 에 있지만
-  코드에서 아직 쓰지 않는다. 쓰는 순간 번들에 공개되므로 Edge Function 뒤로 옮긴다.
-- `.env` 의 변수명이 `EXPO_PUBLIC_SUPABASE_ANON_KEY` 인데 값은 `sb_publishable_…` 이다.
-  fallback 이 있어 동작하지만 `.env.example` 대로 `..._PUBLISHABLE_KEY` 로 바꾸는 편이 맞다.
+- Gemini 키는 `supabase/functions/schedule-recommend` 안에서만 쓴다. 앱은 이 Edge
+  Function 을 호출할 뿐이라 키가 번들에 실리지 않는다. `EXPO_PUBLIC_KAKAO_REST_API_KEY`
+  는 아직 쓰는 곳이 없고, 쓰게 되면 같은 방식으로 Edge Function 뒤에 둔다.
+- 운영 `schedule-recommend` version 7은 `placeCandidates`를 받고
+  `slotRecommendations`·`placeRecommendations`를 반환하지만, 저장소의 레거시 함수는
+  `place`와 `recommendations`를 쓴다. 2026-08-23 클라이언트는 두 요청 필드를 함께 보내고
+  두 시간 추천 응답을 같은 화면 모델로 정규화하도록 바꿨다. 같은 날 운영 v7의
+  `index.ts`·`deno.json`도 로컬 작업 트리에 복원했고, Deno 검사에서 드러난 미검증
+  `body` 참조 네 곳을 `requestBody`로 바꿔 타입 검사를 통과시켰다. 이 로컬 수정은 아직
+  운영에 재배포하지 않았다. 실제 사용자 JWT로 운영 함수를 두 차례 호출했을 때 Auth와
+  함수 검증은 통과했지만 Gemini가 매번 세 차례 `503 UNAVAILABLE`을 반환했다. 따라서
+  제공자 요청까지는 실증됐고 실제 응답 파싱·화면 렌더링은 아직 미검증이다.
 
 ---
 
@@ -251,10 +295,22 @@ Figma 변수(`get_variable_defs`)로 나오는 건 그대로 쓰고, 나머지�
 
 ### 폰트
 
-디자인은 Pretendard / 42dot Sans / Iosevka Charon 을 쓰지만 원본 저장소에 `expo-font`
-가 없어 **웨이트만 맞춘 시스템 폰트**로 대체했다.
-번들링하려면 `expo-font` 추가 후 [typography.ts](../src/theme/typography.ts) 의
-`fontFamily` 만 바꾸면 된다.
+디자인은 42dot Sans 와 Iosevka Charon 을 쓴다. 둘 다 `expo-font` 로 번들해 뒀다
+([App.tsx](../App.tsx), [typography.ts](../src/theme/typography.ts)).
+
+| 패밀리 | 굵기 | 쓰임 | 출처 |
+|---|---|---|---|
+| 42dot Sans | 300·400·500·600·700·800 | 본문 전부 | Google Fonts |
+| Iosevka Charon | Bold | 로고 워드마크 (`fontFamily.wordmark`) | [jul-sh/iosevka-charon](https://github.com/jul-sh/iosevka-charon) (OFL) |
+
+굵기마다 파일이 다르므로 `fontWeight` 가 아니라 `fontFamily` 로 고른다. 또 CSS 식별자가
+숫자로 시작할 수 없어서 등록 이름을 `Dot42Sans-*` 로 뒤집었다 — `42dotSans-Regular` 로
+등록하면 React Native Web 이 따옴표 없이 내보내 웹에서 폰트 지정이 통째로 무시된다.
+
+> 폰트 파일이 assets 의 대부분(~20MB)을 차지한다. 특히 Iosevka Charon 4.4MB 는
+> 워드마크 8글자에만 쓰이므로, 배포 전에 `pyftsubset` 으로 줄일 여지가 크다.
+
+> Pretendard 도 쓴다고 적어 뒀었는데, 현재 Figma 파일에서는 확인되지 않는다.
 
 ### 에셋
 
@@ -349,26 +405,64 @@ window.zoom=()=>{const el=document.getElementById('root');
 
 ## 7. 다음 할 일
 
-Figma 에 남아 있는 미구현 화면은 **프로필 수정 `309:1086`** 하나뿐이다.
+Figma 화면은 전부 옮겼다. 프로필 수정(`309:1086`)·은행 드롭다운(`549:3366`)도
+[ProfileEditScreen](../src/screens/profile/ProfileEditScreen.tsx) 과
+[BankSelect](../src/components/ui/BankSelect.tsx) 로 들어가 있다.
 화면별 구성은 [figma-specs.md](./figma-specs.md) 에 정리돼 있다.
 
-추천 순서:
+현재 출시 게이트와 2026-08-23 후속 구현·검증 결과는
+[출시 준비 판정](./release-readiness-2026-08-23.md)을 우선해서 본다. 실제 앱의 비밀번호
+재설정은 첫 링크가 다른 기기에서 먼저 소비돼 재시도가 필요하고, 기능용 새 비밀번호 화면은
+있지만 Figma 노드·좌표 검수 기록은 없다. 추천 fixture와 RPC 권한 모델은 로컬에 구현됐지만
+운영 배포는 하지 않았다. 로컬 PostgreSQL 17.6에서 최신 29개 fresh 적용, 당시 운영과 같은
+27개 baseline에서 `include-all`로 29개까지의 out-of-order upgrade, pgTAP 70/70,
+additive v1/v2 호환, 별도 두 세션 동시성이 통과했다. 현재 소스의 테스트용
+release APK도 Android 15 에뮬레이터에서 오프라인 콜드 스타트·background/resume·hardware
+back을 통과했지만 실제 실기기와 인증된 주요 화면은 남아 있다. Redirect URL은 등록됐고
+유출 비밀번호 차단은 Pro 플랜 변경 승인이 있어야 진행할 수 있다.
+2026-09-07 read-only 확인에서 원격 migration은 28개로 늘었고 최신 identity는
+`20260907120000_update_settlement_amount`였지만 해당 SQL은 로컬에 없어 history drift로
+기록한다.
 
-1. **프로필 수정 `309:1086`** — 회원가입 개인정보 입력(`150:121`)과 필드 구성이 거의 같아
-   [SignupPersonalScreen](../src/screens/signup/SignupPersonalScreen.tsx) 을 참고하면 된다.
-2. **은행 드롭다운 `549:3366`** — 회원가입·프로필 수정이 공유하는 공용 오버레이.
-3. **Supabase 데이터 연동** — RLS 하드닝 마이그레이션 승인·적용 후 프로필부터 연결한다.
+### 아직 눌러도 아무 일 없는 컨트롤
 
-### 아직 눌러도 아무 일 없는 버튼
+실제 앱을 돌려서 확인한 것이다. 셋 다 일정 추가 STEP 1
+([ScheduleDetailScreen](../src/screens/schedule/ScheduleDetailScreen.tsx)) 에 있고,
+`Pressable` 이 아니라 그냥 `View` / 아이콘이라 눌러도 아무 반응이 없다.
 
-| 위치 | 버튼 | 필요한 것 |
-|---|---|---|
-| 회원가입·프로필 수정 | 은행 칩 | 은행 드롭다운 `549:3366` |
-| 로그인 | `아이디 비밀번호 찾기` | Figma 에도 화면 없음 |
-| 이모티콘 패널 | `전체 보기 →` | 전체 스티커 목록 화면 없음 |
+| 컨트롤 | 필요한 것 |
+|---|---|
+| `지도에서 선택` 칩 | 지도에서 좌표를 찍는 화면. Tmap→카카오 전환과 함께 한다 |
+| 밥약 메이트 선택 헤더의 돋보기 | 친구 목록 검색·필터. 나중에 쓸 자리라 지우지 않고 남겨 뒀다 |
+
+`+` 는 [FriendsScreen](../src/screens/profile/FriendsScreen.tsx) 으로 연결했다.
+
+이모티콘 패널의 `전체 보기 →` 는 패널이 스티커 8개를 이미 전부 보여주고 있어
+갈 곳이 없는 장식이라 지웠다. 스티커를 더 만들면 그때 목록 화면과 함께 되살린다.
 
 ### 남아 있는 품질 이슈
 
 - `assets/ad/banner-1.png` 가 저해상도 (위 3절 참고)
-- Auth 외 Supabase 데이터 미연동 — 모든 도메인 화면은 파일 안 상수 배열로 동작한다
-- 일정 추가 STEP 1~3 에 뒤로가기가 없다
+- `EXPO_PUBLIC_KAKAO_REST_API_KEY` 는 `.env` 에 있지만 코드에서 쓰지 않는다.
+  쓰는 순간 번들에 공개되므로 Gemini 처럼 Edge Function 뒤로 옮긴다.
+- 장소 검색은 Tmap 에서 **카카오로 바꿀 예정**이다. 그때까지
+  `EXPO_PUBLIC_TMAP_APP_KEY` 가 `.env` 에 없으면 일정 추가 STEP 1 의 장소 검색이
+  통째로 실패한다 — 브라우저로 이 흐름을 확인하려면 먼저 채워 넣어야 한다.
+- `getSupabaseConfig` 의 `EXPO_PUBLIC_SUPABASE_ANON_KEY` fallback 은 아직 못 지운다.
+  `.env` 는 git 에 없어서 한 번의 커밋으로 모두의 파일을 바꿀 수 없다.
+  **각자 자기 `.env` 에서 `..._ANON_KEY` 를 `..._PUBLISHABLE_KEY` 로 바꾸고**,
+  팀 전원이 끝났을 때 [supabaseConfig.ts](../src/lib/supabaseConfig.ts) 의 fallback 과
+  `tests/supabaseConfig.test.ts` 의 해당 케이스를 함께 지운다.
+
+### 화면 사이를 뒤로 갈 때 ⚠️
+
+네비게이터는 **스택 최상단 한 장만 렌더한다.** 뒤로 가면 앞 화면이 새로 마운트되므로
+`useState` 로 들고 있던 입력값은 그대로 사라진다. 그래서 뒤로가기를 붙일 때는
+`goBack()` 이 아니라 `goBackWith({ … })` 로 값을 돌려보내고, 받는 화면은 그 params 로
+state 를 초기화해야 한다 ([stack.ts](../src/navigation/stack.ts)).
+
+일정 추가 STEP 1~3 이 이 방식으로 연결돼 있다. STEP 2 는 이름·메이트·장소를,
+STEP 3 은 격자 선택(`picked`)을 돌려준다.
+
+> `goBack` 은 `onPress={goBack}` 형태로 넘겨 쓰는 곳이 많아 인자를 받지 않는다.
+> 받게 하면 터치 이벤트 객체가 그대로 params 로 들어간다.

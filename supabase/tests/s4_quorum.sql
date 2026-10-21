@@ -1,0 +1,32 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions;
+set local s1.tap='on';
+select no_plan();
+\ir s4_fixture.sql
+-- An owner without a participant remains unauthorized; an empty quorum is never complete.
+select pg_temp.check(private.s4_availability('24000000-0000-4000-8000-000000000003')->>'all_submitted'='false','zero eligible members never satisfy all-submitted');
+select pg_temp.check(private.s4_leader('24000000-0000-4000-8000-000000000003')->>'leading_item_id' is null,'zero eligible members have no winning candidate');
+delete from public.participants where room_id='24000000-0000-4000-8000-000000000001' and profile_id is not null and profile_id<>'10000001-0000-4000-8000-000000000001';
+insert into public.participants(room_id,profile_id,name) values('24000000-0000-4000-8000-000000000001',null,'Another legacy display');
+update public.participants set schedule=jsonb_build_object('slots',jsonb_build_array('2000-01-01-11'),'submitted_at',clock_timestamp()) where room_id='24000000-0000-4000-8000-000000000001' and profile_id is not null;
+set local role authenticated;
+select pg_temp.as_user('10000001-0000-4000-8000-000000000001');
+select pg_temp.check(public.get_room_s4_state('24000000-0000-4000-8000-000000000001')->'availability'->>'eligible_count'='1','multiple NULL-profile rows do not inflate a solo quorum');
+select pg_temp.check(public.get_room_s4_state('24000000-0000-4000-8000-000000000001')->'voting'->>'required_votes'='1','one actual member requires one vote');
+select pg_temp.check(public.get_room_s4_state('24000000-0000-4000-8000-000000000001')->'availability'->>'submitted_count'='0' and public.get_room_s4_state('24000000-0000-4000-8000-000000000001')->'availability'->>'all_submitted'='false','a legacy past-only schedule remains unsubmitted despite submitted_at');
+select public.submit_room_availability_v1('24000000-0000-4000-8000-000000000001',array(select (select v#>>'{}' from s4_data where k='day')||'-'||h from generate_series(11,20) h),pg_temp.s4_revision('24000000-0000-4000-8000-000000000001'),gen_random_uuid());
+select pg_temp.check(public.get_room_s4_state('24000000-0000-4000-8000-000000000001')->'availability'->>'all_submitted'='true','solo submission completes the actual-member quorum');
+select public.select_room_meeting_time_v1('24000000-0000-4000-8000-000000000001',jsonb_set((select v from s4_data where k='time'),'{ends_at}',to_jsonb((select v#>>'{}' from s4_data where k='day')||'T21:00:00+09:00')),pg_temp.s4_revision('24000000-0000-4000-8000-000000000001'),gen_random_uuid());
+select pg_temp.check(public.get_room_s4_state('24000000-0000-4000-8000-000000000001')->'meeting_time'->>'ends_at' like '%T12:00:00.%Z','the inclusive 21 KST end boundary is stored in UTC');
+insert into s4_data values('solo-menu',to_jsonb(public.add_voting_item('24000000-0000-4000-8000-000000000001','menu','Solo restaurant')));
+select public.toggle_vote('24000000-0000-4000-8000-000000000001',(select (v#>>'{}')::uuid from s4_data where k='solo-menu'));
+select pg_temp.check(public.get_room_s4_state('24000000-0000-4000-8000-000000000001')->>'stage'='place','solo unanimous voting does not automatically confirm');
+select public.confirm_room_appointment_v1('24000000-0000-4000-8000-000000000001',(select (v#>>'{}')::uuid from s4_data where k='solo-menu'),pg_temp.s4_revision('24000000-0000-4000-8000-000000000001'),gen_random_uuid());
+select pg_temp.check(public.get_room_s4_state('24000000-0000-4000-8000-000000000001')->>'confirmation_status'='owner_confirmed','solo owner explicitly confirms after a valid full-interval submission and vote');
+insert into s4_data values('solo-bill',to_jsonb(public.create_room_settlement_v2('24000000-0000-4000-8000-000000000001','Solo real recipient',1000,'Synthetic','0000','A')));
+select pg_temp.check(public.get_room_s4_state('24000000-0000-4000-8000-000000000001')->>'stage'='done','solo actual recipient completes even when multiple NULL display rows remain');
+reset role;
+select pg_temp.check((select count(*)=1 and bool_and(profile_id is not null and is_completed) from public.dutch_pay_members where bill_id=(select (v#>>'{}')::uuid from s4_data where k='solo-bill')) and (select split_count=1 and payment_disclosure_closed_at is not null from public.dutch_pay_bills where id=(select (v#>>'{}')::uuid from s4_data where k='solo-bill')),'display rows do not affect solo settlement quorum or disclosure closure');
+select * from finish();
+rollback;

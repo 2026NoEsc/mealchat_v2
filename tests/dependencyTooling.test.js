@@ -1,0 +1,586 @@
+const { execFileSync } = require('node:child_process');
+const { resolve } = require('node:path');
+const { readFileSync, readdirSync } = require('node:fs');
+
+const projectRoot = resolve(__dirname, '..');
+const runNode = (source) => JSON.parse(execFileSync(process.execPath, ['-e', source], {
+  cwd: projectRoot,
+  encoding: 'utf8',
+  timeout: 15000,
+}));
+
+const sourcePathsIn = (directory) => readdirSync(directory, { withFileTypes: true })
+  .flatMap((entry) => {
+    const path = resolve(directory, entry.name);
+    return entry.isDirectory() ? sourcePathsIn(path) : /\.[cm]?[jt]sx?$/.test(entry.name) ? [path] : [];
+  });
+
+const packageImportsIn = (source) => [...source.matchAll(
+  /\b(?:require(?:\.resolve)?\s*\(\s*|import\s*\(\s*|import\s+|from\s+)['"`]([^'"`]+)['"`]/g,
+)].map((match) => match[1]);
+
+const importsPackage = (source, packages) => packages.some((name) => source.includes(name))
+  && packageImportsIn(source).some((specifier) => packages.some((name) => specifier === name || specifier.startsWith(`${name}/`)));
+
+describe('dependency audit gate', () => {
+  const entry = {
+    id: 'GHSA-HP3W-G68C-FV3C', package: 'sprintf-js', reason: 'Reviewed test boundary',
+    reviewedOn: '2026-10-15', expiresOn: '2026-10-29',
+  };
+  const allowlist = { schemaVersion: 2, advisories: [entry] };
+  const finding = { via: [{ url: `https://github.com/advisories/${entry.id}` }] };
+  const reportFor = (vulnerabilities) => ({
+    auditReportVersion: 2,
+    vulnerabilities,
+    metadata: {
+      vulnerabilities: { info: 0, low: Object.keys(vulnerabilities).length, moderate: 0, high: 0, critical: 0, total: Object.keys(vulnerabilities).length },
+      dependencies: { total: 100 },
+    },
+  });
+  const report = reportFor({ 'sprintf-js': finding });
+  const checkCases = (cases) => runNode(`
+    (async () => {
+      const { checkAuditReport } = await import('./scripts/check-dependency-audit.mjs');
+      console.log(JSON.stringify(${JSON.stringify(cases)}.map(({ allowlist, report }) => {
+        try { checkAuditReport(allowlist, report, '2026-10-15'); return 'PASS'; }
+        catch (error) { return error.message; }
+      })));
+    })().catch(error => { console.error(error.message); process.exitCode = 1; });
+  `);
+
+  it('accepts an exact package match and the inclusive 30-day limit', () => {
+    expect(checkCases([
+      { allowlist, report },
+      { allowlist: { ...allowlist, advisories: [{ ...entry, expiresOn: '2026-11-14' }] }, report },
+      { allowlist, report: reportFor({ ...report.vulnerabilities, argparse: { via: ['sprintf-js'] } }) },
+    ])).toEqual(['PASS', 'PASS', 'PASS']);
+  });
+
+  it('rejects a substituted package and a second package sharing an allowed GHSA', () => {
+    const results = checkCases([
+      { allowlist, report: reportFor({ argparse: finding }) },
+      { allowlist, report: reportFor({ 'sprintf-js': finding, argparse: finding }) },
+    ]);
+    for (const result of results) expect(result).toMatch(/Audit package mismatch/);
+  });
+
+  it('rejects missing, invalid, future, inverted, and overlong review periods', () => {
+    const changes = [
+      { reviewedOn: undefined }, { reviewedOn: '2026-02-30' }, { reviewedOn: '2026-10-16' },
+      { expiresOn: '2026-10-15' }, { expiresOn: '2026-10-14' }, { expiresOn: '2026-11-15' },
+      { expiresOn: '2026-10-32' }, { reviewedOn: '2026-9-15' },
+    ];
+    const results = checkCases(changes.map((change) => ({
+      allowlist: { ...allowlist, advisories: [{ ...entry, ...change }] }, report,
+    })));
+    expect(results).toHaveLength(changes.length);
+    for (const result of results) expect(result).toMatch(/Invalid .* date|Future reviewedOn|Exception period/);
+  });
+
+  it('keeps schema, identity, expiry, unknown, and stale checks failing closed', () => {
+    const cases = [
+      [{ ...allowlist, schemaVersion: 1 }, report, /unsupported schema/],
+      [{ ...allowlist, advisories: [null] }, report, /Invalid advisory ID/],
+      [{ ...allowlist, advisories: [{ ...entry, package: '' }] }, report, /Invalid package/],
+      [{ ...allowlist, advisories: [{ ...entry, reason: '' }] }, report, /Missing reason/],
+      [{ ...allowlist, advisories: [entry, entry] }, report, /Duplicate advisory/],
+      [{ ...allowlist, advisories: [{ ...entry, reviewedOn: '2026-10-01', expiresOn: '2026-10-15' }] }, report, /Expired audit exception/],
+      [{ ...allowlist, advisories: [] }, report, /New advisory/],
+      [allowlist, reportFor({}), /Resolved advisory/],
+      [allowlist, reportFor({ 'sprintf-js': { via: [{ title: 'Missing ID' }] } }), /Unidentified audit finding/],
+      [allowlist, { error: { summary: 'Registry failure' } }, /npm audit failed/],
+    ];
+    const results = checkCases(cases.map(([allowlist, report]) => ({ allowlist, report })));
+    results.forEach((result, index) => expect(result).toMatch(cases[index][2]));
+  });
+
+  it('rejects absent, malformed, and inconsistent reports before resolving exceptions, even with an empty allowlist', () => {
+    const invalid = [
+      null, [], {}, { vulnerabilities: {} }, { ...report, auditReportVersion: 1 },
+      { ...report, metadata: undefined }, { ...report, metadata: {} },
+      { ...report, metadata: { ...report.metadata, dependencies: {} } },
+      { ...report, metadata: { ...report.metadata, dependencies: { total: 0 } } },
+      { ...report, metadata: { ...report.metadata, vulnerabilities: { total: 1 } } },
+      { ...report, vulnerabilities: [] }, { ...report, vulnerabilities: {} },
+      { ...report, metadata: { ...report.metadata, vulnerabilities: { ...report.metadata.vulnerabilities, total: '1' } } },
+      { ...report, metadata: { ...report.metadata, vulnerabilities: { ...report.metadata.vulnerabilities, low: 0 } } },
+      reportFor({ 'sprintf-js': null }), reportFor({ 'sprintf-js': {} }),
+      reportFor({ 'sprintf-js': { via: [] } }), reportFor({ 'sprintf-js': { via: [null] } }),
+      reportFor({ 'sprintf-js': { via: ['missing-package'] } }),
+      { error: { code: 'ENOTFOUND', summary: 'Registry failure' } }, { ...report, error: null },
+    ];
+    const results = checkCases([allowlist, { ...allowlist, advisories: [] }]
+      .flatMap((list) => invalid.map((invalidReport) => ({ allowlist: list, report: invalidReport }))));
+    for (const result of results) {
+      expect(result).toMatch(/Dependency audit not performed/);
+      expect(result).not.toMatch(/Resolved advisory/);
+    }
+  });
+
+  it('accepts a genuine clean online report when no exceptions remain', () => {
+    expect(checkCases([{ allowlist: { ...allowlist, advisories: [] }, report: reportFor({}) }])).toEqual(['PASS']);
+  });
+
+  const auditExecutions = (cases) => runNode(`
+    (async () => {
+      const { getAuditReport } = await import('./scripts/check-dependency-audit.mjs');
+      console.log(JSON.stringify(${JSON.stringify(cases)}.map(({ config, audit }) => {
+        const calls = [];
+        try {
+          getAuditReport((command, args) => {
+            calls.push(args);
+            const response = calls.length === 1 ? config : audit;
+            if (response?.throws) throw new Error('Private subprocess error');
+            return response;
+          });
+          return { result: 'PASS', calls };
+        } catch (error) { return { result: error.message, calls }; }
+      })));
+    })().catch(error => { console.error(error.message); process.exitCode = 1; });
+  `);
+  const completed = (value, status = 0) => ({ status, stdout: JSON.stringify(value) });
+
+  it('fails before auditing when effective npm offline configuration is enabled or cannot be checked', () => {
+    const configs = [completed(true), completed(null), { status: 0, stdout: '' },
+      { status: 1, stdout: 'false' }, { status: null, signal: 'SIGTERM' }, { error: { code: 'ENOENT' } }, { throws: true }];
+    const results = auditExecutions(configs.map((config) => ({ config, audit: completed(reportFor({})) })));
+    for (const { result, calls } of results) {
+      expect(result).toMatch(/Dependency audit not performed/);
+      expect(result).not.toContain('Private subprocess error');
+      expect(calls).toHaveLength(1);
+      expect(calls.flat().join(' ')).toContain('config get offline --json');
+    }
+    expect(results[0].result).toMatch(/configured offline/);
+  });
+
+  it('rejects empty JSON, registry errors, interrupted processes, and abnormal exits as unaudited', () => {
+    const audits = [{ status: 0, stdout: '' }, { status: 0, stdout: '<html>unavailable</html>' },
+      completed(null), completed({}), completed({ error: { code: 'ENOTFOUND' } }, 1),
+      completed(report, 2), { ...completed(report), signal: 'SIGTERM' }, { error: { code: 'ENOENT' } },
+      completed(reportFor({}), 1), { throws: true }];
+    for (const { result } of auditExecutions(audits.map((audit) => ({ config: completed(false), audit })))) {
+      expect(result).toMatch(/Dependency audit not performed/);
+      expect(result).not.toMatch(/Resolved advisory/);
+    }
+  });
+
+  it('accepts online findings with exit 1 and clean reports with exit 0 while forcing audit execution', () => {
+    const results = auditExecutions([completed(report, 1), completed(reportFor({}))]
+      .map((audit) => ({ config: completed(false), audit })));
+    for (const { result, calls } of results) {
+      expect(result).toBe('PASS'); expect(calls).toHaveLength(2);
+      expect(calls.flat().join(' ')).toContain('audit --json --audit=true --prefer-online');
+    }
+  });
+});
+
+describe('patched build dependencies', () => {
+  it('reads PNG buffers and asset file paths through the Expo Metro wrapper', () => {
+    const result = runNode(`
+      const { readFileSync } = require('node:fs');
+      const { resolve } = require('node:path');
+      const { getAssetSize, getAssetData } = require('@expo/metro/metro/Assets');
+      const path = resolve('assets/ad/banner-1.png');
+      const content = readFileSync(path);
+      const expected = { width: content.readUInt32BE(16), height: content.readUInt32BE(20) };
+      (async () => {
+        const asset = await getAssetData(path, 'assets/ad/banner-1.png', [], 'android', '/assets');
+        console.log(JSON.stringify({
+          expected,
+          buffer: getAssetSize('png', content, path),
+          file: { width: asset.width, height: asset.height },
+        }));
+      })().catch(error => { console.error(error.message); process.exitCode = 1; });
+    `);
+    expect(result.expected.width).toBeGreaterThan(0);
+    expect(result.expected.height).toBeGreaterThan(0);
+    expect(result.buffer).toEqual(result.expected);
+    expect(result.file).toEqual(result.expected);
+  });
+
+  it('rejects malformed image input without hanging', () => {
+    const result = runNode(`
+      const { getAssetSize } = require('@expo/metro/metro/Assets');
+      const failures = [];
+      for (const content of [Buffer.alloc(0), Buffer.from('invalid'), Buffer.from([0x89, 0x50, 0x4e, 0x47])]) {
+        try { getAssetSize('png', content, 'invalid.png'); failures.push(false); }
+        catch { failures.push(true); }
+      }
+      console.log(JSON.stringify(failures));
+    `);
+    expect(result).toEqual([true, true, true]);
+  });
+
+  it('generates unique Xcode identifiers through the CommonJS uuid consumer', () => {
+    const result = runNode(`
+      const project = require('xcode').project('test.pbxproj');
+      project.hash = { project: { objects: {} } };
+      const ids = Array.from({ length: 100 }, () => project.generateUuid());
+      console.log(JSON.stringify(ids));
+    `);
+    expect(new Set(result).size).toBe(100);
+    for (const id of result) expect(id).toMatch(/^[0-9A-F]{24}$/);
+  });
+
+  it('rejects undersized UUID output buffers in the package resolved by Xcode', () => {
+    const result = runNode(`
+      const { createRequire } = require('node:module');
+      const { v3, v5, v6 } = createRequire(require.resolve('xcode'))('uuid');
+      const namespace = '6ba7b810-9dad-11d1-80b4-00c04fd430c8';
+      const failures = [
+        () => v3('test', namespace, new Uint8Array(8), 4),
+        () => v5('test', namespace, new Uint8Array(8), 4),
+        () => v6({}, new Uint8Array(8), 4),
+      ].map(write => {
+        try { write(); return false; }
+        catch (error) { return error instanceof RangeError; }
+      });
+      console.log(JSON.stringify(failures));
+    `);
+    expect(result).toEqual([true, true, true]);
+  });
+  it('round-trips plist through both updated XML parser consumers', () => {
+    const result = runNode(`
+      const expoPlist = require('@expo/plist').default;
+      const plist = require('plist');
+      const data = { name: 'MealChat', characters: '<&>', count: 2, enabled: true };
+      console.log(JSON.stringify([
+        expoPlist.parse(expoPlist.build(data)),
+        plist.parse(plist.build(data)),
+      ]));
+    `);
+    const expected = { name: 'MealChat', characters: '<&>', count: 2, enabled: true };
+    expect(result).toEqual([expected, expected]);
+  });
+
+  it('keeps Expo CLI file observers working with the patched Metro watcher', () => {
+    const result = runNode(`
+      const { EventEmitter } = require('node:events');
+      const { resolve } = require('node:path');
+      const { installMetroWatchCompatibility } = require('./scripts/metro-watch-compat.cjs');
+      installMetroWatchCompatibility();
+      const FileMap = require('metro-file-map').default;
+      const once = FileMap.prototype.emit;
+      installMetroWatchCompatibility();
+      const watcher = new EventEmitter();
+      Object.setPrototypeOf(watcher, FileMap.prototype);
+      const server = new EventEmitter();
+      const runner = { server, metro: { getBundler: () => ({ getBundler: () => ({ getWatcher: () => watcher }) }) } };
+      const cliPath = resolve(require.resolve('@expo/cli/package.json'), '..', 'build/src/start/server/metro/waitForMetroToObserveTypeScriptFile.js');
+      const { observeFileChanges, observeAnyFileChanges, waitForMetroToObserveTypeScriptFile } = require(cliPath);
+      let callbacks = 0, tsCallbacks = 0, captured;
+      observeFileChanges(runner, [resolve('tsconfig.json')], () => callbacks++);
+      observeAnyFileChanges(runner, events => { captured = events; });
+      waitForMetroToObserveTypeScriptFile(process.cwd(), runner, () => tsCallbacks++);
+      const changes = {
+        addedFiles: new Map([['src/new.ts', { isSymlink: false, modifiedTime: 1 }]]),
+        modifiedFiles: new Map([['tsconfig.json', { isSymlink: false, modifiedTime: 2 }]]),
+        removedFiles: new Map([['src/removed.ts', { isSymlink: false, modifiedTime: 0 }]]),
+        addedDirectories: new Set(['directory.ts']), removedDirectories: new Set(),
+      };
+      let preserved = false;
+      watcher.once('change', event => { preserved = event.changes === changes; });
+      watcher.emit('change', { changes, rootDir: process.cwd() });
+      const translated = captured.map(event => ({type: event.type, filePath: event.filePath, kind: event.metadata.type}));
+      const legacy = [{ type: 'change', filePath: resolve('tsconfig.json'), metadata: { type: 'f' } }];
+      watcher.emit('change', { eventsQueue: legacy });
+      const legacyPreserved = captured === legacy;
+      server.emit('close');
+      const remaining = watcher.listenerCount('change');
+      console.log(JSON.stringify({ callbacks, tsCallbacks, translated, preserved, legacyPreserved, remaining, idempotent: once === FileMap.prototype.emit }));
+    `);
+    expect(result.callbacks).toBe(2);
+    expect(result.tsCallbacks).toBe(1);
+    expect(result.translated).toEqual([
+      { type: 'add', filePath: resolve(projectRoot, 'src/new.ts'), kind: 'f' },
+      { type: 'change', filePath: resolve(projectRoot, 'tsconfig.json'), kind: 'f' },
+      { type: 'delete', filePath: resolve(projectRoot, 'src/removed.ts'), kind: 'f' },
+      { type: 'add', filePath: resolve(projectRoot, 'directory.ts'), kind: 'd' },
+    ]);
+    expect(result.preserved).toBe(true);
+    expect(result.legacyPreserved).toBe(true);
+    expect(result.remaining).toBe(0);
+    expect(result.idempotent).toBe(true);
+  });
+});
+
+const auditAllowlist = JSON.parse(readFileSync(resolve(projectRoot, 'security/audit-allowlist.json'), 'utf8'));
+const forgeException = auditAllowlist.advisories.find((entry) => entry.id.toUpperCase() === 'GHSA-86W9-CPQP-85RV');
+const bracesException = auditAllowlist.advisories.find((entry) => entry.id.toUpperCase() === 'GHSA-VFJ7-8CJW-P6XM');
+const sprintfException = auditAllowlist.advisories.find((entry) => entry.id.toUpperCase() === 'GHSA-HP3W-G68C-FV3C');
+
+(sprintfException ? describe : describe.skip)('temporary sprintf-js exception boundary', () => {
+  it('pins the reviewed expiry, versions, and coverage-tooling dependency chain', () => {
+    expect(sprintfException.package).toBe('sprintf-js');
+    expect(sprintfException.reviewedOn).toBe('2026-10-15');
+    expect(sprintfException.expiresOn).toBe('2026-10-29');
+    const lock = JSON.parse(readFileSync(resolve(projectRoot, 'package-lock.json'), 'utf8'));
+    const chain = [
+      ['node_modules/sprintf-js', '1.0.3', 'sprintf-js', 'node_modules/@istanbuljs/load-nyc-config/node_modules/argparse'],
+      ['node_modules/@istanbuljs/load-nyc-config/node_modules/argparse', '1.0.10', 'argparse', 'node_modules/@istanbuljs/load-nyc-config/node_modules/js-yaml'],
+      ['node_modules/@istanbuljs/load-nyc-config/node_modules/js-yaml', '3.15.2', 'js-yaml', 'node_modules/@istanbuljs/load-nyc-config'],
+      ['node_modules/@istanbuljs/load-nyc-config', '1.1.0', '@istanbuljs/load-nyc-config', 'node_modules/babel-plugin-istanbul'],
+    ];
+    for (const [path, version, name, parent] of chain) {
+      expect(lock.packages[path].version).toBe(version);
+      expect(lock.packages[parent].dependencies[name]).toBeDefined();
+    }
+    expect(Object.entries(lock.packages).filter(([, entry]) =>
+      [entry.dependencies, entry.optionalDependencies, entry.peerDependencies]
+        .some((group) => Object.hasOwn(group ?? {}, 'sprintf-js'))).map(([path]) => path))
+      .toEqual(['node_modules/@istanbuljs/load-nyc-config/node_modules/argparse']);
+    expect(Object.keys(lock.packages).filter((path) => /(?:^|\/)node_modules\/sprintf-js$/.test(path)))
+      .toEqual(['node_modules/sprintf-js']);
+  });
+
+  it('keeps argparse references out of the js-yaml 3.x library entry and lib tree', () => {
+    const root = resolve(projectRoot, 'node_modules/@istanbuljs/load-nyc-config/node_modules/js-yaml');
+    const paths = [resolve(root, 'index.js'), ...sourcePathsIn(resolve(root, 'lib'))];
+    expect(paths.length).toBeGreaterThan(1);
+    expect(paths.filter((path) => /\bargparse\b/.test(readFileSync(path, 'utf8')))).toEqual([]);
+  });
+
+  it('detects undeclared formatting consumers throughout installed node_modules', () => {
+    const consumers = sourcePathsIn(resolve(projectRoot, 'node_modules'))
+      .filter((path) => importsPackage(readFileSync(path, 'utf8'), ['sprintf-js', 'argparse']))
+      .map((path) => path.slice(projectRoot.length + 1).replace(/\\/g, '/')).sort();
+    expect(consumers).toEqual([
+      'node_modules/@istanbuljs/load-nyc-config/node_modules/argparse/lib/argument_parser.js',
+      'node_modules/@istanbuljs/load-nyc-config/node_modules/argparse/lib/help/formatter.js',
+      'node_modules/@istanbuljs/load-nyc-config/node_modules/js-yaml/bin/js-yaml.js',
+      'node_modules/js-yaml/bin/js-yaml.js',
+    ]);
+  }, 30000);
+
+  it('loads YAML coverage configuration without reaching argparse or sprintf', () => {
+    const result = runNode(`
+      const fs = require('node:fs');
+      const { tmpdir } = require('node:os');
+      const { join } = require('node:path');
+      const Module = require('node:module');
+      const { createRequire } = Module;
+      const coverageRequire = createRequire(require.resolve('@istanbuljs/load-nyc-config'));
+      const yamlRequire = createRequire(coverageRequire.resolve('js-yaml'));
+      const argparsePath = yamlRequire.resolve('argparse');
+      const sprintfPath = createRequire(argparsePath).resolve('sprintf-js');
+      const originalLoad = Module._load;
+      let blockedCalls = 0;
+      Module._load = function (name, parent, isMain) {
+        const path = Module._resolveFilename(name, parent, isMain);
+        if (path === argparsePath || path === sprintfPath) {
+          blockedCalls++;
+          throw new Error('Unreviewed formatting path blocked');
+        }
+        return originalLoad.apply(this, arguments);
+      };
+      const directory = fs.mkdtempSync(join(tmpdir(), 'mealchat-audit-'));
+      const configPath = join(directory, '.nycrc.yaml');
+      const payload = '%.1000000f';
+      fs.writeFileSync(configPath, 'include:\\n  - "' + payload + '"\\n');
+      (async () => {
+        try {
+          const { loadNycConfig } = require('@istanbuljs/load-nyc-config');
+          const config = await loadNycConfig({ cwd: directory, nycrcPath: configPath });
+          const callsDuringLoad = blockedCalls;
+          const loaded = [argparsePath, sprintfPath].some(path => Boolean(require.cache[path]));
+          let controlBlocked = false;
+          try { require(sprintfPath); } catch { controlBlocked = true; }
+          console.log(JSON.stringify({ include: config.include, callsDuringLoad, loaded, controlBlocked, blockedCalls }));
+        } finally {
+          Module._load = originalLoad;
+          fs.unlinkSync(configPath);
+          fs.rmdirSync(directory);
+        }
+      })().catch(error => { console.error(error.message); process.exitCode = 1; });
+    `);
+    expect(result).toEqual({
+      include: ['%.1000000f'], callsDuringLoad: 0, loaded: false,
+      controlBlocked: true, blockedCalls: 1,
+    });
+  });
+
+  it('blocks direct formatting-package imports in app, config, and build scripts', () => {
+    const configs = readdirSync(projectRoot).filter((name) => /\.config\.[cm]?[jt]s$/.test(name)).map((name) => resolve(projectRoot, name));
+    const paths = [resolve(projectRoot, 'App.tsx'), resolve(projectRoot, 'index.js'), ...configs,
+      ...sourcePathsIn(resolve(projectRoot, 'src')), ...sourcePathsIn(resolve(projectRoot, 'scripts'))];
+    expect(paths.filter((path) => importsPackage(readFileSync(path, 'utf8'), ['sprintf-js', 'argparse'])))
+      .toEqual([]);
+  });
+});
+
+(bracesException ? describe : describe.skip)('temporary braces exception boundary', () => {
+  it('requires reassessment before the reviewed expiry and any version change', () => {
+    expect(bracesException.package).toBe('braces');
+    expect(bracesException.reviewedOn).toBe('2026-10-15');
+    expect(bracesException.expiresOn).toBe('2026-10-29');
+    const lock = JSON.parse(readFileSync(resolve(projectRoot, 'package-lock.json'), 'utf8'));
+    for (const target of ['braces', 'micromatch']) {
+      const entries = Object.entries(lock.packages).filter(([path]) => path.endsWith(`/node_modules/${target}`) || path === `node_modules/${target}`);
+      expect(entries).toHaveLength(1);
+      expect(entries[0][1].version).toBe(target === 'braces' ? '3.0.3' : '4.0.8');
+    }
+  });
+
+  it('limits consumers to the reviewed Jest and Metro tooling', () => {
+    const lock = JSON.parse(readFileSync(resolve(projectRoot, 'package-lock.json'), 'utf8'));
+    const consumers = (target) => Object.entries(lock.packages)
+      .filter(([, entry]) => [entry.dependencies, entry.optionalDependencies, entry.peerDependencies]
+        .some((dependencies) => Object.hasOwn(dependencies ?? {}, target)))
+      .map(([path]) => path).sort();
+    expect(consumers('braces')).toEqual(['node_modules/micromatch']);
+    const reviewedConsumers = [
+      'node_modules/@jest/core', 'node_modules/@jest/transform', 'node_modules/jest-config',
+      'node_modules/jest-haste-map', 'node_modules/jest-message-util', 'node_modules/metro-file-map',
+    ];
+    expect(consumers('micromatch')).toEqual(reviewedConsumers);
+    for (const path of reviewedConsumers) {
+      expect(lock.packages[path].version).toBe(path.endsWith('/metro-file-map') ? '0.83.8' : '29.7.0');
+    }
+    const manifest = JSON.parse(readFileSync(resolve(projectRoot, 'package.json'), 'utf8'));
+    for (const group of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
+      for (const name of ['braces', 'micromatch']) expect(manifest[group]?.[name]).toBeUndefined();
+    }
+  });
+
+  it('blocks glob package imports in app, config, and build scripts', () => {
+    const configs = readdirSync(projectRoot).filter((name) => /\.config\.[cm]?[jt]s$/.test(name)).map((name) => resolve(projectRoot, name));
+    const paths = [resolve(projectRoot, 'App.tsx'), resolve(projectRoot, 'index.js'), ...configs,
+      ...sourcePathsIn(resolve(projectRoot, 'src')), ...sourcePathsIn(resolve(projectRoot, 'scripts'))];
+    const imports = paths.filter((path) => importsPackage(readFileSync(path, 'utf8'), ['braces', 'micromatch', 'picomatch']));
+    expect(imports).toEqual([]);
+  });
+
+  it('matches through the reviewed APIs without executing braces', () => {
+    const result = runNode(`
+      const bracesPath = require.resolve('braces');
+      require(bracesPath);
+      let calls = 0;
+      const blocked = () => { calls++; throw new Error('Vulnerable braces execution is blocked'); };
+      require.cache[bracesPath].exports = new Proxy(blocked, { get: () => blocked });
+      const mm = require('micromatch');
+      const { createRequire } = require('node:module');
+      const picomatchVersion = createRequire(require.resolve('micromatch'))('picomatch/package.json').version;
+      const { includedByGlob } = require('./node_modules/metro-file-map/src/watchers/common.js');
+      const pattern = '**/*.{js,ts}';
+      const matches = [
+        mm(['src/app.ts', 'src/app.png'], pattern, { nocase: true, windows: false }),
+        mm.some('src/app.ts', pattern, { dot: true }), mm.isMatch('src/app.ts', pattern),
+        mm.any('src/app.ts', pattern),
+        includedByGlob('f', [pattern], false, 'src/app.ts'),
+        includedByGlob('f', [], false, 'src/app.ts'),
+        includedByGlob('f', [pattern], false, 'src/app.png'),
+      ];
+      const matchingCalls = calls;
+      let dangerousApiBlocked = false;
+      try { mm.braceExpand('{a,b}'); } catch { dangerousApiBlocked = true; }
+      console.log(JSON.stringify({ matches, matchingCalls, dangerousApiBlocked, picomatchVersion }));
+    `);
+    expect(result.matches).toEqual([['src/app.ts'], true, true, true, true, true, false]);
+    expect(result.matchingCalls).toBe(0);
+    expect(result.dangerousApiBlocked).toBe(true);
+    expect(result.picomatchVersion).toBe('2.3.2');
+  });
+
+  it('checks the bundled workspace resolver and blocks its braces execution during matching', () => {
+    const result = runNode(`
+      const { readFileSync } = require('node:fs');
+      const { createHash } = require('node:crypto');
+      const { runInNewContext } = require('node:vm');
+      const { dirname, join, resolve } = require('node:path');
+      const source = readFileSync(require.resolve('resolve-workspace-root'), 'utf8');
+      const marker = '610:(e,t,r)=>{';
+      if (source.split(marker).length !== 2) throw new Error('Bundled braces module changed');
+      const instrumented = source.replace(marker, marker + 'globalThis.bracesLoaded++;const blocked=()=>{globalThis.bracesCalls++;throw new Error("Bundled braces execution blocked");};e.exports=new Proxy(blocked,{get:()=>blocked});globalThis.blockedBraces=e.exports;return;');
+      const root = resolve('tmp/virtual-workspace');
+      const child = join(root, 'packages', 'app');
+      const files = new Map([[join(root, 'package.json'), JSON.stringify({ workspaces: ['packages/{app,lib}'] })]]);
+      const read = (path) => {
+        if (files.has(path)) return files.get(path);
+        throw Object.assign(new Error('Fixture file absent'), { code: 'ENOENT' });
+      };
+      const virtualFs = { readFileSync: read, promises: { readFile: async (path) => read(path) } };
+      const sandbox = { module: { exports: {} }, bracesLoaded: 0, bracesCalls: 0, process, console, Buffer, __dirname: dirname(require.resolve('resolve-workspace-root')),
+        require: (name) => name === 'node:fs' ? virtualFs : require(name) };
+      try { runInNewContext(instrumented, sandbox); }
+      catch (error) { console.error(error.message); process.exit(1); }
+      const resolver = sandbox.module.exports;
+      (async () => {
+        const sync = resolver.resolveWorkspaceRoot(child) === root;
+        const asyncMatch = await resolver.resolveWorkspaceRootAsync(child) === root;
+        const excluded = resolver.resolveWorkspaceRoot(join(root, 'other')) === null;
+        const matchingCalls = sandbox.bracesCalls;
+        let dangerousApiBlocked = false;
+        try { sandbox.blockedBraces('{a,b}'); } catch { dangerousApiBlocked = true; }
+        console.log(JSON.stringify({
+          sha256: createHash('sha256').update(source).digest('hex'),
+          version: require('resolve-workspace-root/package.json').version,
+          sync, async: asyncMatch, excluded, loaded: sandbox.bracesLoaded,
+          matchingCalls, dangerousApiBlocked, callsAfterControl: sandbox.bracesCalls,
+        }));
+      })().catch(error => { console.error(error); process.exitCode = 1; });
+    `);
+    expect(result).toEqual({
+      sha256: 'ee3be37ce5bce6f0de05ee538653d13f8cbf6a7ec8c8f4ed24466025e5e34f2e',
+      version: '2.0.1', sync: true, async: true, excluded: true,
+      loaded: 1, matchingCalls: 0, dangerousApiBlocked: true, callsAfterControl: 1,
+    });
+    const lock = JSON.parse(readFileSync(resolve(projectRoot, 'package-lock.json'), 'utf8'));
+    expect(Object.keys(lock.packages).filter((path) => /(?:^|\/)node_modules\/resolve-workspace-root$/.test(path))).toEqual(['node_modules/resolve-workspace-root']);
+    const consumers = Object.entries(lock.packages).filter(([, entry]) =>
+      [entry.dependencies, entry.optionalDependencies, entry.peerDependencies].some((group) => Object.hasOwn(group ?? {}, 'resolve-workspace-root')))
+      .map(([path, entry]) => [path, entry.version]).sort();
+    expect(consumers).toEqual([['node_modules/@expo/config', '12.0.14'], ['node_modules/@expo/package-manager', '1.13.1']]);
+  });
+});
+
+// Remove this conditional boundary guard when an upstream fix removes the exception.
+(forgeException ? describe : describe.skip)('temporary node-forge exception boundary', () => {
+  it('requires explicit reassessment before extending the reviewed exception', () => {
+    expect(forgeException.package).toBe('node-forge');
+    expect(forgeException.reviewedOn).toBe('2026-10-15');
+    expect(forgeException.expiresOn).toBe('2026-10-29');
+    const lock = JSON.parse(readFileSync(resolve(projectRoot, 'package-lock.json'), 'utf8'));
+    expect(lock.packages['node_modules/node-forge'].version).toBe('1.4.0');
+    expect(lock.packages['node_modules/@expo/cli'].version).toBe('54.0.27');
+    expect(lock.packages['node_modules/@expo/code-signing-certificates'].version).toBe('0.0.6');
+  });
+
+  it('limits forge consumers to the reviewed CLI packages and excludes expo-updates', () => {
+    const lock = JSON.parse(readFileSync(resolve(projectRoot, 'package-lock.json'), 'utf8'));
+    const consumers = Object.entries(lock.packages)
+      .filter(([, entry]) => [entry.dependencies, entry.optionalDependencies, entry.peerDependencies]
+        .some((dependencies) => Object.hasOwn(dependencies ?? {}, 'node-forge')))
+      .map(([path]) => path)
+      .sort();
+    expect(consumers).toEqual([
+      'node_modules/@expo/cli',
+      'node_modules/@expo/code-signing-certificates',
+    ]);
+    expect(Object.keys(lock.packages).filter((path) => /(?:^|\/)node_modules\/expo-updates$/.test(path))).toEqual([]);
+    expect(() => require.resolve('expo-updates')).toThrow();
+  });
+
+  it('blocks configuration changes that enable the reviewed signing paths', () => {
+    const config = JSON.parse(readFileSync(resolve(projectRoot, 'app.json'), 'utf8')).expo;
+    expect(config.updates?.codeSigningCertificate).toBeUndefined();
+    expect(config.updates?.codeSigningMetadata).toBeUndefined();
+    expect(config.extra?.eas?.projectId).toBeUndefined();
+    expect(readdirSync(projectRoot).filter((name) => /^app\.config\./.test(name))).toEqual([]);
+    const manifest = JSON.parse(readFileSync(resolve(projectRoot, 'package.json'), 'utf8'));
+    expect(manifest.expo).toBeUndefined();
+  });
+
+  it('blocks direct forge imports in application sources', () => {
+    const sourcePaths = [resolve(projectRoot, 'App.tsx'), resolve(projectRoot, 'index.js')];
+    const collectSources = (directory) => {
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        const path = resolve(directory, entry.name);
+        if (entry.isDirectory()) collectSources(path);
+        else if (/\.[cm]?[jt]sx?$/.test(entry.name)) sourcePaths.push(path);
+      }
+    };
+    collectSources(resolve(projectRoot, 'src'));
+    const imports = sourcePaths.filter((path) => /['"]node-forge(?:\/[^'"]*)?['"]/.test(readFileSync(path, 'utf8')));
+    expect(imports).toEqual([]);
+  });
+});

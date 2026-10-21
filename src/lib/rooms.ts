@@ -1,11 +1,34 @@
 import { toEmoticonToken } from './emoticon';
+import { randomRoomColor } from './roomTheme';
+import { effectiveInvitationStatus, type RoomInvitationStatus } from './roomInvitationState';
+import {
+  toSettlementSummary,
+  type SettlementBillRow,
+  type SettlementSummary,
+} from './settlementSummary';
 import { supabase } from './supabase';
+import { fetchS4Capabilities } from './roomDecisions';
+import { normalizeMeetingTime, type MeetingTime } from './meetingTime';
+import { createLifecycleRoom, fetchS3Capabilities, lifecycleError, roomLifecycleReadToken } from './roomLifecycle';
 
 export type RoomParticipant = {
   id: string;
   profileId: string | null;
   name: string;
   avatarColor: string;
+  /** 본인이 올린 프로필 사진. 안 올렸으면 null 이라 색·캐릭터로 대신한다 */
+  avatarUrl: string | null;
+};
+
+/** 약속이 어디까지 왔는지. 방 화면이 이 값에 따라 갈린다. */
+export type RoomStage = 'scheduling' | 'place' | 'confirmed' | 'settling' | 'done';
+
+export const STAGE_LABEL: Record<RoomStage, string> = {
+  scheduling: '일정 조율 중',
+  place: '식당 정하는 중',
+  confirmed: '확정',
+  settling: '정산 중',
+  done: '정산 완료',
 };
 
 export type RoomSummary = {
@@ -13,11 +36,21 @@ export type RoomSummary = {
   code: string;
   title: string;
   color: string;
+  stage: RoomStage;
+  /** 방장만 단계를 넘길 수 있다 */
+  ownerId: string | null;
   isConfirmed: boolean;
   confirmedSlot: string | null;
+  meetingTime?: MeetingTime | null;
+  decisionRevision?: string | null;
+  appointmentConfirmedAt?: string | null;
+  appointmentConfirmedBy?: string | null;
+  decisionMode?: 'legacy' | 's4';
   expiresAt: string;
   meetingDate: string;
   locationName: string | null;
+  /** 기존 confirmed_menu 원본: 일반 위치와 식당 저장 성공을 구분한다. */
+  confirmedMenu?: string | null;
   participants: RoomParticipant[];
   lastMessage: { text: string; senderName: string; createdAt: string } | null;
 };
@@ -29,6 +62,21 @@ export type RoomMessage = {
   senderName: string;
   senderColor: string;
   text: string;
+  createdAt: string;
+  /** system 은 방에서 일어난 일의 안내다. 사람이 보낼 수 없다 */
+  kind: 'user' | 'system';
+  /** Only S3 structured events can be treated as verified lifecycle facts. */
+  lifecycleEvent?: { actorId: string | null; actorName: string; type: string; transferId: string | null } | null;
+};
+
+export type RoomInvitation = {
+  id: string;
+  roomId: string;
+  inviterId: string;
+  roomTitle: string;
+  /** pending 초대는 만료 시 클라이언트에서도 expired로 표시한다. */
+  status: RoomInvitationStatus;
+  expiresAt: string;
   createdAt: string;
 };
 
@@ -44,11 +92,20 @@ type RoomRow = {
   code: string;
   title: string;
   color: string;
+  stage: string | null;
+  owner_id: string | null;
   is_confirmed: boolean;
   confirmed_slot: string | null;
+  meeting_starts_at?: string | null;
+  meeting_ends_at?: string | null;
+  meeting_time_zone?: string | null;
+  s4_revision?: string;
+  appointment_confirmed_at?: string | null;
+  appointment_confirmed_by?: string | null;
   expires_at: string;
   meeting_date: string;
   location_name: string | null;
+  confirmed_menu: string | null;
   participants: ParticipantRow[] | null;
   messages: { message: string; sender_name: string; created_at: string }[] | null;
 };
@@ -61,6 +118,31 @@ type MessageRow = {
   sender_color: string;
   message: string;
   created_at: string;
+  kind: string | null;
+  lifecycle_actor_id?: string | null;
+  lifecycle_event_type?: string | null;
+  event_key?: string | null;
+};
+
+/** 예전에 만들어진 방에는 stage 가 없을 수 있다 — 기본값으로 읽는다 */
+function toStage(value: string | null): RoomStage {
+  return value === 'scheduling' ||
+    value === 'place' ||
+    value === 'confirmed' ||
+    value === 'settling' ||
+    value === 'done'
+    ? value
+    : 'scheduling';
+}
+
+type RoomInvitationRow = {
+  id: string;
+  room_id: string;
+  inviter_id: string;
+  room_title: string;
+  status: string;
+  expires_at: string;
+  created_at: string;
 };
 
 function toParticipant(row: ParticipantRow): RoomParticipant {
@@ -69,7 +151,47 @@ function toParticipant(row: ParticipantRow): RoomParticipant {
     profileId: row.profile_id,
     name: row.name,
     avatarColor: row.avatar_color,
+    /* 사진은 participants 에 없다 — attachAvatars 가 나중에 채운다 */
+    avatarUrl: null,
   };
+}
+
+/**
+ * 참가자 사진을 채운다.
+ *
+ * participants 에는 사진이 없고, profiles 는 본인 행만 읽을 수 있다. 남의
+ * 사진은 public_profiles 로만 열려 있어서 한 번 더 물어봐야 한다. 방 조회에
+ * 끼워 넣지 않고 따로 가져오는 이유는, participants 에서 public_profiles 로
+ * 가는 외래키가 없어 임베드가 안 되기 때문이다.
+ *
+ * 실패해도 방 목록은 그대로 돌려준다 — 사진이 없는 것과 방을 못 읽는 것은
+ * 다른 일이고, 사진은 없으면 색과 캐릭터로 대신할 수 있다.
+ */
+async function attachAvatars(rooms: RoomSummary[]): Promise<void> {
+  const ids = [
+    ...new Set(
+      rooms.flatMap((room) =>
+        room.participants.map((participant) => participant.profileId).filter((id): id is string => Boolean(id)),
+      ),
+    ),
+  ];
+  if (ids.length === 0) return;
+
+  const { data, error } = await supabase
+    .from('public_profiles')
+    .select('id, avatar_url')
+    .in('id', ids)
+    .returns<{ id: string; avatar_url: string | null }[]>();
+
+  if (error || !data) return;
+
+  const byId = new Map(data.map((row) => [row.id, row.avatar_url]));
+  for (const room of rooms) {
+    for (const participant of room.participants) {
+      if (!participant.profileId) continue;
+      participant.avatarUrl = byId.get(participant.profileId) ?? null;
+    }
+  }
 }
 
 /**
@@ -77,14 +199,48 @@ function toParticipant(row: ParticipantRow): RoomParticipant {
  * 이미 참가자인 방으로 제한하기 때문이다. 참가자·메시지 임베드도
  * 각자의 정책을 통과한 것만 실린다.
  */
+/**
+ * 기한이 지난 방을 지운다.
+ *
+ * 방 목록을 불러올 때 한 번 돌린다. 예약 작업(pg_cron)을 쓰지 않는 이유는
+ * 예약이 조용히 실패해도 앱에서 알 방법이 없어서다 — 방이 안 지워지는 것
+ * 말고는 증상이 없다.
+ *
+ * 실패해도 목록 조회는 그대로 진행한다. 청소는 곁다리고, 못 지웠다고 해서
+ * 사용자가 자기 방을 못 보면 안 된다.
+ */
+async function sweepExpiredRooms(): Promise<void> {
+  const support = await fetchS3Capabilities();
+  if (support.mode !== 'legacy') return;
+  await supabase.rpc('delete_expired_rooms');
+}
+
+const ROOM_PROJECTION = 'id, code, title, color, stage, owner_id, is_confirmed, confirmed_slot, expires_at, meeting_date, location_name, confirmed_menu, ';
+const S4_PROJECTION = 'meeting_starts_at, meeting_ends_at, meeting_time_zone, s4_revision::text, appointment_confirmed_at, appointment_confirmed_by, ';
+function decisionFields(row: RoomRow, mode: 'legacy' | 's4') {
+  if (mode === 'legacy') return { meetingTime: null, decisionRevision: null, appointmentConfirmedAt: null, appointmentConfirmedBy: null, decisionMode: mode };
+  if (typeof row.s4_revision !== 'string' || !/^(0|[1-9]\d*)$/.test(row.s4_revision)
+    || row.appointment_confirmed_at === undefined || row.appointment_confirmed_by === undefined) throw new Error('밥약 상태를 확인하지 못했어요. 다시 불러와 주세요.');
+  const absent = row.meeting_starts_at === null && row.meeting_ends_at === null && row.meeting_time_zone === null;
+  return { meetingTime: absent ? null : normalizeMeetingTime({ starts_at: row.meeting_starts_at, ends_at: row.meeting_ends_at, time_zone: row.meeting_time_zone }),
+    decisionRevision: row.s4_revision, appointmentConfirmedAt: row.appointment_confirmed_at, appointmentConfirmedBy: row.appointment_confirmed_by, decisionMode: mode };
+}
+
 export async function fetchMyRooms(): Promise<{
   data: RoomSummary[] | null;
   error: Error | null;
 }> {
+  const token = roomLifecycleReadToken();
+  const support = await fetchS4Capabilities();
+  if (support.mode === 'error') return { data: null, error: support.error };
+  const mode = support.mode;
+  /* 기한이 지난 방을 먼저 치운다. 실패해도 목록은 그대로 읽는다 */
+  await sweepExpiredRooms().catch(() => undefined);
+
   const { data, error } = await supabase
     .from('rooms')
     .select(
-      'id, code, title, color, is_confirmed, confirmed_slot, expires_at, meeting_date, location_name, ' +
+      ROOM_PROJECTION + (support.mode === 's4' ? S4_PROJECTION : '') +
         'participants(id, profile_id, name, avatar_color), ' +
         'messages(message, sender_name, created_at)',
     )
@@ -96,24 +252,36 @@ export async function fetchMyRooms(): Promise<{
 
   if (error) return { data: null, error };
 
-  const rooms = (data ?? []).map<RoomSummary>((row) => {
+  let invalidRows = 0;
+  const rooms = (data ?? []).flatMap<RoomSummary>((row) => {
+    try {
     const last = row.messages?.[0];
-    return {
+    return [{
       id: row.id,
       code: row.code,
       title: row.title,
       color: row.color,
+      stage: toStage(row.stage),
+      ownerId: row.owner_id,
       isConfirmed: row.is_confirmed,
       confirmedSlot: row.confirmed_slot,
+      ...decisionFields(row, mode),
       expiresAt: row.expires_at,
       meetingDate: row.meeting_date,
-      locationName: row.location_name,
+      /* 메뉴 확정 RPC가 쓴 서버 상태를 표시한다. 클라이언트가 rooms 를 직접 갱신하지 않는다. */
+      locationName: row.location_name ?? row.confirmed_menu,
+      confirmedMenu: row.confirmed_menu,
       participants: (row.participants ?? []).map(toParticipant),
       lastMessage: last
         ? { text: last.message, senderName: last.sender_name, createdAt: last.created_at }
         : null,
-    };
+    }];
+    } catch { invalidRows++; return []; }
   });
+  if (invalidRows && !rooms.length) return { data: null, error: new Error('밥약 시간을 확인하지 못했어요. 다시 불러와 주세요.') };
+
+  await attachAvatars(rooms);
+  if (token !== roomLifecycleReadToken()) return { data: null, error: lifecycleError('ROOM_CHANGED') };
 
   return { data: rooms, error: null };
 }
@@ -123,10 +291,13 @@ export async function fetchRoom(roomId: string): Promise<{
   data: RoomSummary | null;
   error: Error | null;
 }> {
+  const token = roomLifecycleReadToken();
+  const support = await fetchS4Capabilities();
+  if (support.mode === 'error') return { data: null, error: support.error };
   const { data, error } = await supabase
     .from('rooms')
     .select(
-      'id, code, title, color, is_confirmed, confirmed_slot, expires_at, meeting_date, location_name, ' +
+      ROOM_PROJECTION + (support.mode === 's4' ? S4_PROJECTION : '') +
         'participants(id, profile_id, name, avatar_color), ' +
         'messages(message, sender_name, created_at)',
     )
@@ -137,36 +308,55 @@ export async function fetchRoom(roomId: string): Promise<{
   if (error) return { data: null, error };
   if (!data) return { data: null, error: null };
 
-  return {
-    data: {
-      id: data.id,
-      code: data.code,
-      title: data.title,
-      color: data.color,
-      isConfirmed: data.is_confirmed,
-      confirmedSlot: data.confirmed_slot,
-      expiresAt: data.expires_at,
-      meetingDate: data.meeting_date,
-      locationName: data.location_name,
-      participants: (data.participants ?? []).map(toParticipant),
-      lastMessage: null,
-    },
-    error: null,
+  let fields;
+  try { fields = decisionFields(data, support.mode); } catch { return { data: null, error: new Error('밥약 시간을 확인하지 못했어요. 다시 불러와 주세요.') }; }
+  const room: RoomSummary = {
+    id: data.id,
+    code: data.code,
+    title: data.title,
+    color: data.color,
+    stage: toStage(data.stage),
+    ownerId: data.owner_id,
+    isConfirmed: data.is_confirmed,
+    confirmedSlot: data.confirmed_slot,
+    ...fields,
+    expiresAt: data.expires_at,
+    meetingDate: data.meeting_date,
+    locationName: data.location_name ?? data.confirmed_menu,
+    confirmedMenu: data.confirmed_menu,
+    participants: (data.participants ?? []).map(toParticipant),
+    lastMessage: null,
   };
+
+  await attachAvatars([room]);
+  if (token !== roomLifecycleReadToken()) return { data: null, error: lifecycleError('ROOM_CHANGED') };
+
+  return { data: room, error: null };
 }
 
 export async function fetchRoomMessages(roomId: string): Promise<{
   data: RoomMessage[] | null;
   error: Error | null;
 }> {
+  const token = roomLifecycleReadToken();
+  const support = await fetchS3Capabilities();
+  // Probe failures only disable verified lifecycle projection; basic chat remains readable.
   const { data, error } = await supabase
     .from('messages')
-    .select('id, room_id, sender_id, sender_name, sender_color, message, created_at')
+    .select('id, room_id, sender_id, sender_name, sender_color, message, created_at, kind' + (support.mode === 's3' ? ', lifecycle_actor_id, lifecycle_event_type, event_key' : ''))
     .eq('room_id', roomId)
     .order('created_at', { ascending: true })
     .returns<MessageRow[]>();
 
   if (error) return { data: null, error };
+
+  const actorIds = [...new Set((data ?? []).flatMap(row => row.lifecycle_actor_id ? [row.lifecycle_actor_id] : []))];
+  const actorNames = new Map<string, string>();
+  if (support.mode === 's3' && actorIds.length) {
+    const projection = await supabase.from('public_profiles').select('id, name').in('id', actorIds).returns<{ id: string; name: string }[]>();
+    if (!projection.error) for (const actor of projection.data ?? []) actorNames.set(actor.id, actor.name);
+  }
+  if (token !== roomLifecycleReadToken()) return { data: null, error: lifecycleError('ROOM_CHANGED') };
 
   return {
     data: (data ?? []).map((row) => ({
@@ -177,6 +367,9 @@ export async function fetchRoomMessages(roomId: string): Promise<{
       senderColor: row.sender_color,
       text: row.message,
       createdAt: row.created_at,
+      /* 모르는 값이 오면 사람 말로 다룬다 — 시스템 줄로 잘못 꾸미는 쪽이 더 나쁘다 */
+      kind: row.kind === 'system' ? 'system' : 'user',
+      lifecycleEvent: lifecycleMessageEvent(row, support.mode === 's3', actorNames),
     })),
     error: null,
   };
@@ -207,6 +400,9 @@ export async function joinRoomByCode(code: string): Promise<{
   roomId: string | null;
   error: Error | null;
 }> {
+  const support = await fetchS3Capabilities();
+  if (support.mode === 'error') return { roomId: null, error: support.error };
+  if (support.mode === 's3') return { roomId: null, error: lifecycleError('PREVIEW_REQUIRED') };
   const trimmed = code.trim().toUpperCase();
   if (!trimmed) return { roomId: null, error: new Error('초대 코드를 입력해 주세요.') };
 
@@ -217,49 +413,36 @@ export async function joinRoomByCode(code: string): Promise<{
 }
 
 /**
- * 방 나가기.
- *
- * 참가행만 지우면 방이 목록에 남을 수 있어 RPC 로 옮겼다. 참가자에서 빼고,
- * 마지막 사람이었으면 방까지 한 트랜잭션으로 지운다.
+ * 레거시 방장 종료 전용. 일반 메이트 나가기는 leaveRoomMember를 사용한다.
  */
 export async function leaveRoom(roomId: string): Promise<Error | null> {
   const { error } = await supabase.rpc('leave_room', { target_room: roomId });
   return error;
 }
 
-export type SettlementSummary = {
-  id: string;
-  roomId: string | null;
-  title: string;
-  totalAmount: number;
-};
-
 /**
- * 내가 만든 정산만 돌아온다. dutch_pay_bills 의 정책이 creator 로 제한한다.
+ * 내가 만들었거나 내가 참가한 방의 정산.
  *
- * "미완료" 여부는 아직 알 수 없다. 완료 표시는 dutch_pay_members.is_completed 에
- * 있는데 그 테이블은 정책도 권한도 없이 잠겨 있다. 참가자별 정산을 열려면
- * 누가 무엇을 볼 수 있는지부터 정하는 별도 작업이 필요하다.
+ * dutch_pay_bills 의 정책은 creator 와 생성 시점 수취인 snapshot만 통과시킨다.
+ * 새 방 참가자는 과거 정산을 받지 못하고, 방을 나간 수취인은 자기 정산을 계속
+ * 읽는다. 수취인은 누가 아직 안 보냈는지까지 함께 읽는다.
  */
-export async function fetchMySettlements(): Promise<{
+export type { SettlementSummary };
+
+export async function fetchMySettlements(userId: string | null): Promise<{
   data: SettlementSummary[] | null;
   error: Error | null;
 }> {
   const { data, error } = await supabase
     .from('dutch_pay_bills')
-    .select('id, room_id, title, total_amount')
+    .select('id, room_id, title, total_amount, dutch_pay_members(profile_id, is_completed)')
     .order('created_at', { ascending: false })
-    .returns<{ id: string; room_id: string | null; title: string; total_amount: number }[]>();
+    .returns<SettlementBillRow[]>();
 
   if (error) return { data: null, error };
 
   return {
-    data: (data ?? []).map((row) => ({
-      id: row.id,
-      roomId: row.room_id,
-      title: row.title,
-      totalAmount: row.total_amount,
-    })),
+    data: (data ?? []).map((row) => toSettlementSummary(row, userId)),
     error: null,
   };
 }
@@ -289,9 +472,14 @@ export async function createRoom(input: {
   meetingDate: string;
   expiresAt: string;
   locationName?: string | null;
-  confirmedSlot?: string | null;
   color?: string;
 }): Promise<{ roomId: string | null; code: string | null; error: Error | null }> {
+  const support = await fetchS3Capabilities();
+  if (support.mode === 'error') return { roomId: null, code: null, error: support.error };
+  if (support.mode === 's3') {
+    const result = await createLifecycleRoom(input.title, input.color ?? '#23A455');
+    return { roomId: result.data?.roomId ?? null, code: result.data?.code ?? null, error: result.error };
+  }
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const code = randomCode();
     /*
@@ -309,9 +497,10 @@ export async function createRoom(input: {
       expires_at: input.expiresAt,
       owner_id: input.ownerId,
       location_name: input.locationName ?? null,
-      confirmed_slot: input.confirmedSlot ?? null,
-      is_confirmed: Boolean(input.confirmedSlot),
-      color: input.color ?? '#FF9900',
+      confirmed_slot: null,
+      is_confirmed: false,
+      /* 색을 안 주면 팔레트에서 고른다 — 예전에는 늘 주황이라 방이 다 같아 보였다 */
+      color: input.color ?? randomRoomColor(),
     });
 
     if (!error) {
@@ -331,21 +520,104 @@ export async function createRoom(input: {
   return { roomId: null, code: null, error: new Error('초대 코드를 만들지 못했어요. 다시 시도해 주세요.') };
 }
 
+/** No historical system message is upgraded to a verified S3 event. */
+function lifecycleMessageEvent(row: MessageRow, supported: boolean, names: Map<string, string>): RoomMessage['lifecycleEvent'] {
+  if (!supported || row.kind !== 'system' || row.sender_id !== null || !row.lifecycle_event_type || !row.event_key) return null;
+  // Accept historical keys and the collision-safe room/actor scoped namespace.
+  const scoped = /^(member-left|owner-transfer):([0-9a-f-]{36}):([0-9a-f-]{36}|server):(.+)$/i.exec(row.event_key);
+  // ON DELETE SET NULL removes the actor reference, while an immutable event
+  // key can still carry its original UUID. Keep that historical fact readable.
+  if (scoped && (scoped[2] !== row.room_id || (row.lifecycle_actor_id !== null && scoped[3] !== row.lifecycle_actor_id))) return null;
+  const key = scoped ? `${scoped[1]}:${scoped[4]}` : row.event_key;
+  const member = ['member_left', 'member_left_confirmed'].includes(row.lifecycle_event_type) && /^member-left:[0-9a-f-]{36}$/i.test(key);
+  const transfer = /^owner-transfer:([0-9a-f-]{36}):(pending|accepted|declined|cancelled|expired)$/i.exec(key);
+  if (!member && (!transfer || row.lifecycle_event_type !== `owner_transfer_${transfer[2]}`)) return null;
+  return { actorId: row.lifecycle_actor_id ?? null, actorName: row.lifecycle_actor_id === null ? '탈퇴한 메이트' : names.get(row.lifecycle_actor_id ?? '') ?? '메이트', type: row.lifecycle_event_type, transferId: transfer?.[1] ?? null };
+}
+
+export { effectiveInvitationStatus } from './roomInvitationState';
+
+/** 내가 받은 대기 초대. 방 자체는 수락 전 RLS로 보이지 않으며 이 스냅샷만 보인다. */
+export async function fetchMyPendingRoomInvitations(): Promise<{
+  data: RoomInvitation[] | null;
+  error: Error | null;
+}> {
+  const { data, error } = await supabase
+    .from('room_invitations')
+    .select('id, room_id, inviter_id, room_title, status, expires_at, created_at')
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false })
+    .returns<RoomInvitationRow[]>();
+
+  if (error) return { data: null, error };
+
+  return {
+    data: (data ?? [])
+      .map((row) => ({
+        id: row.id,
+        roomId: row.room_id,
+        inviterId: row.inviter_id,
+        roomTitle: row.room_title,
+        status: effectiveInvitationStatus(row.status, row.expires_at),
+        expiresAt: row.expires_at,
+        createdAt: row.created_at,
+      }))
+      .filter((invitation) => invitation.status === 'pending'),
+    error: null,
+  };
+}
+
 /**
- * 방장이 메이트를 방에 넣는다. 서버가 부른 사람의 방 참가 여부와
- * 메이트 관계를 확인하므로 모르는 사람은 넣을 수 없다.
- *
- * added 가 false 면 이미 참가 중이라 아무것도 하지 않은 것이다.
- * 화면이 "초대했어요" 와 "이미 있어요" 를 구분할 수 있어야 한다.
+ * 메이트에게 수락형 초대를 만든다. 이 호출은 participants를 직접 만들지 않는다.
+ * 같은 요청을 재시도하면 서버는 기존 pending 초대 id를 돌려준다.
  */
-export async function inviteFriendToRoom(
+export async function createRoomInvitation(
   roomId: string,
   friendId: string,
-): Promise<{ added: boolean; error: Error | null }> {
-  const { data, error } = await supabase.rpc('invite_friend_to_room', {
+): Promise<{ invitationId: string | null; error: Error | null }> {
+  const { data, error } = await supabase.rpc('create_room_invitation', {
     target_room: roomId,
-    friend_id: friendId,
+    invitee_id: friendId,
   });
 
-  return { added: data === true, error };
+  return { invitationId: typeof data === 'string' ? data : null, error };
+}
+
+/** 대상자만 수락할 수 있다. null은 만료·거절된 초대라 방에 들어가지 못했다는 뜻이다. */
+export async function acceptRoomInvitation(invitationId: string): Promise<{
+  roomId: string | null;
+  error: Error | null;
+}> {
+  const { data, error } = await supabase.rpc('accept_room_invitation', {
+    target_invitation: invitationId,
+  });
+
+  return { roomId: typeof data === 'string' ? data : null, error };
+}
+
+/** 대상자만 거절할 수 있다. stale pending 초대는 서버가 expired로 바꾼다. */
+export async function declineRoomInvitation(invitationId: string): Promise<Error | null> {
+  const { error } = await supabase.rpc('decline_room_invitation', {
+    target_invitation: invitationId,
+  });
+  return error;
+}
+
+/**
+ * 약속 단계를 다음으로 넘긴다.
+ *
+ * 방장만 가능하고 되돌아가지 않는다 — 그 판단은 서버가 한다. 앱은 결과 단계만
+ * 받아서 화면을 다시 그린다.
+ */
+export async function advanceRoomStage(
+  roomId: string,
+  next: RoomStage,
+): Promise<{ stage: RoomStage | null; error: Error | null }> {
+  const { data, error } = await supabase.rpc('advance_room_stage', {
+    target_room: roomId,
+    next_stage: next,
+  });
+
+  if (error) return { stage: null, error };
+  return { stage: typeof data === 'string' ? toStage(data) : null, error: null };
 }

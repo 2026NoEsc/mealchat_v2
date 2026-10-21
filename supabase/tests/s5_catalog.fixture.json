@@ -1,0 +1,341 @@
+{
+  "catalog_version": "s5-food-2026-10-18-v1",
+  "content_hash": "d9e9bed4857b3dc9590b36c13907d3212172baedde3f615cd4f63ee6c48d3122",
+  "options": [
+    {
+      "group": "cuisine",
+      "label": "한식",
+      "code": "korean"
+    },
+    {
+      "group": "cuisine",
+      "label": "일식",
+      "code": "japanese"
+    },
+    {
+      "group": "cuisine",
+      "label": "중식",
+      "code": "chinese"
+    },
+    {
+      "group": "cuisine",
+      "label": "양식",
+      "code": "western"
+    },
+    {
+      "group": "cuisine",
+      "label": "동남아",
+      "code": "southeast_asian"
+    },
+    {
+      "group": "cuisine",
+      "label": "기타 세계음식",
+      "code": "other_world"
+    },
+    {
+      "group": "cuisine",
+      "label": "분식",
+      "code": "snack_food"
+    },
+    {
+      "group": "cuisine",
+      "label": "상관없음",
+      "code": "any"
+    },
+    {
+      "group": "preferred_ingredient",
+      "label": "소고기",
+      "code": "beef"
+    },
+    {
+      "group": "preferred_ingredient",
+      "label": "돼지고기",
+      "code": "pork"
+    },
+    {
+      "group": "preferred_ingredient",
+      "label": "닭고기",
+      "code": "chicken"
+    },
+    {
+      "group": "preferred_ingredient",
+      "label": "양고기",
+      "code": "lamb"
+    },
+    {
+      "group": "preferred_ingredient",
+      "label": "생선",
+      "code": "fish"
+    },
+    {
+      "group": "preferred_ingredient",
+      "label": "새우·게 등 갑각류",
+      "code": "crustaceans"
+    },
+    {
+      "group": "preferred_ingredient",
+      "label": "조개류",
+      "code": "shellfish"
+    },
+    {
+      "group": "preferred_ingredient",
+      "label": "오징어·문어",
+      "code": "squid_octopus"
+    },
+    {
+      "group": "preferred_ingredient",
+      "label": "계란",
+      "code": "egg"
+    },
+    {
+      "group": "preferred_ingredient",
+      "label": "두부·콩",
+      "code": "tofu_soy"
+    },
+    {
+      "group": "preferred_ingredient",
+      "label": "채소",
+      "code": "vegetables"
+    },
+    {
+      "group": "preferred_ingredient",
+      "label": "치즈·유제품",
+      "code": "cheese_dairy"
+    },
+    {
+      "group": "food_form",
+      "label": "밥",
+      "code": "rice"
+    },
+    {
+      "group": "food_form",
+      "label": "면",
+      "code": "noodles"
+    },
+    {
+      "group": "food_form",
+      "label": "국물·탕",
+      "code": "soup"
+    },
+    {
+      "group": "food_form",
+      "label": "찌개·전골",
+      "code": "stew_hotpot"
+    },
+    {
+      "group": "food_form",
+      "label": "구이",
+      "code": "grilled"
+    },
+    {
+      "group": "food_form",
+      "label": "튀김",
+      "code": "fried"
+    },
+    {
+      "group": "food_form",
+      "label": "볶음",
+      "code": "stir_fried"
+    },
+    {
+      "group": "food_form",
+      "label": "찜",
+      "code": "steamed"
+    },
+    {
+      "group": "food_form",
+      "label": "샐러드·가벼운 식사",
+      "code": "salad_light_meal"
+    },
+    {
+      "group": "spice",
+      "label": "전혀 못 먹음",
+      "code": "not_spicy"
+    },
+    {
+      "group": "spice",
+      "label": "조금 매운 정도",
+      "code": "mild"
+    },
+    {
+      "group": "spice",
+      "label": "보통",
+      "code": "medium"
+    },
+    {
+      "group": "spice",
+      "label": "매운 음식 좋아함",
+      "code": "hot"
+    },
+    {
+      "group": "spice",
+      "label": "아주 매운 음식도 좋아함",
+      "code": "very_hot"
+    },
+    {
+      "group": "allergy",
+      "label": "계란",
+      "code": "egg"
+    },
+    {
+      "group": "allergy",
+      "label": "우유·유제품",
+      "code": "milk_dairy"
+    },
+    {
+      "group": "allergy",
+      "label": "땅콩",
+      "code": "peanut"
+    },
+    {
+      "group": "allergy",
+      "label": "견과류",
+      "code": "tree_nuts"
+    },
+    {
+      "group": "allergy",
+      "label": "밀",
+      "code": "wheat"
+    },
+    {
+      "group": "allergy",
+      "label": "메밀",
+      "code": "buckwheat"
+    },
+    {
+      "group": "allergy",
+      "label": "대두·콩",
+      "code": "soy"
+    },
+    {
+      "group": "allergy",
+      "label": "생선",
+      "code": "fish"
+    },
+    {
+      "group": "allergy",
+      "label": "새우",
+      "code": "shrimp"
+    },
+    {
+      "group": "allergy",
+      "label": "게",
+      "code": "crab"
+    },
+    {
+      "group": "allergy",
+      "label": "조개류",
+      "code": "shellfish"
+    },
+    {
+      "group": "allergy",
+      "label": "오징어",
+      "code": "squid"
+    },
+    {
+      "group": "allergy",
+      "label": "소고기",
+      "code": "beef"
+    },
+    {
+      "group": "allergy",
+      "label": "돼지고기",
+      "code": "pork"
+    },
+    {
+      "group": "allergy",
+      "label": "닭고기",
+      "code": "chicken"
+    },
+    {
+      "group": "allergy",
+      "label": "기타 직접 입력",
+      "code": "other_input"
+    },
+    {
+      "group": "allergy",
+      "label": "알레르기 없음",
+      "code": "none"
+    },
+    {
+      "group": "avoided_food",
+      "label": "회·날생선",
+      "code": "raw_fish"
+    },
+    {
+      "group": "avoided_food",
+      "label": "내장",
+      "code": "offal"
+    },
+    {
+      "group": "avoided_food",
+      "label": "곱창·막창",
+      "code": "intestines"
+    },
+    {
+      "group": "avoided_food",
+      "label": "고수",
+      "code": "cilantro"
+    },
+    {
+      "group": "avoided_food",
+      "label": "소고기",
+      "code": "beef"
+    },
+    {
+      "group": "avoided_food",
+      "label": "해산물",
+      "code": "seafood"
+    },
+    {
+      "group": "avoided_food",
+      "label": "유제품",
+      "code": "dairy"
+    },
+    {
+      "group": "avoided_food",
+      "label": "육류 전체",
+      "code": "all_meat"
+    },
+    {
+      "group": "avoided_food",
+      "label": "기타 직접 입력",
+      "code": "other_input"
+    },
+    {
+      "group": "avoided_food",
+      "label": "없음",
+      "code": "none"
+    },
+    {
+      "group": "diet_type",
+      "label": "식단 제한 없음",
+      "code": "none"
+    },
+    {
+      "group": "diet_type",
+      "label": "채식 (고기 · 생선을 먹지 않음)",
+      "code": "vegetarian"
+    },
+    {
+      "group": "diet_type",
+      "label": "비건 (동물성 음식을 먹지 않음)",
+      "code": "vegan"
+    },
+    {
+      "group": "diet_type",
+      "label": "페스코 (생선 · 해산물은 먹음)",
+      "code": "pescatarian"
+    },
+    {
+      "group": "additional_avoid",
+      "label": "돼지고기 제외",
+      "code": "exclude_pork"
+    },
+    {
+      "group": "additional_avoid",
+      "label": "기타 직접 입력",
+      "code": "other_input"
+    }
+  ]
+}

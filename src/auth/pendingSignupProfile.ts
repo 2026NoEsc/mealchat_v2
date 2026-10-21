@@ -1,0 +1,131 @@
+import { PENDING_SIGNUP_CONSENTS_TTL_MS as PENDING_SIGNUP_PROFILE_TTL_MS } from './pendingSignupConsents';
+import { createPendingProfileStorage, type DraftMetadataStorage } from './pendingProfileStorage';
+import { notify } from '../lib/confirm';
+
+// Accommodates bank/virtual account numbers while bounding the secure envelope.
+export const PENDING_PROFILE_ACCOUNT_MAX_LENGTH = 32;
+
+/**
+ * 가입 화면에서 받았지만 아직 서버에 못 넣은 값.
+ *
+ * 계좌·생년월일은 본인만 볼 수 있는 행(profile_private)에 들어가고, 그 쓰기는
+ * 로그인된 세션을 요구한다. 그런데 이메일 확인을 켜 두면 가입 직후에는 세션이 없다.
+ * 예전에는 그 경우 그냥 버려서, 메일을 확인하고 처음 로그인하면 적어 넣은 값이
+ * 하나도 없었다.
+ *
+ * 그래서 세션이 생길 때까지 기기에 맡겨 두었다가, 로그인하는 순간 옮겨 담는다.
+ *
+ * 계좌번호가 들어 있으므로 오래 두지 않는다 — 옮겨 담자마자 지우고, 확인 메일을
+ * 끝내 열지 않은 경우를 위해 기한도 둔다.
+ */
+export const PENDING_SIGNUP_PROFILE_KEY = 'mealchat.auth.pending-signup-profile.v1';
+
+/** 이 기간이 지나면 버린다 */
+export { PENDING_SIGNUP_CONSENTS_TTL_MS as PENDING_SIGNUP_PROFILE_TTL_MS } from './pendingSignupConsents';
+
+export type PendingSignupProfile = {
+  /** 이 값이 누구 것인지 가리는 기준. 다른 계정으로 로그인하면 옮기지 않는다 */
+  email: string;
+  userId: string;
+  bank: string | null;
+  account: string;
+  birth: { year: string; month: string; day: string };
+  /** 저장한 때 (Date.now) */
+  savedAt: number;
+};
+
+export type PendingSignupProfileStorage = DraftMetadataStorage;
+const vaults = new WeakMap<PendingSignupProfileStorage, ReturnType<typeof createPendingProfileStorage>>();
+function vault(storage: PendingSignupProfileStorage) {
+  let value = vaults.get(storage);
+  if (!value) {
+    value = createPendingProfileStorage({ metadata: storage, legacyKey: PENDING_SIGNUP_PROFILE_KEY,
+      project: raw => JSON.stringify(parsePendingSignupProfile(raw)),
+      valid: (raw, now) => {
+        const pending = parsePendingSignupProfile(raw);
+        return Boolean(pending && Number.isFinite(pending.savedAt) && now >= pending.savedAt && now - pending.savedAt <= PENDING_SIGNUP_PROFILE_TTL_MS);
+      },
+      onDiscard: () => notify('프로필 입력 필요', '가입 대기 프로필을 보관하지 못했어요. 로그인한 뒤 프로필에서 계좌와 생년월일을 다시 입력해 주세요.'),
+    });
+    vaults.set(storage, value);
+  }
+  return value;
+}
+
+export function normalizeEmail(email: string | null | undefined): string {
+  return (email ?? '').trim().toLowerCase();
+}
+
+/**
+ * 저장해 둔 글자를 값으로 되돌린다.
+ *
+ * 앱 판이 바뀌거나 저장이 중간에 끊겨 모양이 깨져 있을 수 있다. 그럴 때는 null 을
+ * 돌려 그냥 없는 셈 친다 — 가입 보조 값이라 터뜨릴 이유가 없다.
+ */
+export function parsePendingSignupProfile(raw: string | null): PendingSignupProfile | null {
+  if (!raw) return null;
+
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+
+    const value = parsed as Record<string, unknown>;
+    const email = typeof value.email === 'string' ? value.email : '';
+    if (!email.trim() || typeof value.userId !== 'string' || !value.userId.trim()) return null;
+
+    const birth = (value.birth ?? {}) as Record<string, unknown>;
+
+    return {
+      email,
+      userId: value.userId,
+      bank: typeof value.bank === 'string' ? value.bank : null,
+      account: typeof value.account === 'string' ? value.account : '',
+      birth: {
+        year: typeof birth.year === 'string' ? birth.year : '',
+        month: typeof birth.month === 'string' ? birth.month : '',
+        day: typeof birth.day === 'string' ? birth.day : '',
+      },
+      savedAt: typeof value.savedAt === 'number' ? value.savedAt : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** 지금 로그인한 사람에게 옮겨 담아도 되는 값인지 */
+export function isPendingProfileFor(
+  pending: PendingSignupProfile | null,
+  user: { id: string; email?: string | null },
+  now: number = Date.now(),
+): boolean {
+  if (!pending?.userId || pending.userId !== user.id) return false;
+
+  const owner = normalizeEmail(pending.email);
+  const signedIn = normalizeEmail(user.email);
+  if (!owner || !signedIn || owner !== signedIn) return false;
+
+  return now >= pending.savedAt && now - pending.savedAt <= PENDING_SIGNUP_PROFILE_TTL_MS;
+}
+
+export async function persistPendingSignupProfile(
+  storage: PendingSignupProfileStorage,
+  value: Omit<PendingSignupProfile, 'savedAt'>,
+  now: number = Date.now(),
+): Promise<void> {
+  const { email, userId, bank, account, birth } = value;
+  if (!userId?.trim()) { await clearPendingSignupProfile(storage); return; }
+  await vault(storage).write(JSON.stringify({ email, userId, bank, account, birth, savedAt: now }), now);
+}
+
+export async function readPendingSignupProfile(
+  storage: PendingSignupProfileStorage,
+  now = Date.now(),
+): Promise<PendingSignupProfile | null> {
+  return parsePendingSignupProfile(await vault(storage).read(now));
+}
+
+export async function clearPendingSignupProfile(
+  storage: PendingSignupProfileStorage,
+): Promise<void> {
+  await vault(storage).clear();
+}

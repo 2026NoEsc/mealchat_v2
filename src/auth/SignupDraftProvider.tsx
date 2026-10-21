@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 
-export type SignupConsent = 'service' | 'privacy' | 'marketing';
+export type SignupConsent = 'service' | 'privacy' | 'health' | 'marketing';
 
 export type SignupDraft = {
   nickname: string;
@@ -10,8 +10,8 @@ export type SignupDraft = {
   bank: string | null;
   account: string;
   birth: { year: string; month: string; day: string };
-  tastes: Record<string, boolean>;
   consents: Record<SignupConsent, boolean>;
+  consentIdentity?: string;
 };
 
 const initialDraft: SignupDraft = {
@@ -22,8 +22,7 @@ const initialDraft: SignupDraft = {
   bank: null,
   account: '',
   birth: { year: '', month: '', day: '' },
-  tastes: {},
-  consents: { service: false, privacy: false, marketing: false },
+  consents: { service: false, privacy: false, health: false, marketing: false },
 };
 
 type SignupDraftValue = {

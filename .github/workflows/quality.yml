@@ -25,11 +25,23 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install locked dependencies
         run: npm ci
 
-      - name: Run quality and security gates
+      - name: Run quality and security gates (UTC)
         run: npm run quality
+        env:
+          TZ: UTC
+
+      - name: Run Jest tests (Asia/Seoul)
+        run: npm test -- --ci --runInBand
+        env:
+          TZ: Asia/Seoul
+
+      - name: Run Jest tests (America/Los_Angeles)
+        run: npm test -- --ci --runInBand
+        env:
+          TZ: America/Los_Angeles

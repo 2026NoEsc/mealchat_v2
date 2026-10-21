@@ -1,5 +1,21 @@
 export type BirthInput = { year: string; month: string; day: string };
 
+export type BirthField = keyof BirthInput;
+
+/** 칸마다 받는 자릿수 — 2003 / 10 / 29 */
+export const BIRTH_LENGTH: Record<BirthField, number> = { year: 4, month: 2, day: 2 };
+
+/**
+ * 생년월일 칸에 들어온 글자를 다듬는다.
+ *
+ * 숫자만 남기고 칸에 맞는 자릿수까지만 받는다. 키보드를 숫자판으로 띄워도 붙여넣기나
+ * 외장 키보드로는 글자가 들어오고, 자릿수를 막지 않으면 `20031` 같은 값이 그대로
+ * 저장 단계까지 간다.
+ */
+export function formatBirthInput(field: BirthField, text: string): string {
+  return text.replace(/\D/g, '').slice(0, BIRTH_LENGTH[field]);
+}
+
 /**
  * 세 칸으로 나뉜 생년월일 입력을 date 컬럼이 받는 문자열로 바꾼다.
  * 비었거나 실제로 없는 날짜(2월 31일 등)면 null 을 준다 — 저장하지 않는 편이
