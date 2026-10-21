@@ -1,0 +1,28 @@
+begin;
+set local s1.tap='off';
+\ir s3_fixture.sql
+select pg_temp.check((select lifecycle_version=1 and expires_at=created_at+interval '7 days' from public.rooms where id=pg_temp.s3_room()),'server-created room has bounded seven-day lifetime');
+select pg_temp.check(not (select enabled from private.s3_worker_control where singleton) is null,'worker gate exists');
+set local role authenticated;
+select pg_temp.as_user('10000002-0000-4000-8000-000000000002');
+select pg_temp.check((public.get_room_lifecycle_v1(pg_temp.s3_room())->>'can_leave')::boolean,'ordinary scheduling member may leave');
+insert into s4_data values('leave',public.leave_room_member_v1(pg_temp.s3_room(),pg_temp.s3_rev(),'33000000-0000-4000-8000-000000000002'));
+select pg_temp.check(pg_temp.sqlstate_of($q$select public.get_room_lifecycle_v1(pg_temp.s3_room())$q$)='42501','former member immediately loses room access');
+select pg_temp.check(pg_temp.sqlstate_of($q$select public.leave_room_member_v1(pg_temp.s3_room(),0,'33000000-0000-4000-8000-000000000002')$q$)='42501','leave replay does not reveal room state after access loss');
+reset role;
+select pg_temp.check((select count(*)=1 from public.messages where room_id=pg_temp.s3_room() and event_key='member-left:'||pg_temp.s3_room()||':10000002-0000-4000-8000-000000000002:33000000-0000-4000-8000-000000000002'),'exactly one structured leave event');
+set local role authenticated;
+select pg_temp.as_user('10000001-0000-4000-8000-000000000001');
+select pg_temp.check(pg_temp.sqlstate_of($q$select public.leave_room_member_v1(pg_temp.s3_room(),pg_temp.s3_rev(),gen_random_uuid())$q$)='S3002','owner ordinary leave is denied');
+reset role;
+update public.rooms set stage='settling' where id=pg_temp.s3_room();
+set local role authenticated;
+select pg_temp.check(pg_temp.sqlstate_of($q$select public.close_room_v1(pg_temp.s3_room(),pg_temp.s3_rev(),gen_random_uuid())$q$)='S4003','settling without actual unfinished recipients fails closed rather than guessing done');
+select pg_temp.check(not (public.get_room_lifecycle_v1(pg_temp.s3_room())->>'can_close')::boolean,'inconsistent settling stage never grants close permission');
+reset role;
+update public.rooms set stage='scheduling' where id=pg_temp.s3_room();
+set local role authenticated;
+select pg_temp.check((public.close_room_v1(pg_temp.s3_room(),pg_temp.s3_rev(),gen_random_uuid())->>'outcome')='applied','owner explicitly closes empty room');
+select pg_temp.check(public.leave_room(pg_temp.s3_room())='gone','legacy close returns information-free gone');
+select pg_temp.check(pg_temp.sqlstate_of($q$select public.create_room_v1('Synthetic S3','#23A455','33000000-0000-4000-8000-000000000001')$q$)='42501','create tombstone prevents recreating a deleted room');
+rollback;

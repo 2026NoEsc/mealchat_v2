@@ -36,6 +36,20 @@ export default function HomeScreen() {
     delete next.deletedRoomTitle;
     replace('Home', next);
   }, [deletedRoomId, current?.params, replace, showToast]);
+
+  /* [결정] S3 SD01 / Figma 590:2164: 방 나가기 성공 후 홈 토스트 ("{방 이름}에서 나왔어요") */
+  const leftRoomId = current?.params?.leftRoomId;
+  const shownLeave = useRef<string | null>(null);
+  useEffect(() => {
+    if (typeof leftRoomId !== 'string' || !leftRoomId || shownLeave.current === leftRoomId) return;
+    shownLeave.current = leftRoomId;
+    const roomTitle = typeof current.params?.leftRoomTitle === 'string' && current.params.leftRoomTitle.trim() ? current.params.leftRoomTitle.trim() : '방';
+    showToast({ message: roomTitle + '에서 나왔어요' });
+    const next = { ...current.params };
+    delete next.leftRoomId;
+    delete next.leftRoomTitle;
+    replace('Home', next);
+  }, [leftRoomId, current?.params, replace, showToast]);
   const topInset = useTopInset();
   const insets = useSafeAreaInsets();
   const { bundle } = useMyProfile();

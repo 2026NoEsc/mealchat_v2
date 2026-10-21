@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, Lock, Pencil, Plus } from 'lucide-react-native';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '../../auth/AuthProvider';
@@ -10,6 +10,7 @@ import { buildWeeksOf, columnOfIn, daysInMonth, shiftMonth, todayParts, WEEKDAYS
 import { createEvent, deleteNote, saveMemo as saveMemoNote, updateEvent } from '../../lib/calendarNotes';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { groupNotes, useMonthNotes } from '../../schedule/useMonthNotes';
+import { subscribeRoomLifecycle } from '../../lib/roomLifecycle';
 import { useTopInset } from '../../theme/insets';
 import { v3Layout } from '../../theme/scale';
 import { scheduleColors, scheduleLayout as layout } from '../../theme/scheduleTokens';
@@ -50,6 +51,11 @@ export default function ScheduleHomeScreen() {
 
   const { notes, status, reload } = useMonthNotes(month.year, month.month);
   const { eventsByDay, memosByDay, memoIdByDay } = groupNotes(notes);
+  useEffect(() => {
+    return subscribeRoomLifecycle(() => {
+      reload();
+    });
+  }, [reload]);
 
   /*
    * session 은 시트를 열 때만 증가한다. 시트 안의 입력 폼은 이 값으로 초기화되고,

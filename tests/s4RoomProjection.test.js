@@ -1,5 +1,7 @@
 jest.mock('../src/lib/supabase', () => ({ supabase: { rpc: jest.fn(), from: jest.fn() } }));
 jest.mock('../src/lib/consents', () => ({ getConsentServerMode: () => 's1', fetchConsentManifest: jest.fn() }));
+// These tests target the S4 projection against an explicitly old S3 server.
+jest.mock('../src/lib/roomLifecycle', () => ({ fetchS3Capabilities: jest.fn(async () => ({ mode: 'legacy', error: null })), roomLifecycleReadToken: () => 's4-projection-legacy' }));
 const { supabase } = require('../src/lib/supabase');
 const { setConsentAccess } = require('../src/consents/access');
 const { configureRoomDecisions } = require('../src/lib/roomDecisions');

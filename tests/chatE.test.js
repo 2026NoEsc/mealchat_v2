@@ -1,6 +1,7 @@
 const React = require('react');
 jest.mock('../src/lib/useRoomDecision', () => ({ useRoomDecision: () => ({ mode: 'legacy', data: null, error: null, loading: false, reload: jest.fn() }) }));
 jest.mock('../src/lib/roomDecisions', () => ({ ...jest.requireActual('../src/lib/roomDecisions'), fetchS4Capabilities: jest.fn(async () => ({ mode: 'legacy', error: null })) }));
+jest.mock('../src/lib/roomLifecycle', () => ({ ...jest.requireActual('../src/lib/roomLifecycle'), fetchS3Capabilities: jest.fn(async () => ({ mode: 'legacy', error: null })) }));
 const { act, create } = require('react-test-renderer');
 const { BackHandler, Clipboard, Image, Platform, Share, StyleSheet, Text, TextInput } = require('react-native');
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }), SafeAreaProvider: ({ children }) => children }));
@@ -65,7 +66,7 @@ const targets = (root, label) => root.findAll(n => n.props.accessibilityRole ===
 async function render(Component, props = {}) { await act(async () => { renderer = create(React.createElement(Component, props)); }); return renderer.root; }
 // Simulate the AuthProvider event alongside the mocked auth context.
 function setChatUser(user) { useAuth.mockReturnValue({ user }); }
-async function press(root, label) { const button = target(root, label); expect(button).toBeDefined(); await act(async () => button.props.onPress()); }
+async function press(root, label) { const button = target(root, label); expect(button).toBeDefined(); if (!button.props.disabled) await act(async () => button.props.onPress()); }
 beforeEach(() => {
   jest.clearAllMocks(); VotingSheet.mockImplementation(() => null); useKeyboardOverlap.mockReturnValue({ overlap: 0, remeasure: jest.fn() });
   fetchRoomVoting.mockResolvedValue({ data: [{ id: 'restaurant', kind: 'menu', label: '돼지집 서면점', voters: [{name:'a'},{name:'b'},{name:'c'}], mine: true }], memberCount: 4, error: null });
@@ -168,7 +169,7 @@ it('routes missing-place choice and invitation to existing chat sheets and copie
   expect(navigation.navigate).not.toHaveBeenCalledWith('Origin');
 });
 it('cancels deletion without a call, shows real failure, and emits feedback only after success', async () => {
-  const root = await render(RoomDetailScreen); await press(root, '방 없애기'); expect(root.findByType(DestructiveDialog).props.visible).toBe(true); expect(leaveRoom).not.toHaveBeenCalled();
+  const root = await render(RoomDetailScreen); expect(target(root, '방 없애기').props.disabled).toBe(false); await press(root, '방 없애기'); expect(root.findByType(DestructiveDialog).props.visible).toBe(true); expect(leaveRoom).not.toHaveBeenCalled();
   await press(root, '그대로 둘게요'); expect(root.findByType(DestructiveDialog).props.visible).toBe(false); expect(leaveRoom).not.toHaveBeenCalled();
   await press(root, '방 없애기'); leaveRoom.mockResolvedValueOnce(Error('denied')); await press(root, '없애기');
   expect(text(root)).toContain('방을 없애지 못했어요'); expect(text(root)).not.toContain('denied'); expect(navigation.resetTo).not.toHaveBeenCalled();

@@ -36,6 +36,7 @@ import {
 import { useForegroundRefreshToken } from '../../lifecycle/AppLifecycleContext';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useMyRooms } from '../../rooms/useMyRooms';
+import { subscribeRoomLifecycle } from '../../lib/roomLifecycle';
 import { fs, s } from '../../theme/scale';
 import { colors } from '../../theme/tokens';
 import { fontFamily, weight } from '../../theme/typography';
@@ -54,6 +55,12 @@ export default function ChatHomeScreen() {
   const [invitationError, setInvitationError] = useState<string | null>(null);
   const [invitationBusy, setInvitationBusy] = useState<string | null>(null);
   const { rooms, status, reload } = useMyRooms();
+  useEffect(() => {
+    return subscribeRoomLifecycle(() => {
+      reload();
+      void reloadInvitations();
+    });
+  }, [reload]);
   const userId = user?.id ?? null;
   const foregroundRefreshToken = useForegroundRefreshToken();
 

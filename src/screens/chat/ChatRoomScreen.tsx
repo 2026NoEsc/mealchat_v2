@@ -37,6 +37,10 @@ import {
   sendRoomSticker,
   type RoomMessage,
 } from '../../lib/rooms';
+import {
+  registerRoomLifecycleResources,
+  subscribeRoomLifecycle,
+} from '../../lib/roomLifecycle';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useRoom, useRoomMessages } from '../../rooms/useMyRooms';
 import { v3Layout } from '../../theme/scale';
@@ -53,7 +57,7 @@ const groupedGapReduction = 6;
 
 type Message = { key: string; separatorHeight?: number } & (
   | { kind: 'date'; text: string }
-  | { kind: 'sys'; text: string }
+  | { kind: 'sys'; text: string; isTransfer?: boolean }
   | ({ kind: 'msg'; mine: boolean; text: string } & Bubble)
   | ({ kind: 'sticker'; mine?: boolean; sticker: ImageSourcePropType } & Bubble)
   | { kind: 'notice'; notice: RoomNotice }
@@ -115,12 +119,32 @@ export function toDisplayMessages(
     }
 
     if (row.kind === 'system') {
+      let displayText = row.text;
+      const isTransfer = Boolean(row.lifecycleEvent && row.lifecycleEvent.type.startsWith('owner_transfer'));
+      if (row.lifecycleEvent) {
+        const ev = row.lifecycleEvent;
+        if (ev.type === 'member_left_confirmed') {
+          displayText = `${ev.actorName}님이 방을 나갔어요. 이후 새 정산에 포함되지 않아요.`;
+        } else if (ev.type === 'member_left') {
+          displayText = `${ev.actorName}님이 방을 나갔어요.`;
+        } else if (ev.type === 'owner_transfer_pending') {
+          displayText = '방장 넘기기를 요청했어요. 대상 메이트는 방 상세정보에서 확인해 주세요.';
+        } else if (ev.type === 'owner_transfer_declined') {
+          displayText = '방장 넘기기 요청을 거절했어요.';
+        } else if (ev.type === 'owner_transfer_cancelled') {
+          displayText = '방장 넘기기 요청을 취소했어요.';
+        } else if (ev.type === 'owner_transfer_expired') {
+          displayText = '방장 넘기기 요청이 만료됐어요.';
+        } else if (ev.type === 'owner_transfer_accepted') {
+          displayText = '방장이 바뀌었어요.';
+        }
+      }
       /* 카드로 세울 수 있는 것만 세운다. 알아보지 못한 안내는 회색 알약이다. */
-      const notice = roomNoticeOf(row.text);
+      const notice = roomNoticeOf(displayText);
       out.push(
         notice
           ? { key: row.id, kind: 'notice', notice }
-          : { key: row.id, kind: 'sys', text: row.text },
+          : { key: row.id, kind: 'sys', text: displayText, isTransfer },
       );
       continue;
     }
@@ -290,9 +314,41 @@ export default function ChatRoomScreen() {
     Keyboard.dismiss(); setActionsOpen(false); setEmoticonOpen(false); setMessageActions(message);
   }, []);
   useEffect(() => { setMessageActions(null); }, [roomId, user?.id]);
+
+  const currentRef = useRef(current);
+  currentRef.current = current;
+
+  useEffect(() => {
+    if (!roomId) return;
+    const unregister = registerRoomLifecycleResources(roomId, {
+      invalidate: () => { reload(); void reloadRoom(); },
+      unsubscribe: () => {},
+    });
+    const unsubscribe = subscribeRoomLifecycle(event => {
+      if (event.roomId === roomId && (event.reason === 'departed' || event.reason === 'session_ended')) {
+        // ChatRoomScreen이 현재 포커스된 화면일 때만 goBack (RoomDetail에서 resetTo와 중복 네비게이션 방지)
+        if (currentRef.current.name === 'ChatRoom') {
+          goBack();
+        }
+      }
+    });
+    return () => {
+      unregister();
+      unsubscribe();
+    };
+  }, [roomId, reload, reloadRoom, goBack]);
+
+  const openDetailRef = useRef(() => {});
+  openDetailRef.current = () => {
+    if (roomId) navigate('RoomDetail', { roomId, title });
+  };
+  const handleOpenDetail = useCallback(() => {
+    openDetailRef.current();
+  }, []);
+
   const renderMessage = useCallback(
-    ({ item }: { item: Message }) => <Row message={item} onAction={handleNoticeAction} onMessage={openMessageActions} />,
-    [handleNoticeAction, openMessageActions],
+    ({ item }: { item: Message }) => <Row message={item} onAction={handleNoticeAction} onMessage={openMessageActions} onOpenDetail={handleOpenDetail} />,
+    [handleNoticeAction, openMessageActions, handleOpenDetail],
   );
 
   const send = async () => {
@@ -503,9 +559,9 @@ function MessageSeparator({ leadingItem }: { leadingItem?: Message }) {
 }
 
 const Row = memo(function Row({
-  message, onAction, onMessage,
+  message, onAction, onMessage, onOpenDetail,
 }: {
-  message: Message; onAction: (kind: RoomNotice['kind']) => void; onMessage: (message: CopyableMessage) => void;
+  message: Message; onAction: (kind: RoomNotice['kind']) => void; onMessage: (message: CopyableMessage) => void; onOpenDetail?: () => void;
 }) {
   const messageMenu = message.kind === 'msg' ? {
     accessible: true,
@@ -531,9 +587,15 @@ const Row = memo(function Row({
     case 'sys':
       return (
         <View style={styles.sysRow}>
-          <View style={styles.sysPill}>
+          <Pressable
+            disabled={!message.isTransfer || !onOpenDetail}
+            onPress={onOpenDetail}
+            accessibilityRole={message.isTransfer ? 'button' : undefined}
+            accessibilityLabel={message.isTransfer ? `${message.text}, 방 상세정보 보기` : undefined}
+            style={styles.sysPill}
+          >
             <Text style={styles.sysText}>{message.text}</Text>
-          </View>
+          </Pressable>
         </View>
       );
 

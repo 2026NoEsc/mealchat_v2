@@ -195,6 +195,63 @@ S5 DDL 마이그레이션과 Edge Function 배포가 완료된 직후 다음 순
 - [ ] 앱이 place의 `permissions.can_submit` 예외, `legacy_settlement_unverified`, `S4011`(요청 이력 상한), 정산 RPC의 `S4008/SETTLEMENT_REQUIRES_CONFIRMATION`을 처리하는지 확인한다. 일정 변경 이력은 사용자1,000/방1,000×max(5,실제 참가자 수)행으로 제한하며 방장 시간 선택·확정은 제외한다. 같은 일정 재제출은 이력을 추가하지 않는다. 기록된 성공 ID replay를 보존한다. S4008은 hint의 operation=settlement/vote_confirmation으로 분기한다. 새 cron 등록은 없다.
 - [ ] 별도 승인된 운영 반영 뒤 migration/function identity·ACL·다중 사용자 격리·읽기/쓰기 경합·정산 gate·앱 왕복을 확인하고 security advisors를 다시 실행한다. 이 문서는 원격 변경 승인이 아니다.
 
+## S3 운영 반영 절차 — S1 → S5 → S4 검증 완료 후
+
+정본은 `docs/S3-design.md` §12·14·15이며, 선행 순서는 **확정 M7 포함 S1 → S5 → S4(최종 `20261020040000_s4_lock_amount_after_payment.sql` 포함) 적용·검증 → S3 준비 → 예약 등록·관측 → S3 활성화 → 별도 정리 시작**이다. 상단의 법률 문서 출시 차단을 유지한다. 구현 재검토 통과나 이 문서의 체크 완료는 운영 반영·D9 법률 문안의 승인이 아니며, 대상 프로젝트·SQL identity·배포 창·단축/삭제 범위를 포함한 별도 사용자 승인이 필요하다.
+
+### S3 준비 마이그레이션 목록 (타임스탬프 순서)
+
+1. `supabase/migrations/20261021010000_s3_lifecycle_storage.sql` — 수명·초대·위임·요청 저장소, RLS/ACL·인덱스.
+2. `supabase/migrations/20261021010100_s3_membership_owner_core.sql` — 생성·나가기·종료·위임 core와 서버 이벤트.
+3. `supabase/migrations/20261021010200_s3_invite_core.sql` — 코드 TTL·재발급·미리보기·공유 시도 제한.
+4. `supabase/migrations/20261021010300_s3_cleanup_core.sql` — 비활성 worker와 제한된 실행 역할·진입점.
+5. `supabase/migrations/20261021010400_s3_activate_lifecycle.sql` — **활성화 준비만**: 수명 guard·정산 hook·Q1 집계 함수.
+
+이 5개만으로는 capability를 공개하거나 D10/R1 EXECUTE·D11/rooms 직접 INSERT를 회수하지 않고, scheduler도 등록하지 않는다. 기존 migration을 고치거나 아래 보류 파일을 자동 migration 입력으로 옮기지 않는다.
+
+### 적용 전 증거와 사전 집계
+
+- [ ] **운영 Postgres 버전 읽기 전용 확인:** 아래 SQL의 버전·조회 시각을 기록한다. 로컬 검증은 PG17이며 **PG15 역할/소유권 전환 분기는 미검증**이다. 운영이 PG15이면 같은 버전의 격리 환경에서 migration·역할/ACL·cron·release gate를 검증하고 재검토한 뒤 반영한다. 이 확인을 위해 운영 버전을 바꾸지 않는다.
+
+  ```sql
+  begin transaction read only;
+  select statement_timestamp() as observed_at,
+         current_setting('server_version') as server_version,
+         current_setting('server_version_num')::integer as server_version_num;
+  rollback;
+  ```
+
+- [ ] **D10 베타 앱 호출 부재:** 배포할 베타의 artifact digest·versionCode·소스 commit을 고정하고 `post_room_system_message` 호출 제거와 대체 서버 이벤트 경로를 확인한다. §15 Q2/Q3의 권한·함수/SQL 호출 통계를 함께 검토하며, 통계 없음·관측 기간 불명은 `미확인`이다. 관측 0건만으로 베타 호출 부재를 승인하지 않는다.
+- [ ] **D11 새 베타 최소 버전:** 지원할 최소 versionCode와 실제 배포 artifact를 확인한다. 해당 베타가 S3 지원 감지 뒤 새 생성 RPC를 사용하고 rooms 직접 INSERT를 쓰지 않으며, 구 서버에서만 허용된 fallback이 동작하는지 검증한다. §15 Q3/Q4의 호출 후보·table/column grant·RLS를 대조하고 구 앱 영향과 전환 계획을 승인받는다.
+- [ ] **§15 사전 집계 SQL:** `supabase/tests/s3_inventory.sql`의 Q0→Q1→Q2/Q3/Q4를 승인된 읽기 전용 세션에서 실행하고 조회 시각·건수·스키마/함수 identity를 기록한다. Q3은 실제 extension schema와 접근 가능 여부를 먼저 확인하며 통계를 reset하지 않는다. 이름·코드·채팅·식별자 원문은 출력하지 않는다. D8의 불명 기점 대상과 최대7일 이내의 고정 전환 마감일, 기존 만료 방을 되살리지 않는 단축 범위를 검토한다.
+- [ ] **베타 사용자 기한 안내:** 약속 확정·정산을 시작해도 방 기한(생성+7일)은 늘지 않아 미완료 정산이 남은 채 방이 삭제될 수 있음을 안내한다. 정산 기록은 방·채팅과 분리 보존된다.
+- [ ] **시간 민감한 Q1 기대 건수:** 준비 migration 적용 뒤 아래 읽기 전용 조회로 같은 Q1의 11개 건수 JSON을 얻고, **집계 직후 승인된 활성화에 적용**한다. 코드 형식 불일치와 정규화 후 중복에 속한 방 수도 검토한다. 값을 생략하거나 일부 키만 전달하지 않고 `mealchat.s3.expected_inventory`에 그대로 입력한다. 시간이 지나거나 쓰기가 발생하면 건수가 달라질 수 있으므로, `S3_INVENTORY_COUNT_MISMATCH`이면 적용을 중단하고 재집계·대상 검토 후 새 기대 건수를 사용한다. 실패를 0건으로 대체하거나 검사를 우회하지 않는다.
+
+  ```sql
+  begin transaction read only;
+  select statement_timestamp() as observed_at,
+         private.s3_inventory_counts() as expected_inventory;
+  rollback;
+  ```
+
+- [ ] **D8 잠금·복구 준비:** 유지보수 창에서 구 앱 쓰기를 정지하고 백업/PITR·복구 절차·Q1 total_rooms 대비 공유 advisory lock 용량을 확인한다. 방별 lock은 commit까지 누적된다. 용량이 부족한 대규모 대상은 별도 배치 절차 승인 전 실행하지 않는다(`supabase/tests/S3-A-REPORT.md`의 운영 제한 참조).
+- [ ] **다계정 추측 잔여 위험:** 32^6 코드 공간과 계정당200회/일 제한만으로 다계정 합산 추측을 막을 수 없다. 가입 남용 제한과 다계정/분산 요청·실패율·잠금 비율 알람을 확인한다. 현재 DB 구현을 IP 제한으로 설명하지 않는다.
+- [ ] **REST 본문 크기 제한:** DB 도달 전 gateway/프록시의 적용 계층·허용 byte 수·초과 요청 거절과 direct REST/RPC 우회 경로를 확인한다. SQL 코드 입력64byte 제한은 전체 HTTP 본문 제한을 대신하지 않는다. 상한·적용 위치는 아직 미확정이므로 임의 수치로 완료 처리하지 않는다.
+
+### 보류 파일 적용 조건과 순서 (각 외부 변경 별도 사용자 승인)
+
+1. **`supabase/release/s3_schedule_cleanup.sql`: 예약 등록·관측.** 준비5개와 역할/ACL 검증, pg_cron 준비 및 중복 job 부재를 확인하고 cleanup OFF에서 `postgres`가 등록한다. 호스티드 superuser를 요구하지 않으며 고정 command는 NOLOGIN worker 소유 `private.run_s3_job_v1(text)`만 호출한다. `s3-room-expiry-v1`·`s3-transfer-expiry-v1`은 매분, `s3-ephemeral-purge-v1`은 5분마다 실행한다. 세 job의 username·database·command·schedule·active와 실제 성공 기록을 검증하고 관측 시작 시각을 남긴다. OFF 상태의 성공은 실제 데이터 삭제 증거가 아니다.
+2. **`supabase/release/s3_activate_lifecycle.sql`: D8·D10·D11·capability 활성화.** 위 베타/D10/D11 증거, scheduler 성공 관측, 직전 Q1 기대11개 건수, 승인된 고정 전환 마감일을 모두 확인한 후 실행한다. 세션 입력은 `mealchat.s3.beta_artifact_sha256`, `mealchat.s3.beta_version`, `mealchat.s3.transition_at`, `mealchat.s3.scheduler_observed_after`, `mealchat.s3.expected_inventory`다. table lock 뒤 기대 건수가 다르거나 writer advisory가 바쁘면 전체 중단한다. 성공하면 D8 단축·legacy 교체·R1/직접 INSERT 회수·새 grant·capability가 한 transaction으로 반영되며 **cleanup은 OFF로 남는다.**
+3. **활성화 후 정리 시작 전 확인:** S4/S3 기능·멤버십 격리·신구 앱·ACL·security advisors를 확인하고 활성화 영수증 `activated_at`을 기록한다. release gate의 활성화 전 S4 503건, 후495건/정확한 구 계약 예상 실패8건 목록을 기준으로 예상 외 실패를 차단한다. **이 간격에는 만료 방의 접근만 닫히고 S3 예약 정리로 물리 삭제되지 않는다.** 보관 위험·간격·시작 시각을 검토하여 이 상태를 무기한 두지 않는다. 방장의 허용된 즉시 종료는 별도 사용자 동작이다.
+4. **`supabase/release/s3_start_cleanup.sql`: 파괴적 정리 시작.** 활성화 후 검증과 삭제 범위 승인이 끝나면 정확한 `activated_at` 영수증을 `mealchat.s3.cleanup_approved_activation`에 입력하여 별도 실행한다. 그 뒤 실제 background 삭제·위임 만료·임시 자료 정리, 실패 건수·가장 오래 지난 기한·cron 지연 알람을 확인한다. 정산 snapshot은 방/채팅과 별도로 보존되는지 검증한다. 만료 시점의 접근 차단을 물리 삭제 시각·앱 캐시·백업 삭제 증거로 확대하지 않는다.
+
+### D9 처리방침 문구 초안 — 사용자 승인 필요
+
+현재 `src/legal/privacy.ts`의 “채팅 기록: 방이 사라질 때(정산 뒤 24시간)까지”를 대신할 **미승인 초안**이다. 이번 작업에서는 법률 원문을 변경하지 않는다. 최종 문안·예고·시행일·재동의 검토를 승인받은 뒤 별도 작업으로 원문·canonical/hash·앱/서버 문서 일치를 처리한다.
+
+- **짧은 안 (2문장):** 채팅 기록은 기본적으로 방 생성 후 7일까지 보관하고, 정산을 모두 마치면 완료 후 24시간과 최초 약속 확정 후 30일 중 먼저 오는 때까지 보관해요. 재정산을 시작하면 시작 후 7일과 같은 30일 상한 중 먼저 오는 때로 기한을 다시 정하고 만료 후 예약 정리하며, 미완료 정산이 없는 방을 방장이 종료하면 즉시 삭제해요.
+- **자세한 안 (2문장):** 채팅 기록의 기본 기한은 방 생성 후 7일이며 첫 정산을 시작해도 이 기한을 자동으로 늘리지 않고, 모든 열린 정산이 완료되면 완료 후 24시간과 최초 약속 확정 후 30일 중 먼저 오는 때로, 재정산을 시작하면 그 시작 후 7일과 최초 약속 확정 후 30일 중 먼저 오는 때로 기한을 다시 정해요. 기한이 지나면 방 접근을 닫고 예약된 정리 작업으로 채팅을 삭제하며, 미완료 정산이 없는 방을 방장이 종료하면 정리 작업을 기다리지 않고 방과 채팅을 즉시 삭제하고 정산 기록은 별도로 보관해요.
+
 ## Develop 커밋 후 주의
 
 **운영 반영 승인 전까지 Develop에서 `supabase db push`는 금지한다.** M7이 빠진 채 M6의 필수 약관 gate만 적용되면 유효한 current bundle이 없어 S1006으로 전체 서비스 접근이 차단된다. M1~M6만 먼저 배포하지 않는다.

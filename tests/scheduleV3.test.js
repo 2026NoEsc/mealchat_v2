@@ -1,6 +1,7 @@
 const React = require('react');
 // Keep the existing cases as pre-S4 compatibility regressions; s4App covers the new contract.
 jest.mock('../src/lib/useRoomDecision', () => ({ useRoomDecision: () => ({ mode: 'legacy', data: null, error: null, loading: false, reload: jest.fn() }) }));
+jest.mock('../src/lib/roomLifecycle', () => ({ ...jest.requireActual('../src/lib/roomLifecycle'), fetchS3Capabilities: jest.fn(async () => ({ mode: 'legacy', error: null })) }));
 const { act, create } = require('react-test-renderer');
 const { AppState, BackHandler, Linking, Platform, Pressable, StyleSheet, Text, TextInput, View } = require('react-native');
 

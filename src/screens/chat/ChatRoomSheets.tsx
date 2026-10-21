@@ -20,6 +20,8 @@ import { settlementCompletionError } from '../../lib/settlementAccess';
 import type { RoomParticipant, RoomStage } from '../../lib/rooms';
 import { canStartSettlement, settlementConfirmationRequired, unverifiedSettlementLabel } from '../../lib/roomSettlementPolicy';
 import { canEditSettlement, createRoomSettlement, fetchRoomSettlements, setSettlementCompleted, type Settlement, type SettlementMember } from '../../lib/settlements';
+import { createRoomSettlementWithSnapshot, prepareRoomSettlement, settlementRecipientNotice } from '../../lib/roomLifecycleController';
+import { fetchS3Capabilities } from '../../lib/roomLifecycle';
 import { pickActiveSettlement } from '../../lib/settlementSummary';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useMyProfile } from '../../profile/useMyProfile';
@@ -96,7 +98,24 @@ export function SettlementSheet({ visible, roomId, roomStage = null, appointment
     try {
       if (!mounted.current || currentRoom.current !== roomId || currentUser.current !== user?.id) return;
       if (!settlement && !canStartSettlement(currentStage.current, currentOwnerConfirmed.current)) return;
-      const { billId, error } = await createRoomSettlement({ roomId, title: '식사 정산', amount, bankName, accountNumber, accountHolder: bundle?.profile.name ?? null });
+      const payload = { roomId, title: '식사 정산', amount, bankName, accountNumber, accountHolder: bundle?.profile.name ?? null };
+      let billId: string | null = null;
+      let error: Error | null = null;
+      const support = await fetchS3Capabilities();
+      if (support.mode === 's3') {
+        const prep = await prepareRoomSettlement(roomId);
+        if (prep.error || !prep.data) {
+          error = prep.error ?? new Error('정산 대상을 확인하지 못했어요.');
+        } else {
+          const res = await createRoomSettlementWithSnapshot(payload, prep.data.revision);
+          billId = res.data?.id ?? null;
+          error = res.error;
+        }
+      } else {
+        const res = await createRoomSettlement(payload);
+        billId = res.billId;
+        error = res.error;
+      }
       if (currentRoom.current !== roomId || currentUser.current !== user?.id) return;
       if (error) { if (mounted.current) {
         notify('정산 요청 실패', settlementUiError(error));
@@ -154,6 +173,13 @@ export function SettlementSheet({ visible, roomId, roomStage = null, appointment
       {/* [결정] S6 금액 수정 UI는 숨긴다. 기존 정산은 금액을 읽기 전용으로 보여 준다. */}
       <View style={styles.amountField}><Text style={styles.label}>총 결제금액</Text><View style={styles.amountBox}>{settlement ? <Text style={styles.amountInput}>{formatAmount(settlement.totalAmount)}</Text> : <><TextInput accessibilityLabel="총 결제금액" value={amountText.replace(/[^0-9]/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, ',')} onChangeText={setAmountText} editable={editable && !busy && loadStatus === 'ready'} keyboardType="number-pad" placeholder="0" placeholderTextColor={colors.sub} style={styles.amountInput} /><Text style={styles.unit}>원</Text></>}</View></View>
       {/* TODO(서버 단계): 영수증 인식 기능이 없어 촬영/자동 입력 버튼을 표시하지 않는다. */}
+      {/* [결정] S3 SD01 / S3-design.md:75: 정산 대상 안내 문구 */}
+      {!settlement && editable ? (
+        <View style={styles.account}>
+          <Info size={16} color={colors.sub} />
+          <Text style={styles.note}>{settlementRecipientNotice}</Text>
+        </View>
+      ) : null}
       <View><Text style={styles.sectionTitle}>{settlement ? '정산 현황' : `참여 멤버 ${settlementParticipants.length}명`}</Text>
         {settlement ? members.map(member => <SettleMember key={member.id} layout="row" name={member.name} seed={member.profileId ?? member.id} completed={member.isCompleted} mine={member.profileId === user?.id} disabled={busy || finished || (disclosureClosed && member.isCompleted) || loadStatus !== 'ready' || member.profileId !== user?.id} onPress={member.profileId === user?.id ? () => void toggleMine(member) : undefined} />)
           : settlementParticipants.length ? settlementParticipants.map(member => <View key={member.id} style={styles.member} accessible accessibilityLabel={member.name + ', 정산 참여 · 선택 변경 불가'}><Avatar name={member.name} seed={member.profileId ?? member.id} url={member.avatarUrl} size={32} /><Text style={styles.memberName}>{member.name}{member.profileId === user?.id ? ' (나)' : ''}</Text><View style={styles.checkArea}><View style={styles.check}><Check size={16} color={colors.ink} /></View></View></View>)
@@ -193,7 +219,7 @@ export function MembersSheet({ visible, participants, code, myId, ownerId = null
   };
   // One modal changes its contents, avoiding overlapping iOS sheet presentations.
   return <BottomSheet visible={visible} title={selected ? '' : inviting && canInvite ? '메이트 초대' : '멤버 ' + participants.length + '명'} subtitle={selected ? undefined : canInvite ? inviteSubtitle : '정산이 시작되어 메이트를 더 초대할 수 없어요.'} onClose={() => selected ? setSelection(null) : inviting ? setInviting(false) : onClose()}>
-    {selected ? <MateProfileSheet key={`${contextKey}:${selected.id}:${selected.profileId ?? ''}`} visible embedded profileId={selected.profileId} roomId={roomId} myId={myId} name={selected.name} avatarUrl={selected.avatarUrl} onClose={() => setSelection(null)} /> : inviting && canInvite && code ? <MateInviteContent code={code} /> : <>{canInvite ? <InviteCodeBox code={code} /> : null}<ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+    {selected ? <MateProfileSheet key={`${contextKey}:${selected.id}:${selected.profileId ?? ''}`} visible embedded profileId={selected.profileId} roomId={roomId} myId={myId} name={selected.name} avatarUrl={selected.avatarUrl} onClose={() => setSelection(null)} /> : inviting && canInvite && code ? <MateInviteContent code={code} roomId={roomId ?? undefined} /> : <>{canInvite ? <InviteCodeBox code={code} /> : null}<ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
       {participants.length === 0 ? <Text style={styles.note}>참여 멤버를 불러오지 못했어요</Text> : participants.map(participant => <RoomMemberRow key={participant.id} participant={participant} myId={myId} ownerId={ownerId} onPress={() => selectMember(participant)} />)}
     </ScrollView>{canInvite && code ? <Button variant="secondary" label="＋ 메이트 초대" onPress={() => setInviting(true)} /> : null}</>}
   </BottomSheet>;

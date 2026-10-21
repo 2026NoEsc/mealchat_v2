@@ -1,4 +1,4 @@
-import { CalendarDays, ChevronLeft, Info, MapPin, Plus, Trash2 } from 'lucide-react-native';
+import { CalendarDays, ChevronLeft, Crown, Info, LogOut, MapPin, Plus, Trash2 } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useAuth } from '../../auth/AuthProvider';
@@ -10,12 +10,26 @@ import MateProfileSheet from '../../components/ui/MateProfileSheet';
 import { meetingTimeLabel } from '../../components/ui/MeetingCard';
 import RoomMemberRow from '../../components/ui/RoomMemberRow';
 import RoomTimer from '../../components/ui/RoomTimer';
+import {
+  createRoomLifecycleController,
+  type RoomLifecycleView,
+} from '../../lib/roomLifecycleController';
+import {
+  fetchS3Capabilities,
+  registerRoomLifecycleResources,
+  roomLifecycleErrorMessage,
+  lifecycleError,
+  subscribeRoomLifecycle,
+} from '../../lib/roomLifecycle';
 import { canInviteToRoom } from '../../lib/roomMembership';
 import type { RoomParticipant } from '../../lib/rooms';
 import { leaveRoom } from '../../lib/rooms';
 import { unverifiedSettlementLabel } from '../../lib/roomSettlementPolicy';
 import { useNavigation } from '../../navigation/NavigationContext';
 import { useRoom } from '../../rooms/useMyRooms';
+import MemberLeaveDialog from '../room/MemberLeaveDialog';
+import OwnerTransferCard from '../room/OwnerTransferCard';
+import OwnerTransferSheet from '../room/OwnerTransferSheet';
 import { useTopInset } from '../../theme/insets';
 import { v3Layout } from '../../theme/scale';
 import { v3Colors as colors, v3FeedbackColors } from '../../theme/tokens';
@@ -47,30 +61,237 @@ export default function RoomDetailScreen() {
   const [selectedMate, setSelectedMate] = useState<RoomParticipant | null>(null);
   const canInvite = canInviteToRoom(room?.stage);
   useEffect(() => { if (!canInvite) setInviting(false); }, [canInvite]);
+
+  // S3 생명주기 컨트롤러 연결
+  const [s3Supported, setS3Supported] = useState<boolean | null>(null);
+  const [capabilityFailed, setCapabilityFailed] = useState(false);
+  const [probeAttempt, setProbeAttempt] = useState(0);
+  const [lifecycleView, setLifecycleView] = useState<RoomLifecycleView | null>(null);
+  const controllerRef = useRef<ReturnType<typeof createRoomLifecycleController> | null>(null);
+  const lastAction = useRef<'leave' | 'close' | null>(null);
+  const autoRefreshAllowed = useRef(false);
+  const lastTransfer = useRef<RoomLifecycleView['transferState']>(null);
+  const [lifecycleNotice, setLifecycleNotice] = useState<Error | null>(null);
+  const departedHandled = useRef(false);
+  const [busyAction, setBusyAction] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setS3Supported(null);
+    setCapabilityFailed(false);
+    void fetchS3Capabilities().then(cap => {
+      if (!active) return;
+      setS3Supported(cap.mode === 's3' ? true : cap.mode === 'legacy' ? false : null);
+      setCapabilityFailed(cap.mode === 'error');
+    }).catch(() => {
+      if (active) setCapabilityFailed(true);
+    });
+    return () => { active = false; };
+  }, [roomId, probeAttempt]);
+
+  useEffect(() => {
+    if (!roomId || s3Supported !== true) { lastTransfer.current = null; setLifecycleView(null); return; }
+    autoRefreshAllowed.current = false;
+    lastTransfer.current = null;
+    departedHandled.current = false;
+    lastAction.current = null;
+    setLifecycleNotice(null);
+    const controller = createRoomLifecycleController(roomId);
+    controllerRef.current = controller;
+    const unsubscribe = controller.subscribe(view => {
+      if (view.state) {
+        autoRefreshAllowed.current = true;
+        lastTransfer.current = view.transferState;
+        if (!view.pending && !view.error) setLifecycleNotice(null);
+      }
+      if (view.error) {
+        setLifecycleNotice(view.error);
+        if ((view.error as Error & { code?: string }).code === 'ACCOUNT_CHANGED') lastTransfer.current = null;
+      }
+      setLifecycleView(view);
+    });
+    const unregister = registerRoomLifecycleResources(roomId, {
+      invalidate: reload,
+      unsubscribe: () => {},
+    });
+    const unsubscribeInvalidation = subscribeRoomLifecycle(event => {
+      const view = controller.getState();
+      if (event.roomId === roomId && ['changed', 'uncertain'].includes(event.reason) && !view.pending && !view.departed) {
+        autoRefreshAllowed.current = true;
+        setLifecycleView(view);
+      }
+    });
+    void controller.refresh();
+    return () => {
+      unregister();
+      unsubscribeInvalidation();
+      unsubscribe();
+      controller.dispose();
+      controllerRef.current = null;
+    };
+  }, [roomId, reload, s3Supported]);
+
+  // [결정] 오류/외부 무효화 후 한 번 재조회. 재조회 실패는 명시 재시도로 남긴다.
+  useEffect(() => {
+    if (!busyAction && s3Supported && controllerRef.current && lifecycleView && lifecycleView.state === null && !lifecycleView.pending && !lifecycleView.departed && autoRefreshAllowed.current && (lifecycleView.error as (Error & { code?: string }) | null)?.code !== 'ACCOUNT_CHANGED') {
+      autoRefreshAllowed.current = false;
+      void controllerRef.current.refresh();
+    }
+  }, [busyAction, s3Supported, lifecycleView]);
+
+  useEffect(() => {
+    if (lifecycleView?.departed && roomId && !departedHandled.current) {
+      departedHandled.current = true;
+      if (lastAction.current === 'leave') {
+        resetTo('Home', { leftRoomId: roomId, leftRoomTitle: title });
+      } else if (lastAction.current === 'close') {
+        resetTo('Home', { deletedRoomId: roomId, deletedRoomTitle: title });
+      } else {
+        resetTo('Home');
+      }
+    }
+  }, [lifecycleView?.departed, roomId, resetTo, title]);
+
   const [deletionOpen, setDeletionOpen] = useState(false);
-  const [leaving, setLeaving] = useState(false);
   const [deletionError, setDeletionError] = useState<string | null>(null);
+  const [leaveOpen, setLeaveOpen] = useState(false);
+  const [leaveError, setLeaveError] = useState<string | null>(null);
+  const [transferOpen, setTransferOpen] = useState(false);
   const deleting = useRef(false);
+
+  // [결정] B2: 레거시 서버에서는 기존 settling 기준으로 방 없애기 비활성 결정, S3 활성화 시에는 서버 canClose 신뢰
+  const isCloseDisabled = busyAction || s3Supported === null || (s3Supported === true ? !lifecycleView?.canClose : settling);
+
   const openChatSheet = (openSheet: 'menu' | 'members') => { if (roomId && room && (openSheet !== 'menu' || room.stage === 'place')) navigate('ChatRoom', { roomId, title, openSheet }); };
+
   const confirmDeletion = async () => {
     if (!roomId || !user?.id || deleting.current) return;
     deleting.current = true;
-    setLeaving(true);
+    setBusyAction(true);
     setDeletionError(null);
+    lastAction.current = 'close';
     try {
-      const error = await leaveRoom(roomId);
-      if (error) { setDeletionError(roomDeletionErrorMessage(error)); return; }
-      setDeletionOpen(false);
-      // Existing success event: Home consumes this only after the real API succeeds.
-      resetTo('Home', { deletedRoomId: roomId, deletedRoomTitle: title });
-    } catch { setDeletionError('방을 없애지 못했어요. 잠시 후 다시 시도해 주세요.'); }
-    finally { deleting.current = false; setLeaving(false); }
+      if (s3Supported === null) {
+        setDeletionError('서버 상태를 확인한 뒤 다시 시도해 주세요.');
+        return;
+      }
+      if (s3Supported) {
+        if (!controllerRef.current?.getState().canClose) {
+          setDeletionError('현재 방 상태를 다시 확인한 뒤 시도해 주세요.');
+          return;
+        }
+        setLifecycleNotice(null);
+        await controllerRef.current.close();
+        const err = controllerRef.current.getState().error;
+        if (err) {
+          setDeletionError(roomLifecycleErrorMessage(err));
+          return;
+        }
+      } else {
+        const error = await leaveRoom(roomId);
+        if (error) { setDeletionError(roomDeletionErrorMessage(error)); return; }
+        setDeletionOpen(false);
+        resetTo('Home', { deletedRoomId: roomId, deletedRoomTitle: title });
+      }
+    } catch {
+      lastAction.current = null;
+      setDeletionError('방을 없애지 못했어요. 잠시 후 다시 시도해 주세요.');
+    } finally {
+      if (!controllerRef.current?.getState().departed || controllerRef.current.getState().error) lastAction.current = null;
+      deleting.current = false;
+      setBusyAction(false);
+    }
+  };
+
+  const confirmLeave = async () => {
+    if (!roomId || !user?.id || !controllerRef.current || deleting.current) return;
+    if (!controllerRef.current.getState().canLeave) {
+      setLeaveError('현재 방 상태를 다시 확인한 뒤 시도해 주세요.');
+      return;
+    }
+    deleting.current = true;
+    setLifecycleNotice(null);
+    setBusyAction(true);
+    setLeaveError(null);
+    lastAction.current = 'leave';
+    try {
+      await controllerRef.current.leave();
+      const err = controllerRef.current.getState().error;
+      if (err) {
+        setLeaveError(roomLifecycleErrorMessage(err));
+        return;
+      }
+    } catch (err: unknown) {
+      lastAction.current = null;
+      setLeaveError(roomLifecycleErrorMessage(err));
+    } finally {
+      if (!controllerRef.current?.getState().departed || controllerRef.current.getState().error) lastAction.current = null;
+      deleting.current = false;
+      setBusyAction(false);
+    }
+  };
+
+  const runTransferAction = async (run: (controller: ReturnType<typeof createRoomLifecycleController>) => Promise<void>) => {
+    const controller = controllerRef.current;
+    if (!controller) throw lifecycleError('S4005');
+    let applied = false;
+    // action()은 mutation 성공 후에만 state=null/pending=true인 refresh 단계로 진입한다.
+    const unsubscribe = controller.subscribe(view => {
+      if (view.pending && view.state === null) applied = true;
+    });
+    setBusyAction(true);
+    setLifecycleNotice(null);
+    try {
+      await run(controller);
+      const err = controller.getState().error;
+      if (err && !applied) throw err;
+      if (err) autoRefreshAllowed.current = false;
+    } finally { unsubscribe(); setBusyAction(false); }
+  };
+
+  const handleRequestTransfer = async (targetProfileId: string, leaveAfterAccept: boolean) => {
+    if (!controllerRef.current?.getState().canTransfer) throw lifecycleError('S3003');
+    await runTransferAction(controller => controller.requestTransfer(targetProfileId, leaveAfterAccept));
+  };
+
+  const handleCancelTransfer = async () => {
+    const view = controllerRef.current?.getState();
+    if (!controllerRef.current || !view?.state || view.pending || !view.transferState?.id) throw lifecycleError('S4005');
+    await runTransferAction(controller => controller.cancelTransfer(view.transferState!.id));
+  };
+
+  const handleRespondTransfer = async (accept: boolean) => {
+    const view = controllerRef.current?.getState();
+    if (!controllerRef.current || !view?.state || view.pending || !view.transferState?.id) throw lifecycleError('S4005');
+    await runTransferAction(controller => controller.respondTransfer(view.transferState!.id, accept));
   };
   return <View style={styles.screen}>
     <View style={{ height: topInset }} />
     <View style={styles.header}><Pressable accessibilityRole="button" accessibilityLabel="뒤로" style={styles.iconButton} onPress={goBack}><ChevronLeft size={24} color={colors.ink} /></Pressable><Text style={styles.headerTitle}>방 상세정보</Text></View>
     <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
       {status === 'error' ? <FailureCard title="방 정보를 불러오지 못했어요" reason="잠시 후 다시 시도해 주세요." icon={<Info size={26} color={colors.sub} />} onRetry={reload} /> : null}
+      {capabilityFailed ? <FailureCard title="서버 상태를 확인하지 못했어요" reason="잠시 후 다시 시도해 주세요." icon={<Info size={26} color={colors.sub} />} onRetry={() => setProbeAttempt(value => value + 1)} /> : null}
+      {s3Supported && (lifecycleView?.error || lifecycleNotice) ? (
+        <FailureCard
+          title="방 상태를 불러오지 못했어요"
+          reason={roomLifecycleErrorMessage(lifecycleView?.error ?? lifecycleNotice)}
+          icon={<Info size={26} color={v3FeedbackColors.error} />}
+          onRetry={() => {
+            if (controllerRef.current?.getState().pending) return;
+            setLifecycleNotice(null); autoRefreshAllowed.current = false; void controllerRef.current?.refresh();
+          }}
+        />
+      ) : null}
+      {/* [결정] S3 D2 A: 동의 기반 방장 위임 상태 카드 */}
+      {(lifecycleView?.state ? lifecycleView.transferState : lastTransfer.current) ? (
+        <OwnerTransferCard
+          transfer={lifecycleView?.state ? lifecycleView.transferState : lastTransfer.current}
+          myId={user?.id ?? null}
+          participants={members}
+          onCancel={handleCancelTransfer}
+          onRespond={handleRespondTransfer}
+        />
+      ) : null}
       {/* [결정] Figma 528:1533 / 561:1742: 초대 코드 영역 클릭 시 메이트 초대 시트(MateInviteSheet) 오픈 연결 */}
       {canInvite || !room ? (
         <Pressable
@@ -134,15 +355,59 @@ export default function RoomDetailScreen() {
       </View>
       {/* [결정] leave_room은 settling에서만 막으므로, 다른 단계에 정산 완료 조건을 안내하지 않는다. */}
       {isOwner ? <>
-        <Pressable accessibilityRole="button" accessibilityLabel="방 없애기" accessibilityState={{ disabled: leaving || settling }} disabled={leaving || settling}
-          onPress={() => { setDeletionError(null); setDeletionOpen(true); }} style={[styles.delete, (leaving || settling) && styles.disabled]}>
+        {/* [결정] S3 D2 A: 동의 기반 방장 위임 버튼 */}
+        {lifecycleView?.canTransfer ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="방장 넘기기"
+            accessibilityState={{ disabled: busyAction || !lifecycleView.canTransfer }}
+            disabled={busyAction || !lifecycleView.canTransfer}
+            onPress={() => setTransferOpen(true)}
+            style={[styles.transferButton, (busyAction || !lifecycleView.canTransfer) && styles.disabled]}
+          >
+            <Crown size={18} color={colors.primary} />
+            <Text style={styles.transferButtonText}>방장 넘기기</Text>
+          </Pressable>
+        ) : null}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="방 없애기"
+          accessibilityState={{ disabled: isCloseDisabled }}
+          disabled={isCloseDisabled}
+          onPress={() => { setDeletionError(null); setDeletionOpen(true); }}
+          style={[styles.delete, isCloseDisabled && styles.disabled]}
+        >
           <Trash2 size={18} color={v3FeedbackColors.error} /><Text style={styles.deleteText}>방 없애기</Text>
         </Pressable>
-        <View style={styles.hintRow}><Info size={16} color={colors.sub} /><Text style={styles.hint}>{settling ? '정산이 끝나면 없앨 수 있어요.' : '방을 없애면 메이트 모두에게서 방이 사라져요. 정산 내역은 남아 있어요.'}</Text></View>
-      </> : room ? <Text style={styles.hint}>방은 방장만 없앨 수 있어요.</Text> : null}
-      {/* TODO(서버 단계): 메이트의 방 나가기 계약이 없으므로 버튼을 표시하지 않는다. */}
+        <View style={styles.hintRow}><Info size={16} color={colors.sub} /><Text style={styles.hint}>{settling ? '정산이 끝나면 없앨 수 있어요.' : '방을 없애면 메이트 모두에게서 방과 모든 사람의 채팅이 사라져요. 정산 내역은 남아 있어요.'}</Text></View>
+      </> : (
+        /* S3 SD01 / Figma 561:1885: 메이트 방 나가기 버튼 (canLeave가 참일 때만 노출, 레거시·미지원 시 숨김) */
+        lifecycleView?.canLeave ? (
+          <>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="방 나가기"
+              accessibilityState={{ disabled: busyAction || !lifecycleView.canLeave }}
+              disabled={busyAction || !lifecycleView.canLeave}
+              onPress={() => { setLeaveError(null); setLeaveOpen(true); }}
+              style={[styles.delete, (busyAction || !lifecycleView.canLeave) && styles.disabled]}
+            >
+              <LogOut size={18} color={v3FeedbackColors.error} />
+              <Text style={styles.deleteText}>방 나가기</Text>
+            </Pressable>
+            <View style={styles.hintRow}>
+              <Info size={16} color={colors.sub} />
+              <Text style={styles.hint}>
+                {room?.stage === 'confirmed'
+                  ? '정산 요청 전에 나가면 이 밥약 정산에서 빠져요.'
+                  : '방에서 나가면 대화 내용과 약속 정보를 더 이상 볼 수 없어요.'}
+              </Text>
+            </View>
+          </>
+        ) : (room ? <Text style={styles.hint}>방은 방장만 없앨 수 있어요.</Text> : null)
+      )}
     </ScrollView>
-    {canInvite && room?.code ? <MateInviteSheet visible={inviting} code={room.code} onClose={() => setInviting(false)} /> : null}
+    {canInvite && room?.code ? <MateInviteSheet visible={inviting} roomId={roomId ?? undefined} code={lifecycleView?.state?.invite?.code ?? room.code} expiresAt={lifecycleView?.state?.invite?.expires_at} onClose={() => setInviting(false)} /> : null}
     <MateProfileSheet
       visible={Boolean(selectedMate)}
       profileId={selectedMate?.profileId ?? null}
@@ -156,7 +421,33 @@ export default function RoomDetailScreen() {
         navigate('Profile');
       }}
     />
-    <DestructiveDialog visible={deletionOpen} busy={leaving} error={deletionError} onClose={() => setDeletionOpen(false)} onConfirm={() => void confirmDeletion()} />
+    <OwnerTransferSheet
+      visible={transferOpen}
+      roomId={roomId ?? ''}
+      stage={room?.stage}
+      myId={user?.id ?? null}
+      participants={members}
+      onClose={() => setTransferOpen(false)}
+      onSubmit={handleRequestTransfer}
+    />
+    <MemberLeaveDialog
+      visible={leaveOpen}
+      busy={busyAction}
+      stage={room?.stage}
+      roomTitle={title}
+      error={leaveError}
+      onClose={() => setLeaveOpen(false)}
+      onConfirm={() => void confirmLeave()}
+    />
+    <DestructiveDialog
+      visible={deletionOpen}
+      busy={busyAction}
+      error={deletionError}
+      title="방을 없앨까요?"
+      description={"메이트 모두에게서 방과 모든 사람의 채팅이 사라져요.\n정산 내역은 남아 있어요." + (lifecycleView?.transferState?.status === 'pending' ? '\n대기 중인 방장 넘기기도 취소돼요.' : '')}
+      onClose={() => setDeletionOpen(false)}
+      onConfirm={() => void confirmDeletion()}
+    />
   </View>;
 }
 const styles = StyleSheet.create({
@@ -178,6 +469,8 @@ const styles = StyleSheet.create({
   memberHead: { flexDirection: 'row', alignItems: 'center' },
   cardTitle: { flex: 1, fontFamily: fontFamily.bold, fontSize: 15, lineHeight: 22, color: colors.ink },
   invite: { minHeight: v3Layout.minTouchTarget, paddingHorizontal: 8, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  transferButton: { minHeight: v3Layout.buttonHeight, borderWidth: 1.5, borderColor: colors.primary, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.surface },
+  transferButtonText: { fontFamily: fontFamily.bold, fontSize: 16, lineHeight: 24, color: colors.primary },
   delete: { minHeight: v3Layout.buttonHeight, borderWidth: 1.5, borderColor: v3FeedbackColors.error, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.surface },
   deleteText: { fontFamily: fontFamily.bold, fontSize: 16, lineHeight: 24, color: v3FeedbackColors.error },
   hintRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },

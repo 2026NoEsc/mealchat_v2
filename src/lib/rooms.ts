@@ -9,6 +9,7 @@ import {
 import { supabase } from './supabase';
 import { fetchS4Capabilities } from './roomDecisions';
 import { normalizeMeetingTime, type MeetingTime } from './meetingTime';
+import { createLifecycleRoom, fetchS3Capabilities, lifecycleError, roomLifecycleReadToken } from './roomLifecycle';
 
 export type RoomParticipant = {
   id: string;
@@ -64,6 +65,8 @@ export type RoomMessage = {
   createdAt: string;
   /** system 은 방에서 일어난 일의 안내다. 사람이 보낼 수 없다 */
   kind: 'user' | 'system';
+  /** Only S3 structured events can be treated as verified lifecycle facts. */
+  lifecycleEvent?: { actorId: string | null; actorName: string; type: string; transferId: string | null } | null;
 };
 
 export type RoomInvitation = {
@@ -116,6 +119,9 @@ type MessageRow = {
   message: string;
   created_at: string;
   kind: string | null;
+  lifecycle_actor_id?: string | null;
+  lifecycle_event_type?: string | null;
+  event_key?: string | null;
 };
 
 /** 예전에 만들어진 방에는 stage 가 없을 수 있다 — 기본값으로 읽는다 */
@@ -204,6 +210,8 @@ async function attachAvatars(rooms: RoomSummary[]): Promise<void> {
  * 사용자가 자기 방을 못 보면 안 된다.
  */
 async function sweepExpiredRooms(): Promise<void> {
+  const support = await fetchS3Capabilities();
+  if (support.mode !== 'legacy') return;
   await supabase.rpc('delete_expired_rooms');
 }
 
@@ -222,6 +230,7 @@ export async function fetchMyRooms(): Promise<{
   data: RoomSummary[] | null;
   error: Error | null;
 }> {
+  const token = roomLifecycleReadToken();
   const support = await fetchS4Capabilities();
   if (support.mode === 'error') return { data: null, error: support.error };
   const mode = support.mode;
@@ -272,6 +281,7 @@ export async function fetchMyRooms(): Promise<{
   if (invalidRows && !rooms.length) return { data: null, error: new Error('밥약 시간을 확인하지 못했어요. 다시 불러와 주세요.') };
 
   await attachAvatars(rooms);
+  if (token !== roomLifecycleReadToken()) return { data: null, error: lifecycleError('ROOM_CHANGED') };
 
   return { data: rooms, error: null };
 }
@@ -281,6 +291,7 @@ export async function fetchRoom(roomId: string): Promise<{
   data: RoomSummary | null;
   error: Error | null;
 }> {
+  const token = roomLifecycleReadToken();
   const support = await fetchS4Capabilities();
   if (support.mode === 'error') return { data: null, error: support.error };
   const { data, error } = await supabase
@@ -318,6 +329,7 @@ export async function fetchRoom(roomId: string): Promise<{
   };
 
   await attachAvatars([room]);
+  if (token !== roomLifecycleReadToken()) return { data: null, error: lifecycleError('ROOM_CHANGED') };
 
   return { data: room, error: null };
 }
@@ -326,14 +338,25 @@ export async function fetchRoomMessages(roomId: string): Promise<{
   data: RoomMessage[] | null;
   error: Error | null;
 }> {
+  const token = roomLifecycleReadToken();
+  const support = await fetchS3Capabilities();
+  // Probe failures only disable verified lifecycle projection; basic chat remains readable.
   const { data, error } = await supabase
     .from('messages')
-    .select('id, room_id, sender_id, sender_name, sender_color, message, created_at, kind')
+    .select('id, room_id, sender_id, sender_name, sender_color, message, created_at, kind' + (support.mode === 's3' ? ', lifecycle_actor_id, lifecycle_event_type, event_key' : ''))
     .eq('room_id', roomId)
     .order('created_at', { ascending: true })
     .returns<MessageRow[]>();
 
   if (error) return { data: null, error };
+
+  const actorIds = [...new Set((data ?? []).flatMap(row => row.lifecycle_actor_id ? [row.lifecycle_actor_id] : []))];
+  const actorNames = new Map<string, string>();
+  if (support.mode === 's3' && actorIds.length) {
+    const projection = await supabase.from('public_profiles').select('id, name').in('id', actorIds).returns<{ id: string; name: string }[]>();
+    if (!projection.error) for (const actor of projection.data ?? []) actorNames.set(actor.id, actor.name);
+  }
+  if (token !== roomLifecycleReadToken()) return { data: null, error: lifecycleError('ROOM_CHANGED') };
 
   return {
     data: (data ?? []).map((row) => ({
@@ -346,6 +369,7 @@ export async function fetchRoomMessages(roomId: string): Promise<{
       createdAt: row.created_at,
       /* 모르는 값이 오면 사람 말로 다룬다 — 시스템 줄로 잘못 꾸미는 쪽이 더 나쁘다 */
       kind: row.kind === 'system' ? 'system' : 'user',
+      lifecycleEvent: lifecycleMessageEvent(row, support.mode === 's3', actorNames),
     })),
     error: null,
   };
@@ -376,6 +400,9 @@ export async function joinRoomByCode(code: string): Promise<{
   roomId: string | null;
   error: Error | null;
 }> {
+  const support = await fetchS3Capabilities();
+  if (support.mode === 'error') return { roomId: null, error: support.error };
+  if (support.mode === 's3') return { roomId: null, error: lifecycleError('PREVIEW_REQUIRED') };
   const trimmed = code.trim().toUpperCase();
   if (!trimmed) return { roomId: null, error: new Error('초대 코드를 입력해 주세요.') };
 
@@ -386,10 +413,7 @@ export async function joinRoomByCode(code: string): Promise<{
 }
 
 /**
- * 방 나가기.
- *
- * 참가행만 지우면 방이 목록에 남을 수 있어 RPC 로 옮겼다. 참가자에서 빼고,
- * 마지막 사람이었으면 방까지 한 트랜잭션으로 지운다.
+ * 레거시 방장 종료 전용. 일반 메이트 나가기는 leaveRoomMember를 사용한다.
  */
 export async function leaveRoom(roomId: string): Promise<Error | null> {
   const { error } = await supabase.rpc('leave_room', { target_room: roomId });
@@ -450,6 +474,12 @@ export async function createRoom(input: {
   locationName?: string | null;
   color?: string;
 }): Promise<{ roomId: string | null; code: string | null; error: Error | null }> {
+  const support = await fetchS3Capabilities();
+  if (support.mode === 'error') return { roomId: null, code: null, error: support.error };
+  if (support.mode === 's3') {
+    const result = await createLifecycleRoom(input.title, input.color ?? '#23A455');
+    return { roomId: result.data?.roomId ?? null, code: result.data?.code ?? null, error: result.error };
+  }
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const code = randomCode();
     /*
@@ -488,6 +518,21 @@ export async function createRoom(input: {
   }
 
   return { roomId: null, code: null, error: new Error('초대 코드를 만들지 못했어요. 다시 시도해 주세요.') };
+}
+
+/** No historical system message is upgraded to a verified S3 event. */
+function lifecycleMessageEvent(row: MessageRow, supported: boolean, names: Map<string, string>): RoomMessage['lifecycleEvent'] {
+  if (!supported || row.kind !== 'system' || row.sender_id !== null || !row.lifecycle_event_type || !row.event_key) return null;
+  // Accept historical keys and the collision-safe room/actor scoped namespace.
+  const scoped = /^(member-left|owner-transfer):([0-9a-f-]{36}):([0-9a-f-]{36}|server):(.+)$/i.exec(row.event_key);
+  // ON DELETE SET NULL removes the actor reference, while an immutable event
+  // key can still carry its original UUID. Keep that historical fact readable.
+  if (scoped && (scoped[2] !== row.room_id || (row.lifecycle_actor_id !== null && scoped[3] !== row.lifecycle_actor_id))) return null;
+  const key = scoped ? `${scoped[1]}:${scoped[4]}` : row.event_key;
+  const member = ['member_left', 'member_left_confirmed'].includes(row.lifecycle_event_type) && /^member-left:[0-9a-f-]{36}$/i.test(key);
+  const transfer = /^owner-transfer:([0-9a-f-]{36}):(pending|accepted|declined|cancelled|expired)$/i.exec(key);
+  if (!member && (!transfer || row.lifecycle_event_type !== `owner_transfer_${transfer[2]}`)) return null;
+  return { actorId: row.lifecycle_actor_id ?? null, actorName: row.lifecycle_actor_id === null ? '탈퇴한 메이트' : names.get(row.lifecycle_actor_id ?? '') ?? '메이트', type: row.lifecycle_event_type, transferId: transfer?.[1] ?? null };
 }
 
 export { effectiveInvitationStatus } from './roomInvitationState';

@@ -1,5 +1,14 @@
 const React = require('react');
+jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
+jest.mock('../src/lib/supabase', () => ({
+  supabase: {
+    from: jest.fn(),
+    rpc: jest.fn(async () => ({ data: null, error: { code: 'PGRST202' } })),
+    auth: { getSession: jest.fn(async () => ({ data: { session: null }, error: null })) },
+  },
+}));
 jest.mock('../src/lib/roomDecisions', () => ({ ...jest.requireActual('../src/lib/roomDecisions'), fetchS4Capabilities: jest.fn(async () => ({ mode: 'legacy', error: null })) }));
+jest.mock('../src/lib/roomLifecycle', () => ({ fetchS3Capabilities: jest.fn(async () => ({ mode: 'legacy', error: null })) }));
 const { act, create } = require('react-test-renderer');
 const { AccessibilityInfo, Animated, BackHandler, Clipboard, Linking, Modal, Platform, StyleSheet, Text, TextInput } = require('react-native');
 jest.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }), SafeAreaProvider: ({ children }) => children }));
@@ -146,6 +155,7 @@ it('closes a rejected S4 membership code entry with a safe explanation and no fa
   await act(async () => root.findByType(TextInput).props.onChangeText('TEST42')); await press(root, '입장');
   expect(onClose).toHaveBeenCalledTimes(1); expect(onJoined).not.toHaveBeenCalled();
   expect(onMembershipClosed).toHaveBeenCalledTimes(1);
+  // [결정] 레거시 멤버십 마감(isRoomMembershipClosed) 거절 시 시트를 닫으며 입력값을 비운다.
   expect(root.findByType(TextInput).props.value).toBe('');
   expect(notify).toHaveBeenCalledWith('입장할 수 없어요', require('../src/lib/roomMembership').membershipClosedMessage);
 });
