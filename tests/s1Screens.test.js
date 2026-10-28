@@ -110,5 +110,5 @@ it('shows only gate-exempt controls on status failure and exposes an honest S2 d
   expect(button('동의하고 계속하기').props.disabled).toBe(true);
   expect(button('건강정보 동의하기')).toBeUndefined(); expect(button('건강정보 동의 철회')).toBeDefined();
   expect(button('나중에 하기 (로그아웃)')).toBeDefined();
-  await press('계정 삭제 안내'); expect(output()).toContain('아직 계정을 삭제하지 않았어요'); expect(button('계정 삭제')).toBeUndefined();
+  await press('계정 삭제 안내'); expect(output()).toContain('아직 계정을 삭제하지 않았어요'); expect(renderer.root.findAll(node => node.props.accessibilityLabel === '계정 삭제' && node.props.accessibilityRole === 'button')[0].props.accessibilityState.disabled).toBe(true);
 });

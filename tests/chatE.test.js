@@ -1,4 +1,7 @@
 const React = require('react');
+jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
+jest.mock('react-native-webview', () => ({ WebView: () => null }));
+jest.mock('../src/screens/food/FoodProfilePrompt', () => () => null);
 jest.mock('../src/lib/useRoomDecision', () => ({ useRoomDecision: () => ({ mode: 'legacy', data: null, error: null, loading: false, reload: jest.fn() }) }));
 jest.mock('../src/lib/roomDecisions', () => ({ ...jest.requireActual('../src/lib/roomDecisions'), fetchS4Capabilities: jest.fn(async () => ({ mode: 'legacy', error: null })) }));
 jest.mock('../src/lib/roomLifecycle', () => ({ ...jest.requireActual('../src/lib/roomLifecycle'), fetchS3Capabilities: jest.fn(async () => ({ mode: 'legacy', error: null })) }));
@@ -17,7 +20,7 @@ jest.mock('../src/lib/rooms', () => ({ sendRoomMessage: jest.fn(), sendRoomStick
 jest.mock('../src/lib/voting', () => ({ fetchRoomVoting: jest.fn(), confirmRoomVote: jest.fn(), addVotingItem: jest.fn(), removeVotingItem: jest.fn(), toggleVote: jest.fn() }));
 jest.mock('../src/lib/supabase', () => ({ supabase: { functions: { invoke: jest.fn() }, from: jest.fn(), rpc: jest.fn() } }));
 jest.mock('../src/lib/placeCandidates', () => ({ buildPlaceCandidates: jest.fn() }));
-jest.mock('../src/lib/settlements', () => ({ ...jest.requireActual('../src/lib/settlementAccess'), fetchRoomSettlements: jest.fn(), createRoomSettlement: jest.fn(), setSettlementCompleted: jest.fn(), fetchSettlementPaymentDetails: jest.fn(), subscribeSettlementPayments: () => () => {} }));
+jest.mock('../src/lib/settlements', () => ({ ...jest.requireActual('../src/lib/settlementAccess'), fetchSettlementDetail: jest.fn(), fetchRoomSettlements: jest.fn(), createRoomSettlement: jest.fn(), setSettlementCompleted: jest.fn(), fetchSettlementPaymentDetails: jest.fn(), subscribeSettlementPayments: () => () => {} }));
 jest.mock('../src/lib/confirm', () => ({ notify: jest.fn() }));
 jest.mock('../src/screens/chat/ScheduleSheet', () => jest.fn(() => null));
 jest.mock('../src/screens/chat/VotingSheet', () => jest.fn(() => null));
@@ -84,7 +87,7 @@ beforeEach(() => {
 });
 afterEach(async () => { if (renderer) await act(async () => renderer.unmount()); renderer = undefined; jest.restoreAllMocks(); jest.useRealTimers(); });
 
-it.each(['scheduling', 'place', 'confirmed'])('opens five truthful tray actions with existing stage permissions: %s', async stage => {
+it.each(['scheduling', 'place', 'confirmed'])('[phone 527:1393] opens five truthful tray actions with existing stage permissions: %s', async stage => {
   useRoom.mockReturnValue({ room: { ...room, stage }, reload: jest.fn() });
   const root = await render(ChatRoomScreen); expect(root.findAllByType(ActionTray)).toHaveLength(0);
   await press(root, '메뉴 펼치기'); const tray = root.findByType(ActionTray);
@@ -95,7 +98,7 @@ it.each(['scheduling', 'place', 'confirmed'])('opens five truthful tray actions 
   expect(target(tray, 'N빵 정산').props.disabled).toBe(stage === 'scheduling' || stage === 'place');
   await press(root, '메뉴 접기'); expect(root.findAllByType(ActionTray)).toHaveLength(0);
 });
-it.each([['scheduling','일정 조율',ScheduleSheet],['place','식당 정하기',VotingSheet],['confirmed','N빵 정산',SettlementSheet]])('opens the existing %s sheet from the tray', async (stage, label, Component) => {
+it.each([['scheduling','일정 조율',ScheduleSheet],['place','식당 정하기',VotingSheet],['confirmed','N빵 정산',SettlementSheet]])('[phone 527:1613] opens the existing %s sheet from the tray', async (stage, label, Component) => {
   useRoom.mockReturnValue({ room: { ...room, stage }, reload: jest.fn() }); const root = await render(ChatRoomScreen); await press(root, '메뉴 펼치기');
   await press(root.findByType(ActionTray), label); expect(root.findByType(Component).props.visible).toBe(true); expect(root.findAllByType(ActionTray)).toHaveLength(0);
   expect(root.findByType(Component).props.roomId).toBe('room');
@@ -130,7 +133,7 @@ it('opens restaurant voting from the card only with a saved time and retains vot
   expect(sheet.props.visible).toBe(true); expect(sheet.props.kind).toBe('menu');
   await act(async () => sheet.props.onConfirm()); expect(reload).toHaveBeenCalledTimes(1);
 });
-it('opens emoticons from the fifth tray action, closes, and submits a real sticker at 96px', async () => {
+it('[phone 527:1507][phone 628:1829] opens emoticons from the fifth tray action, closes, and submits a real sticker at 96px', async () => {
   const root = await render(ChatRoomScreen); await press(root, '메뉴 펼치기'); await press(root, '이모티콘');
   expect(root.findAllByType(ActionTray)).toHaveLength(0); expect(text(root)).not.toContain('전체 보기');
   await press(root, '이모티콘 닫기'); expect(root.findAllByType(EmoticonPanel)).toHaveLength(0);
@@ -141,19 +144,19 @@ it('opens emoticons from the fifth tray action, closes, and submits a real stick
   const image = root.findAllByType(Image).find(n => n.props.source === STICKERS[0].source);
   expect(StyleSheet.flatten(image.props.style)).toMatchObject({ width: 96, height: 96 });
 });
-it('preserves messaging failures and the draft while using the new send button', async () => {
+it('[phone 683:13388] preserves messaging failures and the draft while using the new send button', async () => {
   sendRoomMessage.mockResolvedValueOnce(Error('offline')); const root = await render(ChatRoomScreen);
   await act(async () => root.findByType(TextInput).props.onChangeText('안녕')); await press(root, '메시지 보내기');
   expect(sendRoomMessage).toHaveBeenCalledWith('room', '안녕'); expect(root.findByType(TextInput).props.value).toBe('안녕'); expect(reload).not.toHaveBeenCalled();
 });
-it('copies the real members code and identifies owner and current member independently', async () => {
+it('[phone 528:1399] copies the real members code and identifies owner and current member independently', async () => {
   const copy = jest.spyOn(Clipboard, 'setString').mockImplementation(() => {});
   const root = await render(MembersSheet, { visible: true, participants: members, ownerId: 'me', code: 'REAL42', myId: 'me', onClose: jest.fn(), onInvite: jest.fn() });
   expect(text(root)).toContain('멤버 2명'); expect(text(root)).toContain('방장 · 나'); await press(root, '초대 코드 복사'); expect(copy).toHaveBeenCalledWith('REAL42'); expect(text(root)).toContain('복사됨');
   await act(async () => renderer.update(React.createElement(MembersSheet, { visible: true, participants: members, ownerId: 'me', code: 'REAL42', myId: 'mate', onClose: jest.fn(), onInvite: jest.fn() })));
   expect(text(root)).toContain('방장'); expect(text(root)).not.toContain('방장 · 나'); expect(text(root)).toContain('나');
 });
-it('opens the invitation sheet from members without sending a chat message', async () => {
+it('[phone 561:1945] opens the invitation sheet from members without sending a chat message', async () => {
   const root = await render(ChatRoomScreen); await press(root, '메뉴 펼치기'); await press(root, '멤버');
   await press(root, '＋ 메이트 초대'); expect(text(root)).toContain('메이트 초대'); expect(target(root, '초대 코드 공유')).toBeDefined(); expect(sendRoomMessage).not.toHaveBeenCalled(); expect(root.findByType(MembersSheet).props.visible).toBe(true);
 });
@@ -161,14 +164,14 @@ it('does not offer copy or invitation when the real code is unavailable', async 
   const root = await render(MembersSheet, { visible: true, participants: [], code: null, myId: 'me', onClose: jest.fn(), onInvite: jest.fn() });
   expect(target(root, '초대 코드 복사')).toBeUndefined(); expect(target(root, '＋ 메이트 초대')).toBeUndefined(); expect(text(root)).toContain('참여 멤버를 불러오지 못했어요');
 });
-it('routes missing-place choice and invitation to existing chat sheets and copies the actual code on detail', async () => {
+it('[phone 528:1525] routes missing-place choice and invitation to existing chat sheets and copies the actual code on detail', async () => {
   const copy = jest.spyOn(Clipboard, 'setString').mockImplementation(() => {}); const root = await render(RoomDetailScreen);
   await press(root, '초대 코드 복사'); expect(copy).toHaveBeenCalledWith('REAL42');
   await press(root, '장소 정하기'); expect(navigation.navigate).toHaveBeenCalledWith('ChatRoom', { roomId: 'room', title: '오늘 저녁팟', openSheet: 'menu' });
   await press(root, '메이트 초대'); expect(target(root, '초대 코드 공유')).toBeDefined(); expect(navigation.navigate).toHaveBeenCalledTimes(1);
   expect(navigation.navigate).not.toHaveBeenCalledWith('Origin');
 });
-it('cancels deletion without a call, shows real failure, and emits feedback only after success', async () => {
+it('[phone 528:1604] cancels deletion without a call, shows real failure, and emits feedback only after success', async () => {
   const root = await render(RoomDetailScreen); expect(target(root, '방 없애기').props.disabled).toBe(false); await press(root, '방 없애기'); expect(root.findByType(DestructiveDialog).props.visible).toBe(true); expect(leaveRoom).not.toHaveBeenCalled();
   await press(root, '그대로 둘게요'); expect(root.findByType(DestructiveDialog).props.visible).toBe(false); expect(leaveRoom).not.toHaveBeenCalled();
   await press(root, '방 없애기'); leaveRoom.mockResolvedValueOnce(Error('denied')); await press(root, '없애기');
@@ -207,6 +210,40 @@ it('closes the tray on Android back and cleans up its subscription', async () =>
 });
 
 const votingProps = overrides => ({ visible: true, roomId: 'room', kind: 'menu', title: '식당 정하기', subtitle: '식당에 투표해 주세요', placeholder: '식당 이름', isOwner: true, stage: 'place', confirmedSlot: null, participantCount: 4, onConfirm: jest.fn(), onClose: jest.fn(), ...overrides });
+it.each([
+  ['540:1524', 'candidate', false], ['540:1682', 'add', false], ['540:1812', 'confirm', false],
+  ['563:1755', 'mate', false], ['628:3074', 'more', false], ['683:12975', 'failure', false],
+  ['631:4344', 'candidate', true], ['631:4490', 'more', true], ['631:4653', 'add', true], ['631:4782', 'confirm', true],
+])('[phone %s] restaurant state %s shabu=%s', async (id, state, shabu) => {
+  const restaurant = shabu ? '채선당 서면점' : '돼지집 서면점';
+  fetchRoomVoting.mockResolvedValue({ data: [{ id: 'candidate', kind: 'menu', label: restaurant, voters: [{ name: '모아' }, { name: '또리' }, { name: '웰링' }], mine: true }], memberCount: 4, error: null });
+  const requestMore = jest.fn(), onConfirm = jest.fn();
+  if (state === 'failure') fetchRoomVoting.mockResolvedValue({ data: [], memberCount: 4, error: null });
+  const root = await render(RealVotingSheet, votingProps({ isOwner: state !== 'mate', subtitle: shabu ? '로컬 선택 · 샤브샤브' : '식당에 투표해 주세요', suggestionStatus: state === 'failure' ? 'error' : 'ready', suggestionReason: state === 'failure' ? '로컬 추천 실패' : undefined, onRequestSuggestions: requestMore, receivedMore: state === 'more', suggestions: state === 'more' ? [{ label: shabu ? '샤브 예시 식당' : '새 예시 식당', fresh: true }] : [], onConfirm }));
+  if (shabu) expect(text(root)).toContain('샤브샤브');
+  if (state === 'failure') { expect(text(root)).toContain('추천을 불러오지 못했어요'); await press(root, '다시 시도'); expect(requestMore).toHaveBeenCalledTimes(1); await press(root, '직접 추가'); expect(text(root)).toContain('식당 직접 추가'); }
+  else expect(text(root)).toContain(restaurant);
+  if (state === 'add') { await press(root, '직접 추가'); await act(async () => root.findByType(TextInput).props.onChangeText(restaurant + ' 별관')); await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); }); await press(root, '이 이름으로 후보 추가'); expect(addVotingItem).toHaveBeenCalledWith('room', 'menu', restaurant + ' 별관'); }
+  if (state === 'mate') expect(target(root, '약속 확정')).toBeUndefined();
+  if (state === 'more') { expect(text(root)).toContain(shabu ? '샤브 예시 식당' : '새 예시 식당'); expect(target(root, '추천을 받았어요').props.disabled).toBe(true); }
+  if (state === 'confirm') { await press(root, '약속 확정'); expect(root.findByType(PlanConfirmation).props.restaurant).toBe(restaurant); expect(confirmRoomVote).not.toHaveBeenCalled(); }
+  expect(onConfirm).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['496:1126', 'scheduling', '', '오늘 저녁팟'], ['496:1202', 'place', '삼겹살', '오늘 저녁팟'],
+  ['591:2495', 'place', '샤브샤브', '오늘 저녁팟'], ['540:1907', 'confirmed', '', '오늘 저녁팟'],
+  ['631:4874', 'confirmed', '샤브샤브', '오늘 저녁팟'], ['548:1675', 'done', '', '오늘 저녁팟'],
+  ['631:6106', 'done', '샤브샤브', '오늘 저녁팟'], ['630:1954', 'confirmed', '', '회사 팀 점심'], ['630:2060', 'scheduling', '', '동아리 뒤풀이'],
+])('[phone %s] actual chat stage=%s menu=%s title=%s', async (id, stage, menu, title) => {
+  navigation.current.params.localMenuName = menu;
+  useRoom.mockReturnValue({ room: { ...room, title, stage, locationName: menu === '샤브샤브' ? '채선당 서면점' : null, decisionMode: 's4', appointmentConfirmedAt: ['confirmed', 'done'].includes(stage) ? '2026-09-25T00:00:00Z' : null }, reload: jest.fn() });
+  const root = await render(ChatRoomScreen); expect(text(root)).toContain(title);
+  if (menu) { expect(text(root)).toContain(menu); expect(text(root)).toContain('로컬 선택'); await press(root, '로컬 메뉴 변경'); expect(navigation.navigate).toHaveBeenCalledWith('LocalMenu', { roomId: 'room' }); }
+  if (stage === 'done') expect(text(root)).toContain('방이 사라져요');
+  if (stage === 'scheduling') expect(target(root, '식당 정하기').props.disabled).toBe(true);
+  if (stage === 'confirmed') { await press(root, '메뉴 펼치기'); expect(target(root, 'N빵 정산').props.disabled).toBe(false); }
+});
 it('shows the Figma summary before calling RPCs, then saves the vote before advancing the stage', async () => {
   const props=votingProps();const root=await render(RealVotingSheet,props);await press(root,'약속 확정');
   expect(root.findByType(PlanConfirmation).props.restaurant).toBe('돼지집 서면점');expect(text(root)).toContain('시간 미정');expect(text(root)).toContain('4');expect(confirmRoomVote).not.toHaveBeenCalled();
@@ -445,7 +482,36 @@ it('validates overlong restaurant names from search results before treating a 22
 });
 
 const accountProfile = { status: 'ready', bundle: { profile: { name: '나야나' }, privateProfile: { bankName: '카카오뱅크', accountNumber: '3333-01-2345678' } }, reload: jest.fn() };
-it('shares only the existing code and app instructions through the OS share sheet', async () => {
+it.each([['527:1747', false], ['631:4955', true]])('[phone %s] creation sheet shabu=%s preserves server-controlled split', async (id, shabu) => {
+  useMyProfile.mockReturnValue(accountProfile);
+  const root = await render(RealSettlementSheet, { visible: true, roomId: shabu ? 'shabu-room' : 'room', roomStage: 'confirmed', participants: members, onClose: jest.fn() });
+  await act(async () => root.findByType(TextInput).props.onChangeText('52000'));
+  expect(text(root)).toContain('참여 멤버 2명'); expect(text(root)).toContain('요청 후 표시');
+  expect(target(root, '정산 요청 보내기').props.disabled).toBe(false); expect(createRoomSettlement).not.toHaveBeenCalled();
+});
+it('[phone 590:1869] account draft returns to its parent while actual payment stays blocked', async () => {
+  useMyProfile.mockReturnValue({ status: 'ready', bundle: { profile: { name: '나' }, privateProfile: {} } });
+  const root = await render(RealSettlementSheet, { visible: true, roomId: 'room', roomStage: 'confirmed', participants: members, onClose: jest.fn() });
+  await act(async () => root.findByType(TextInput).props.onChangeText('52000')); await press(root, '계좌 등록하기');
+  await press(root, '은행 선택'); await press(root, '국민은행');
+  const fields = root.findAllByType(TextInput);
+  await act(async () => { fields[0].props.onChangeText('0000001234'); fields[1].props.onChangeText('로컬 예금주'); });
+  await press(root, '계좌 입력 준비'); expect(text(root)).toContain('계좌 초안을 준비했어요');
+  expect(target(root, '계좌를 먼저 등록해 주세요').props.disabled).toBe(true);
+  expect(createRoomSettlement).not.toHaveBeenCalled(); expect(text(root)).not.toContain('0000001234');
+});
+it('clears an account draft on account switch and ignores the previous form callback', async () => {
+  useMyProfile.mockReturnValue({ status: 'ready', bundle: { profile: { name: '나' }, privateProfile: {} } });
+  const props = { visible: true, roomId: 'room', roomStage: 'confirmed', participants: members, onClose: jest.fn() };
+  const root = await render(RealSettlementSheet, props); await press(root, '계좌 등록하기');
+  const Form = require('../src/screens/settlement/SettlementAccountForm').default;
+  const stale = root.findByType(Form).props.onDraft;
+  await act(async () => stale({ bank: '국민은행', account: '0000001234', holder: '예시' })); expect(text(root)).toContain('계좌 초안을 준비했어요');
+  setChatUser({ id: 'other-user' }); await act(async () => renderer.update(React.createElement(RealSettlementSheet, props)));
+  expect(text(root)).not.toContain('계좌 초안을 준비했어요');
+  await act(async () => stale({ bank: '국민은행', account: '0000001234', holder: '예시' })); expect(text(root)).not.toContain('계좌 초안을 준비했어요');
+});
+it('[phone 628:2083] shares only the existing code and app instructions through the OS share sheet', async () => {
   const share = jest.spyOn(Share, 'share').mockResolvedValue({ action: Share.dismissedAction });
   const root = await render(MateInviteSheet, { visible: true, code: 'REAL42', onClose: jest.fn() });
   await press(root, '초대 코드 공유');
@@ -454,14 +520,14 @@ it('shares only the existing code and app instructions through the OS share shee
   expect(shared).toContain('MEALCHAT 앱'); expect(shared).not.toMatch(/https?:/); expect(shared).not.toContain('3333');
   expect(text(root)).not.toContain('7일'); expect(text(root)).not.toContain('카카오톡'); expect(sendRoomMessage).not.toHaveBeenCalled();
 });
-it('shows share failure without claiming it was sent, keeping code copy available', async () => {
+it('[phone 628:1934] shows share failure without claiming it was sent, keeping code copy available', async () => {
   jest.spyOn(Share, 'share').mockRejectedValue(Error('native private detail'));
   const copy = jest.spyOn(Clipboard, 'setString').mockImplementation(() => {});
   const root = await render(MateInviteSheet, { visible: true, code: 'REAL42', onClose: jest.fn() });
   await press(root, '초대 코드 공유'); expect(text(root)).toContain('공유 창을 열지 못했어요'); expect(text(root)).not.toContain('private detail');
   await press(root, '초대 코드 복사'); expect(copy).toHaveBeenCalledWith('REAL42'); expect(text(root)).toContain('초대 코드를 복사했어요');
 });
-it.each([true, false])('opens only copy actions for a long-pressed message; mine=%s', async mine => {
+it.each([true, false])('[phone 562:2031][phone 628:2371] opens contextual copy and local message actions for a long-pressed message; mine=%s', async mine => {
   const copy = jest.spyOn(Clipboard, 'setString').mockImplementation(() => {});
   useRoomMessages.mockReturnValue({ messages: [{ id: 'long', roomId: 'room', senderId: mine ? 'me' : 'mate', senderName: mine ? '나' : '모아', kind: 'user', text: '복사할 내용', createdAt: '2026-09-25T10:00:00Z' }], status: 'ready', reload });
   const root = await render(ChatRoomScreen);
@@ -473,7 +539,8 @@ it.each([true, false])('opens only copy actions for a long-pressed message; mine
   expect(StyleSheet.flatten(bubble.props.style).marginTop).toBeUndefined();
   await act(async () => bubble.props.onLongPress());
   expect(target(root, '메시지 복사')).toBeDefined();
-  for (const label of ['답장', '삭제', '신고하기', '차단하기']) expect(target(root, label)).toBeUndefined();
+  expect(target(root, '답장')).toBeDefined(); expect(target(root, '삭제')).toBeUndefined();
+  for (const label of ['신고하기', '차단하기']) expect(Boolean(target(root, label))).toBe(!mine);
   await press(root, '메시지 복사'); expect(copy).toHaveBeenCalledWith('복사할 내용'); expect(text(root)).toContain('메시지를 복사했어요');
 });
 it('offers the same message menu through accessibilityActions', async () => {
@@ -575,16 +642,18 @@ it('keeps old-server settlement labels unchanged', async () => {
   const root = await render(RealSettlementSheet, { visible: true, roomId: 'room', roomStage: 'settling', decisionMode: 'legacy', onClose: jest.fn() });
   expect(text(root)).not.toContain('확정 미확인');
 });
-it('blocks requests without an account and preserves the amount when opening the existing profile editor', async () => {
+it('[phone 562:1879] blocks requests without an account and preserves the amount when opening the existing profile editor', async () => {
   useMyProfile.mockReturnValue({ status: 'ready', bundle: { profile: { name: '나' }, privateProfile: {} }, reload: jest.fn() });
   const root = await render(RealSettlementSheet, { visible: true, roomStage: 'confirmed', roomId: 'room', participants: members, onClose: jest.fn() });
   await act(async () => root.findByType(TextInput).props.onChangeText('52000'));
   expect(text(root)).toContain('받을 계좌가 아직 없어요'); expect(target(root, '계좌를 먼저 등록해 주세요').props.disabled).toBe(true);
-  await press(root, '계좌 등록하기');
+  await press(root, '계좌 등록하기'); expect(text(root)).toContain('정산 받을 계좌 등록');
+  expect(root.findAllByType(TextInput)).toHaveLength(2); expect(createRoomSettlement).not.toHaveBeenCalled();
+  await press(root, '기존 프로필에서 계좌 등록');
   expect(navigation.replace).toHaveBeenCalledWith('ChatRoom', expect.objectContaining({ roomId: 'room', openSheet: 'settlement', settlementAmountText: '52000', awaitingSettlementAccount: true }));
   expect(navigation.navigate).toHaveBeenCalledWith('ProfileEdit'); expect(createRoomSettlement).not.toHaveBeenCalled();
 });
-it('reads the profile on sheet entry and shows real registration feedback only once an account is available', async () => {
+it('[phone 590:1896] reads the profile on sheet entry and shows real registration feedback only once an account is available', async () => {
   const refresh = jest.fn(); navigation.current.params = { roomId: 'room', settlementAmountText: '52000', awaitingSettlementAccount: true };
   useMyProfile.mockReturnValue({ status: 'loading', bundle: null, reload: refresh });
   const root = await render(RealSettlementSheet, { visible: true, roomStage: 'confirmed', roomId: 'room', onClose: jest.fn() });
@@ -700,4 +769,50 @@ it.each([
   const accountText = root.findAllByType(Text).find(node => node.props.accessibilityLabel === label);
   expect(accountText).toBeDefined(); expect(accountText.props.children).toContain(display);
   if (accountNumber.replace(/\D/g, '').length < 4) expect(text(root)).not.toContain('••••');
+});
+
+it('real AppNavigator carries shabu local selection through restaurant confirmation and the returned bill', async () => {
+  const navModule = jest.requireActual('../src/navigation/NavigationContext');
+  const Navigator = require('../src/navigation/AppNavigator').default;
+  const { setConsentAccess } = require('../src/consents/access');
+  let nav;
+  function Observer() { nav = navModule.useNavigation(); return null; }
+  useNavigation.mockImplementation(navModule.useNavigation);
+  VotingSheet.mockImplementation(props => React.createElement(RealVotingSheet, props));
+  SettlementSheet.mockImplementation(props => React.createElement(RealSettlementSheet, props));
+  setConsentAccess('me', 'accepted'); useMyProfile.mockReturnValue(accountProfile);
+  fetchRoomVoting.mockResolvedValue({ data: [{ id: 'shabu-place', kind: 'menu', label: '채선당 서면점', voters: [{name:'모아'},{name:'또리'},{name:'웰링'}], mine: true }], memberCount: 4, error: null });
+  let actualRoom = { ...room, confirmedSlot: '2026-09-25T10:00:00Z' };
+  useRoom.mockImplementation(() => ({ room: actualRoom, status: 'ready', reload: jest.fn() }));
+  const api = require('../src/lib/settlements');
+  api.fetchSettlementDetail.mockResolvedValue({ data: { id: 'created', roomId: 'room', creatorId: 'me', roomTitle: '오늘 저녁팟', title: '식사 정산', locationName: '채선당 서면점', meetingDate: '2026-09-25', totalAmount: 52000, splitCount: 4, createdAt: '2026-09-25T10:00:00Z', members: [{ id: 'self', profileId: 'me', name: '모아', isCompleted: true }, { id: 'other', profileId: 'mate', name: '또리', isCompleted: false }] }, error: null });
+  const app = () => React.createElement(navModule.NavigationProvider, { initialRoute: 'LocalMenu' }, React.createElement(React.Fragment, null, React.createElement(Observer), React.createElement(Navigator)));
+  await act(async () => { renderer = create(app()); });
+  await act(async () => nav.replace('LocalMenu', { roomId: 'room' }));
+  let root = renderer.root;
+  await press(root, '메뉴 후보 보기'); await act(async () => { await new Promise(resolve => setTimeout(resolve, 650)); });
+  await press(root, '로컬 예시 후보로 계속하기');
+  const dislike = root.findAll(node => node.props.accessibilityRole === 'radio' && node.props.accessibilityLabel === '삼겹살 별로예요' && node.props.onPress)[0];
+  await act(async () => dislike.props.onPress()); await press(root, '평가 완료'); await press(root, '새 후보로 다시 평가하기'); await press(root, '평가 완료');
+  await press(root, '식당 찾기'); expect(nav.current.params.localMenuName).toBe('샤브샤브');
+  expect(text(root)).toContain('샤브샤브'); expect(text(root)).toContain('채선당 서면점');
+  await act(async () => root.findAll(node => node.props.testID === 'voting-confirm-cta' && node.props.onPress)[0].props.onPress()); await press(root, '확정하기'); expect(confirmRoomVote).toHaveBeenCalledWith('room', 'shabu-place');
+  actualRoom = { ...actualRoom, stage: 'confirmed', confirmedMenu: '채선당 서면점' };
+  await act(async () => renderer.update(app())); await press(root, '메뉴 펼치기'); await press(root, 'N빵 정산');
+  const amount = root.findAllByType(TextInput).find(node => node.props.accessibilityLabel === '총 결제금액');
+  await act(async () => amount.props.onChangeText('52000')); await press(root, '정산 요청 보내기');
+  expect(nav.current.name).toBe('SettlementDetail'); expect(text(root)).toContain('채선당 서면점'); expect(text(root)).toContain('52,000원');
+  await press(root, '정산 더보기'); await press(root, '정산 취소'); await press(root, '취소 요청 준비');
+  expect(nav.current.name).toBe('ChatRoom'); expect(nav.current.params.localSettlementAction).toBe('cancel-prepared'); expect(text(root)).toContain('실제 정산은 취소되지 않았어요');
+  setConsentAccess(null, 'loading');
+});
+
+it('[phone 628:2259] reply quotes the selected message and keeps typed text without an unconnected send', async () => {
+  useRoomMessages.mockReturnValue({ messages: [{ id: 'reply-source', roomId: 'room', senderId: 'mate', senderName: '모아', kind: 'user', text: '샤브샤브 어때?', createdAt: '2026-09-25T10:00:00Z' }], status: 'ready', reload });
+  const root = await render(ChatRoomScreen);
+  const bubble = root.findAll(node => node.props.onLongPress && node.props.accessibilityLabel === '모아, 샤브샤브 어때?')[0];
+  await act(async () => bubble.props.onLongPress()); await press(root, '답장');
+  expect(text(root).replace(/\s/g, '')).toContain('모아에게답장'); expect(text(root)).toContain('샤브샤브 어때?');
+  await act(async () => root.findByType(TextInput).props.onChangeText('좋아요')); await press(root, '메시지 보내기');
+  expect(sendRoomMessage).not.toHaveBeenCalled(); expect(root.findByType(TextInput).props.value).toBe('좋아요'); expect(text(root)).toContain('답장 서버 연결 대기');
 });

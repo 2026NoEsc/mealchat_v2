@@ -16,6 +16,8 @@ describe('navigation route mappings', () => {
   it('maps every root route to the expected active tab', () => {
     expect(ROUTE_TO_TAB).toEqual({
       Settings: 'profile',
+      MealHistory: 'profile',
+      NotificationPreferences: 'profile',
       OptionalConsents: 'profile',
       ServiceTerms: 'profile',
       PrivacyPolicy: 'profile',

@@ -1,3 +1,5 @@
+import LocalMenuScreen from '../screens/chat/LocalMenuScreen';
+import InviteLandingScreen from '../screens/chat/InviteLandingScreen';
 import { StyleSheet, View } from 'react-native';
 
 import BottomNav from '../components/BottomNav';
@@ -26,6 +28,10 @@ import SignupTermsScreen from '../screens/signup/SignupTermsScreen';
 import FoodProfileScreen from '../screens/food/FoodProfileScreen';
 import FoodProfilePrompt from '../screens/food/FoodProfilePrompt';
 import SettingsScreen from '../screens/settings/SettingsScreen';
+import ContactScreen from '../screens/settings/ContactScreen';
+import NotificationPreferencesScreen from '../screens/settings/NotificationPreferencesScreen';
+import MealHistoryScreen from '../screens/history/MealHistoryScreen';
+import MealReceiptScreen from '../screens/history/MealReceiptScreen';
 import ServiceTermsScreen from '../screens/settings/ServiceTermsScreen';
 import PrivacyPolicyScreen from '../screens/settings/PrivacyPolicyScreen';
 import AppInfoScreen from '../screens/settings/AppInfoScreen';
@@ -54,6 +60,16 @@ export default function AppNavigator() {
 
 function renderScreen(name: RouteName) {
   switch (name) {
+    case 'LocalMenu': return <LocalMenuScreen />;
+    case 'InviteLanding': return <InviteLandingScreen />;
+    case 'Contact':
+      return <ContactScreen />;
+    case 'NotificationPreferences':
+      return <NotificationPreferencesScreen />;
+    case 'MealHistory':
+      return <MealHistoryScreen />;
+    case 'MealReceipt':
+      return <MealReceiptScreen />;
     case 'Settings':
       return <SettingsScreen />;
     case 'OptionalConsents':

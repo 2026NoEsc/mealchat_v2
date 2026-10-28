@@ -81,7 +81,7 @@ export default function ProfileHomeScreen() {
         <ListRow title="출발지 설정" value={origin || '아직 설정 안 됨'} onPress={() => navigate('Origin')} />
         <ListRow title="정보 공개 범위" onPress={() => navigate('Privacy')} style={styles.lastRow} />
         <ListRow title="설정" value="약관 · 계정" style={[styles.lastRow, { borderTopWidth: 1, borderTopColor: colors.border }]} onPress={() => navigate('Settings')} />
-        {/* TODO(서버 단계): 밥약 기록·설정 화면 계약이 생기면 메뉴에 추가한다. */}
+        <ListRow title="밥약 기록" value="준비 중" onPress={() => navigate('MealHistory')} />
         {privateProfile?.foodProfileAvailable !== false ? <ListRow title="음식 취향 다시 고르기" onPress={() => navigate('FoodProfile')} /> : null}
       </View>
       <View style={styles.accountActions}>

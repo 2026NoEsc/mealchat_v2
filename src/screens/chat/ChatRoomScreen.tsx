@@ -1,3 +1,5 @@
+import MessageSafetySheet from './MessageSafetySheet';
+import { Button } from '../../components/ui/Button';
 import { ChevronLeft, MoreVertical, Plus, Send } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -226,6 +228,8 @@ export default function ChatRoomScreen() {
   const title = room?.title ?? params?.title ?? '밥약';
   const { messages: remoteMessages, status, reload } = useRoomMessages(roomId);
   const [draft, setDraft] = useState('');
+  const [reply, setReply] = useState<CopyableMessage | null>(null), [sendError, setSendError] = useState(false);
+  const [safety, setSafety] = useState<{ kind: 'report' | 'block'; message: CopyableMessage } | null>(null);
   const [sending, setSending] = useState(false);
   // state 반영 전 같은 프레임의 연속 제출도 막는다.
   const sendingRef = useRef(false);
@@ -313,7 +317,7 @@ export default function ChatRoomScreen() {
   const openMessageActions = useCallback((message: CopyableMessage) => {
     Keyboard.dismiss(); setActionsOpen(false); setEmoticonOpen(false); setMessageActions(message);
   }, []);
-  useEffect(() => { setMessageActions(null); }, [roomId, user?.id]);
+  useEffect(() => { setMessageActions(null); setReply(null); setSafety(null); setSendError(false); }, [roomId, user?.id]);
 
   const currentRef = useRef(current);
   currentRef.current = current;
@@ -354,6 +358,8 @@ export default function ChatRoomScreen() {
   const send = async () => {
     const text = draft.trim();
     if (!text || !roomId || sendingRef.current) return;
+    if (reply) { setSendError(true); return; }
+    setSendError(false);
     sendingRef.current = true;
     const submittedRevision = draftRevision.current;
 
@@ -362,7 +368,7 @@ export default function ChatRoomScreen() {
       const error = await sendRoomMessage(roomId, text);
 
       if (error) {
-        notify('전송 실패', error.message);
+        setSendError(true); notify('전송 실패', error.message);
         return;
       }
 
@@ -370,7 +376,7 @@ export default function ChatRoomScreen() {
       if (draftRevision.current === submittedRevision) setDraft('');
       reload();
     } catch {
-      notify('전송 실패', '메시지를 보내지 못했어요. 잠시 후 다시 시도해 주세요.');
+      setSendError(true); notify('전송 실패', '메시지를 보내지 못했어요. 잠시 후 다시 시도해 주세요.');
     } finally {
       sendingRef.current = false;
       setSending(false);
@@ -412,6 +418,8 @@ export default function ChatRoomScreen() {
       {roomError ? <FailureCard title={room ? '방 정보를 새로 불러오지 못했어요' : '방 정보를 불러오지 못했어요'} reason={room ? '마지막으로 확인한 내용을 보고 있어요.' : '잠시 후 다시 시도해 주세요.'} onRetry={reloadRoom} /> : null}
       {room ? <View style={styles.pinned}><MeetingCard compact={panelOpen || keyboard > 0} isOwner={isOwner} confirmedRestaurant={room.confirmedMenu} slot={room.confirmedSlot} meetingTime={room.meetingTime} ownerConfirmed={Boolean(room.appointmentConfirmedAt)} s4={room.decisionMode === 's4'} stage={stage} location={room.locationName} memberCount={room.participants.filter(p => p.profileId !== null).length} onChooseRestaurant={() => chooseAction('menu')} /></View> : null}
 
+      {typeof current.params?.localMenuName === 'string' && current.params.localMenuName.trim() !== '' && <View style={styles.pinned}><Text style={styles.name}>로컬 선택 · {current.params.localMenuName} · 서버 연결 대기</Text><Button variant="text" label="로컬 메뉴 변경" onPress={() => navigate('LocalMenu', { roomId })} /></View>}
+      {(current.params?.localSettlementAction === 'cancel-prepared' || current.params?.localSettlementAction === 'edit-prepared') && <View style={styles.pinned}><Text accessibilityLiveRegion="polite" style={styles.name}>{current.params.localSettlementAction === 'cancel-prepared' ? '정산 취소 요청 준비 · 실제 정산은 취소되지 않았어요' : '정산 수정 요청 준비 · 실제 정산은 변경되지 않았어요'}</Text></View>}
       <FlatList
         ref={scrollRef}
         testID="chat-message-list"
@@ -461,6 +469,8 @@ export default function ChatRoomScreen() {
         }
       />
 
+      {reply ? <View style={{ padding: 12 }}><Text style={styles.name}>{reply.name}에게 답장 · 서버 연결 대기</Text><Text numberOfLines={2} style={styles.inputText}>{reply.text}</Text><Button variant="text" label="답장 취소" onPress={() => { setReply(null); setSendError(false); }} /></View> : null}
+      {sendError ? <FailureCard title="메시지를 보내지 못했어요" reason={reply ? '답장 서버 연결 대기 · 입력한 내용은 유지했어요.' : '입력한 내용은 유지했어요.'} onRetry={() => void send()} /> : null}
       <View style={[styles.inputBar, { paddingBottom: 20 + (keyboard > 0 || panelOpen ? 0 : insets.bottom) }]}>
         <Pressable style={[styles.plusButton, actionsOpen && styles.plusOpen]} accessibilityRole="button" accessibilityLabel={actionsOpen ? '메뉴 접기' : '메뉴 펼치기'} accessibilityState={{ expanded: actionsOpen }}
           onPress={() => { Keyboard.dismiss(); setEmoticonOpen(false); setActionsOpen(!actionsOpen); }}>
@@ -474,7 +484,7 @@ export default function ChatRoomScreen() {
           <Send size={20} color={colors.ink} />
         </Pressable>
       </View>
-      {actionsOpen ? <ActionTray stage={stage} canOpenSchedule={stage === 'scheduling' || (room?.decisionMode === 's4' && stage === 'place' && (!room.meetingTime || isOwner))} onChoose={chooseAction} bottomInset={keyboard > 0 ? 0 : insets.bottom} /> : null}
+      {actionsOpen ? <><Button variant="text" label="메뉴 정하기 · 로컬" onPress={() => { setActionsOpen(false); navigate('LocalMenu', { roomId }); }} /><ActionTray stage={stage} canOpenSchedule={stage === 'scheduling' || (room?.decisionMode === 's4' && stage === 'place' && (!room.meetingTime || isOwner))} onChoose={chooseAction} bottomInset={keyboard > 0 ? 0 : insets.bottom} /></> : null}
       {emoticonOpen ? <EmoticonPanel disabled={sending} bottomInset={keyboard > 0 ? 0 : insets.bottom} onClose={() => setEmoticonOpen(false)} onPick={sticker => {
         if (sendingRef.current) return;
         setEmoticonOpen(false); void sendSticker(sticker.id);
@@ -506,7 +516,7 @@ export default function ChatRoomScreen() {
         participants={room?.participants}
         kind="menu"
         title="식당 정하기"
-        subtitle="가고 싶은 식당에 투표해 주세요"
+        subtitle={typeof current.params?.localMenuName === 'string' && current.params.localMenuName.trim() !== '' ? `로컬 선택 · ${current.params.localMenuName} · 추천에는 아직 반영되지 않아요` : '가고 싶은 식당에 투표해 주세요'}
         placeholder="예: 조선칼국수 하단점"
         suggestionTitle={recommendation.suggestions.length > 0 && recommendation.suggestions.every(item => item.source === 'gemini') ? 'AI 추천 식당' : '추천 식당'}
         suggestions={recommendation.suggestions}
@@ -545,7 +555,10 @@ export default function ChatRoomScreen() {
         ownerId={room?.ownerId ?? null}
         onClose={() => setSheet(null)}
       />
-      <MessageActionsSheet message={messageActions} onClose={() => setMessageActions(null)} onCopied={() => showToast({ message: '메시지를 복사했어요' })} />
+      {safety && safety.message.senderId ? <MessageSafetySheet key={safety.kind + safety.message.senderId} kind={safety.kind} targetId={safety.message.senderId} name={safety.message.name} onClose={() => setSafety(null)} /> : null}
+      <MessageActionsSheet message={messageActions} onReply={() => { setReply(messageActions); setMessageActions(null); }}
+        onReport={messageActions?.senderId && messageActions.senderId !== user?.id ? () => { setSafety({ kind: 'report', message: messageActions }); setMessageActions(null); } : undefined}
+        onBlock={messageActions?.senderId && messageActions.senderId !== user?.id ? () => { setSafety({ kind: 'block', message: messageActions }); setMessageActions(null); } : undefined} onClose={() => setMessageActions(null)} onCopied={() => showToast({ message: '메시지를 복사했어요' })} />
       <Toast {...toastProps} bottom={88} />
     </View>
   );

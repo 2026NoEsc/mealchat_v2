@@ -69,6 +69,43 @@ beforeEach(() => {
   require('../src/lib/settlements').fetchSettlementPaymentDetails.mockResolvedValue({ data: { billId: bill.id, status: 'open', details: { bankName: bill.bankName, accountNumber: bill.accountNumber, accountHolder: bill.accountHolder } }, error: null });
 });
 afterEach(async () => { if (renderer) await act(async () => renderer.unmount()); renderer = undefined; jest.restoreAllMocks(); jest.useRealTimers(); });
+it.each([
+  ['521:1248', 'main'], ['521:1331', 'menu'], ['521:1575', 'settlements'], ['559:1805', 'empty'], ['563:2123', 'error'],
+  ['590:2077', 'deleted'], ['590:2164', 'left'], ['521:1429', 'notices'], ['599:2425', 'read'], ['599:2587', 'filter'],
+])('[phone %s] home state %s', async (id, state) => {
+  navigation.current = { name: 'Home', params: {} }; navigation.replace = jest.fn(); navigation.resetTo = jest.fn();
+  if (['notices', 'read', 'filter'].includes(state)) {
+    const onRead = jest.fn(), root = await render(NotificationPanel, { notices, allRead: state === 'read', readAt: null, onClose: jest.fn(), onMarkAllRead: onRead });
+    if (state === 'read') expect(target(root, '모두 읽음').props.disabled).toBe(true);
+    else if (state === 'filter') { await press(root, '정산 알림'); expect(text(root)).toContain('회사'); expect(text(root)).not.toContain('저녁팟'); }
+    else { await press(root, '모두 읽음'); expect(onRead).toHaveBeenCalledTimes(1); }
+    return;
+  }
+  if (state === 'settlements') { const root = await render(SettlementsScreen); expect(text(root)).toContain('회사 팀 점심'); await press(root, '정산 완료'); expect(text(root)).toContain('선택한 상태의 정산이 없어요'); return; }
+  if (state === 'empty') useMyRooms.mockReturnValue({ rooms: [], status: 'ready', reload });
+  if (state === 'error') useMyRooms.mockReturnValue({ rooms: [], status: 'error', reload });
+  if (state === 'deleted') navigation.current.params = { deletedRoomId: 'room', deletedRoomTitle: '오늘 저녁팟' };
+  if (state === 'left') navigation.current.params = { leftRoomId: 'room', leftRoomTitle: '오늘 저녁팟' };
+  const root = await render(HomeScreen);
+  if (state === 'main') { expect(text(root)).toContain('오늘 저녁팟'); expect(text(root)).toContain('오늘은 누구랑 먹을까요'); }
+  if (state === 'menu') { await press(root, '새 밥약 또는 초대 코드'); expect(target(root, '밥약 만들기')).toBeDefined(); expect(target(root, '초대 코드 입력')).toBeDefined(); }
+  if (state === 'empty') { expect(text(root)).toContain('아직 잡힌 밥약이 없어요'); expect(text(root)).not.toContain('선택한 상태의 정산이 없어요'); }
+  if (state === 'error') { expect(text(root)).toContain('밥약을 불러오지 못했어요'); await act(async () => root.findByType(FailureCard).props.onRetry()); expect(reload).toHaveBeenCalledTimes(1); }
+  if (state === 'deleted') expect(text(root)).toContain('없앴어요');
+  if (state === 'left') expect(text(root)).toContain('에서 나왔어요');
+});
+it('empty settlement data has only one empty explanation', async () => {
+  fetchMySettlementsDetailed.mockResolvedValue({ data: [], error: null }); const root = await render(SettlementsScreen);
+  expect(text(root)).toContain('아직 정산이 없어요'); expect(text(root)).not.toContain('선택한 상태의 정산이 없어요');
+});
+it('filters settlement status without changing payment data or losing other cards', async () => {
+  fetchMySettlementsDetailed.mockResolvedValue({ data: [bill, { ...bill, id: 'finished', title: '완료된 저녁', members: bill.members.map(member => ({ ...member, isCompleted: true })) }], error: null });
+  const root = await render(SettlementsScreen);
+  await press(root, '정산 완료'); expect(text(root)).toContain('완료된 저녁'); expect(text(root)).not.toContain('회사 팀 점심');
+  await press(root, '정산 진행 중'); expect(text(root)).toContain('회사 팀 점심'); expect(text(root)).not.toContain('완료된 저녁');
+  await press(root, '정산 전체'); expect(text(root)).toContain('완료된 저녁'); expect(text(root)).toContain('회사 팀 점심');
+  expect(setSettlementCompleted).not.toHaveBeenCalled();
+});
 it('hides the settlement nudge for zero and shows the actual positive count', async () => {
   let root = await render(HomeScreen); expect(text(root)).not.toContain('미완료 정산');
   useMySettlements.mockReturnValue([{ settled: false }, { settled: true }]);
@@ -379,7 +416,7 @@ it.each([true, false])('shows only working settlement-more actions; requester=%s
   const root = await render(SettlementsScreen); await press(root, '회사 팀 점심 정산 더보기');
   expect(target(root, '채팅방으로 가기')).toBeDefined();
   expect(Boolean(target(root, '금액이 이상해요 · 채팅방에서 묻기'))).toBe(!requester);
-  for (const label of ['정산 취소', '금액 · 참여 멤버 고치기', '재알림']) expect(target(root, label)).toBeUndefined();
+  for (const label of ['정산 취소', '금액 · 참여 멤버 고치기']) expect(Boolean(target(root, label))).toBe(requester); expect(target(root, '재알림')).toBeUndefined();
   expect(target(root, '정산 내용 복사')).toBeUndefined(); expect(copy).not.toHaveBeenCalled();
   await press(root, '채팅방으로 가기'); expect(navigation.navigate).toHaveBeenCalledWith('ChatRoom', { roomId: 'room', title: '조선칼국수' });
 });

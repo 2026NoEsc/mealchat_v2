@@ -60,9 +60,10 @@ export default function SettlementsScreen() {
   const completing = useRef(false);
   const [pending, setPending] = useState<{ settlementId: string; memberId: string } | null>(null);
   const [confirmationError, setConfirmationError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<'all' | 'open' | 'done'>('all');
   const [moreId, setMoreId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null | undefined>(undefined);
-  useEffect(() => { setPending(null); setMoreId(null); setConfirmationError(null); }, [userId]);
+  useEffect(() => { setPending(null); setMoreId(null); setConfirmationError(null); setFilter('all'); }, [userId]);
 
   const load = useCallback(async () => {
     const owner = currentOwner.current, ticket = ++loadVersion.current;
@@ -128,10 +129,12 @@ export default function SettlementsScreen() {
     <View style={styles.header}><Pressable onPress={() => resetTo('Home')} style={styles.back} accessibilityRole="button" accessibilityLabel="뒤로"><ChevronLeft size={24} color={colors.ink} /></Pressable><Text style={styles.headerTitle}>정산</Text></View>
     <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
       <Text style={styles.summary}>{status === 'loading' ? '불러오는 중...' : status === 'error' ? '정산을 불러오지 못했어요' : settlements.length === 0 ? '아직 정산이 없어요' : '진행 중 ' + open.length + '건 · 완료 ' + done.length + '건'}</Text>
+      <View style={styles.filters}>{([['all', '전체'], ['open', '진행 중'], ['done', '완료']] as const).map(([value, label]) => <Pressable key={value} accessibilityRole="button" accessibilityLabel={`정산 ${label}`} accessibilityState={{ selected: filter === value }} onPress={() => setFilter(value)} style={[styles.filter, filter === value && styles.filterSelected]}><Text style={[styles.filterText, filter === value && styles.filterSelectedText]}>{label}</Text></Pressable>)}</View>
+      {status === 'ready' && ownedSettlements.length > 0 && !(filter === 'open' ? open : filter === 'done' ? done : ownedSettlements).length ? <Text style={styles.summary}>선택한 상태의 정산이 없어요</Text> : null}
       {status === 'error' ? <FailureCard title="정산을 불러오지 못했어요" reason="정산 정보를 확인하지 못했어요. 다시 불러와 주세요." icon={<AlertCircle size={26} color={colors.sub} />} onRetry={() => void load()} /> : null}
       {status === 'error' && settlements.length > 0 ? <Text style={styles.small}>이전에 불러온 정산이에요</Text> : null}
       <View style={[styles.cards, status === 'error' && styles.stale]} pointerEvents={status === 'error' ? 'none' : 'auto'} accessibilityElementsHidden={status === 'error'} importantForAccessibility={status === 'error' ? 'no-hide-descendants' : 'auto'}>
-      {[...open, ...done].map((settlement) => {
+      {(filter === 'open' ? open : filter === 'done' ? done : [...open, ...done]).map((settlement) => {
         const settled = isSettled(settlement);
         const each = settlement.splitCount > 0 ? Math.ceil(settlement.totalAmount / settlement.splitCount) : settlement.totalAmount;
         return <View key={settlement.id} style={[styles.card, !settled && styles.cardOpen]}>
@@ -159,6 +162,7 @@ export default function SettlementsScreen() {
   </View>;
 }
 const styles = StyleSheet.create({
+  filters: { flexDirection: 'row', gap: 8 }, filter: { minHeight: 44, paddingHorizontal: 16, justifyContent: 'center', borderRadius: 22, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface }, filterSelected: { borderColor: colors.primary, backgroundColor: colors.selectedBg }, filterText: { fontFamily: fontFamily.medium, fontSize: 14, color: colors.ink }, filterSelectedText: { color: colors.selectedText },
   more: { minWidth: 44, minHeight: 44, alignSelf: 'flex-end', marginVertical: -10, alignItems: 'center', justifyContent: 'center' },
   cards: { gap: 16 }, stale: { opacity: 0.45 },
   screen: { flex: 1, backgroundColor: colors.bg },

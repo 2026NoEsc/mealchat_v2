@@ -439,7 +439,7 @@ describe('S3 방 생명주기 UI 단위 테스트', () => {
       expect(textNodes).not.toContain('표시행멤버');
     });
 
-    it('confirmed 단계에서 방 나가기 체크 시 안내 문구를 표시하고 요청을 전송한다', async () => {
+    it('[phone 561:1815] confirmed 단계에서 방 나가기 체크 시 안내 문구를 표시하고 요청을 전송한다', async () => {
       const onSubmit = jest.fn(async () => {});
       act(() => {
         renderer = create(
@@ -506,7 +506,7 @@ describe('S3 방 생명주기 UI 단위 테스트', () => {
   });
 
   describe('5. JoinCodeSheet (6칸 입력, 미리보기, 오류, 5회 잠금)', () => {
-    it('6칸 셀 렌더링 및 6자리 완성 시 preview를 호출한다', async () => {
+    it('[phone 543:1665][phone 590:2533] 6칸 셀 렌더링 및 6자리 완성 시 preview를 호출한다', async () => {
       await act(async () => {
         renderer = create(
           <JoinCodeSheet
@@ -572,7 +572,7 @@ describe('S3 방 생명주기 UI 단위 테스트', () => {
       expect(mockInviteController.join).toHaveBeenCalledTimes(1);
     });
 
-    it('오류 상태에서 칸 안에 에러 스타일과 에러 문구를 표시한다', async () => {
+    it('[phone 559:1657] 오류 상태에서 칸 안에 에러 스타일과 에러 문구를 표시한다', async () => {
       mockInviteState = {
         code: 'ABCDE2',
         pending: false,
@@ -985,7 +985,7 @@ describe('S3 방 생명주기 UI 단위 테스트', () => {
   });
 
   describe('7. RoomDetailScreen (단계별 나가기 버튼 및 레거시 숨김)', () => {
-    it('S3 지원 및 canLeave=true일 때 일반 메이트에게 방 나가기 버튼을 노출한다', async () => {
+    it('[phone 561:1734] S3 지원 및 canLeave=true일 때 일반 메이트에게 방 나가기 버튼을 노출한다', async () => {
       mockCurrentUser = { id: 'u-mate' };
       mockLifecycleView = {
         state: null,

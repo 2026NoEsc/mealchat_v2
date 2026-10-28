@@ -1,3 +1,4 @@
+import LocalLocationControl from './LocalLocationControl';
 import { Info, Search } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, BackHandler, Platform, StyleSheet, Text, View } from 'react-native';
@@ -127,6 +128,7 @@ export default function ScheduleDetailScreen() {
         <View style={styles.mates}>{visibleFriends.map((friend) => <MateToggle key={friend.id} name={friend.name} seed={friend.profileId} selected={picked.includes(friend.profileId)} onChange={() => toggle(friend.profileId)} />)}</View>
         {friends.length === 0 ? <Text style={styles.note}>아직 메이트가 없어요. 프로필 → 내 친구 관리에서 추가할 수 있어요.</Text> : visibleFriends.length === 0 ? <Text style={styles.note}>검색 결과가 없어요.</Text> : null}
       </View>
+      <LocalLocationControl />
       <View style={styles.hint}><Info size={16} color={colors.sub} /><Text style={[styles.note, styles.flex]}>식당 추천은 개인 출발지 없이 공용 만남 지역을 기준으로 찾아요. 방에서 함께 정할 수 있어요.</Text></View>
     </ScheduleFrame>
   );

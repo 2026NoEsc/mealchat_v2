@@ -1,3 +1,4 @@
+import ReceiptCaptureFlow, { type ReceiptDraft } from './ReceiptCaptureFlow';
 import { CalendarDays, Check, ChevronLeft, Clock3, MapPin, MoreVertical, Wallet } from 'lucide-react-native';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AppState, BackHandler, Image, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -111,7 +112,11 @@ export default function SettlementDetailScreen() {
     <TransferConfirmationSheet visible={Boolean(pending && pendingChange?.kind === 'transfer')} recipient={recipient} amount={each} busy={busy} error={error}
       onClose={closeConfirmation} onConfirm={confirmChange} />
     <SettlementStatusConfirmationSheet kind={pending && pendingChange?.kind !== 'transfer' ? pendingChange?.kind ?? null : null} busy={busy} error={error} onClose={closeConfirmation} onConfirm={confirmChange} />
-    <SettlementMoreSheet settlement={more ? settlement : null} requester={requester} onClose={() => setMore(false)} onOpenChat={openChat} />
+    <SettlementMoreSheet settlement={more ? settlement : null} requester={requester} onClose={() => setMore(false)} onOpenChat={openChat} onLocalAction={({ action }) => {
+      if (!settlement?.roomId) return;
+      setMore(false);
+      replace('ChatRoom', { roomId: settlement.roomId, localSettlementAction: action === 'cancel' ? 'cancel-prepared' : 'edit-prepared' });
+    }} />
   </SettlementDetailView>;
 }
 
@@ -120,8 +125,10 @@ export function SettlementDetailView({ settlement, userId, status, busy, error, 
   onBack: () => void; onMore: () => void; onOpenChat: () => void; onRetry: () => void; onToggle: (member: SettlementMember) => void; children?: React.ReactNode;
 }) {
   const top = useTopInset(), { bottom } = useSafeAreaInsets();
+  const [expensesExpanded, setExpensesExpanded] = useState(false);
   const [incompleteOnly, setIncompleteOnly] = useState(false);
-  useEffect(() => { setIncompleteOnly(false); }, [settlement?.id, userId]);
+  const [capture, setCapture] = useState(false), [receipt, setReceipt] = useState<ReceiptDraft | null>(null), [reminder, setReminder] = useState('');
+  useEffect(() => { setExpensesExpanded(false); setIncompleteOnly(false); setCapture(false); setReceipt(null); setReminder(''); }, [settlement?.id, userId]);
   useEffect(() => {
     if (Platform.OS !== 'android') return;
     const back = BackHandler.addEventListener('hardwareBackPress', () => { onBack(); return true; });
@@ -134,6 +141,7 @@ export function SettlementDetailView({ settlement, userId, status, busy, error, 
   const mine = members.find(member => member.profileId !== null && member.profileId === userId);
   const recipient = members.find(member => member.profileId !== null && member.profileId === settlement?.creatorId);
   const each = settlement ? settlement.splitCount > 0 ? Math.ceil(settlement.totalAmount / settlement.splitCount) : settlement.totalAmount : 0;
+  if (capture) return <ReceiptCaptureFlow onClose={() => setCapture(false)} onDraft={setReceipt} />;
   return <View style={styles.screen}>
     <View style={{ height: top }} />
     <View style={styles.header}>
@@ -152,8 +160,14 @@ export function SettlementDetailView({ settlement, userId, status, busy, error, 
           <View style={styles.amounts}><View style={styles.grow}><Text style={styles.small}>총 금액</Text><Text style={styles.amount}>{formatAmount(settlement.totalAmount)}</Text></View><View style={styles.right}><Text style={styles.small}>1인당 ({settlement.splitCount}명)</Text><Text style={[styles.amount, styles.accent]}>{formatAmount(each)}</Text></View></View>
           <View style={styles.progress}><View style={styles.progressRow}><Text style={styles.note}>정산 현황</Text><Text style={styles.progressText}>{allPaid ? `${members.length}명 모두 완료` : `${members.length}명 중 ${completed}명 완료`}</Text></View><View accessibilityRole="progressbar" accessibilityLabel="정산 완료 현황" accessibilityValue={{ min: 0, max: members.length, now: completed }} style={styles.track}><View style={[styles.fill, { width: `${members.length ? completed / members.length * 100 : 0}%` }]} /></View></View>
         </View>
-        {/* [결정] S6/S7 지출·영수증 서버가 없어 588:2024 빈 상태 제목만 표시한다. 미구현 촬영·인식 기능을 약속하는 설명과 추가·촬영·펼침 버튼은 숨긴다. */}
-        <View testID="settlement-expenses-empty" style={[styles.card, styles.empty]}><Image source={require('./assets/receipt-empty.png')} style={styles.receipt} accessible={false} /><Text style={styles.emptyTitle}>지출 내역이 아직 없어요</Text></View>
+        <View testID="settlement-expenses-empty" style={[styles.card, styles.empty]}>
+          {receipt ? <>
+            <Text style={styles.emptyTitle}>지출 내역 · 로컬 초안</Text>
+            <Button variant="text" label={expensesExpanded ? '지출 내역 접기' : '지출 내역 펼치기'} onPress={() => setExpensesExpanded(!expensesExpanded)} />
+            {expensesExpanded && <View style={{ alignSelf: 'stretch', gap: 6 }}><Text style={styles.emptyTitle}>{receipt.merchant}</Text>{receipt.items?.map((item, i) => <View key={`${item.name}-${i}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: colors.border }}><Text style={[styles.note, { flex: 1 }]}>{item.name}</Text><Text style={styles.small}>x{item.quantity}</Text><Text style={styles.note}>{item.amount.toLocaleString('ko-KR')}원</Text></View>)}<Text style={styles.note}>합계 {receipt.amount.toLocaleString('ko-KR')}원 · 실제 정산에 반영되지 않았어요</Text></View>}
+          </> : <><Image source={require('./assets/receipt-empty.png')} style={styles.receipt} accessible={false} /><Text style={styles.emptyTitle}>지출 내역이 아직 없어요</Text></>}
+          <Button variant="secondary" label="영수증 찍어서 올리기" onPress={() => setCapture(true)} />
+        </View>
         <View testID="settlement-members" style={[styles.card, styles.members]}>
           <View style={styles.tabs}>
             <Pressable accessibilityRole="tab" accessibilityLabel="전체" accessibilityState={{ selected: !incompleteOnly }} onPress={() => setIncompleteOnly(false)} style={[styles.tab, !incompleteOnly && styles.selected]}><Text style={[styles.tabLabel, !incompleteOnly && styles.selectedText]}>전체</Text></Pressable>
@@ -174,7 +188,7 @@ export function SettlementDetailView({ settlement, userId, status, busy, error, 
     </ScrollView>
     {settlement ? <View style={[styles.footer, { paddingBottom: 24 + bottom }]}>
       {/* [결정] S6/S7 계약 없는 재알림·취소·금액/멤버 수정은 버튼 자체를 노출하지 않는다. */}
-      {requester && !done ? <Text style={styles.small}>보낸 메이트를 누르면 완료로 바꿀 수 있어요.</Text> : null}
+      {requester && !done ? <><Text style={styles.small}>서버 연결 대기 · 알림은 전송되지 않아요.</Text><Button label="미완료 메이트 모두에게 알리기" onPress={() => setReminder('전체 재알림 요청 준비 · 서버 연결 대기')} />{members.filter(m => !m.isCompleted && m.profileId !== settlement.creatorId).map(m => <Button key={m.id} variant="text" label={`${m.name}에게 알리기`} onPress={() => setReminder(`${m.name} 재알림 요청 준비 · 서버 연결 대기`)} />)}{!!reminder && <Text accessibilityRole="alert" style={styles.small}>{reminder}</Text>}<Text style={styles.small}>보낸 메이트를 누르면 완료로 바꿀 수 있어요.</Text></> : null}
       {/* [결정] 영수증 보존은 S6/S7 대상이므로 완료 상태에서 보존·방 삭제 시각을 약속하지 않는다. */}
       {done ? <><View style={styles.success}><Check size={20} color={colors.safeText} /><View style={styles.grow}><Text style={styles.successTitle}>{allPaid ? '정산이 끝났어요. 모두 정산을 완료했어요.' : '정산이 종료됐어요.'}</Text><Text style={styles.successNote}>정산 계좌 공개가 끝났어요.</Text></View></View>{settlement.roomId ? <Button label="채팅방으로 가기" disabled={busy} onPress={onOpenChat} /> : null}</> : null}
       {!requester && mine?.isCompleted && !done ? <View style={styles.success}><Check size={20} color={colors.safeText} /><View style={styles.grow}><Text style={styles.successTitle}>{recipient?.name ? `${recipient.name}에게 보냈다고 알렸어요` : '보냈다고 알렸어요'}</Text><Text style={styles.successNote}>다른 메이트가 보내면 정산이 끝나요.</Text></View></View> : null}

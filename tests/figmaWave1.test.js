@@ -79,6 +79,20 @@ afterEach(async () => {
 });
 
 describe('1. MateProfileSheet (메이트 프로필 시트: 628-2832, 638-12723)', () => {
+  it.each([
+    ['628:2832', '모아', false, 'female'], ['638:12499', '또리', false, 'male'],
+    ['638:12611', '웰링', false, null], ['638:12723', '나야나', true, 'male'], ['638:12835', '하늘', false, null],
+  ])('[phone %s] selected mate %s respects public/self fields', async (id, name, self, gender) => {
+    const profileId = self ? 'self' : id;
+    fetchVisibleProfile.mockResolvedValue({ data: { profile: { id: profileId, name, tag: 'phone-test', avatar_color: '', avatar_url: null }, relationship: self ? 'self' : 'room_mate', fields: { bio: `${name} 한마디`, ...(gender ? { gender } : {}) } }, error: null });
+    fetchMyFriends.mockResolvedValue({ data: [], error: null });
+    const root = await render(MateProfileSheet, { visible: true, embedded: true, profileId, roomId: 'phone-room', myId: 'self', onClose: jest.fn(), onEditProfile: jest.fn() });
+    const output = root.findAllByType(Text).map(node => node.props.children).flat().join(' ');
+    expect(output).toContain(name); expect(fetchVisibleProfile).toHaveBeenCalledWith(profileId, 'phone-room');
+    expect(output).not.toContain('계좌');
+    if (self) { expect(output).toContain('내 프로필 수정'); expect(output).not.toContain(`${name} 한마디`); }
+    else { expect(output).toContain(`${name} 한마디`); expect(output).toContain(gender ? gender === 'female' ? '여성' : '남성' : '공개 안 함'); }
+  });
   it('renders public fields only, forwards roomId, and hides bank_account even if present in server response', async () => {
     fetchVisibleProfile.mockResolvedValueOnce({
       data: {

@@ -76,17 +76,17 @@ async function render(Component, props, options) {
 function action(root, label) { return root.findAll((node) => node.props.accessibilityRole === 'button' && typeof node.props.style === 'function' && node.props.accessibilityLabel === label)[0]; }
 const output = () => JSON.stringify(renderer.toJSON());
 
-it('routes the settings information rows to local screens and keeps their profile tab mappings', async () => {
+it('[phone 564:1791] routes the settings information rows to local screens and keeps their profile tab mappings', async () => {
   const root = await render(SettingsScreen);
   const rows = root.findAllByType(ListRow);
-  expect(rows.map((row) => row.props.title)).toEqual(['서비스 이용약관', '개인정보 처리방침', '오픈소스 라이선스', '앱 버전', '선택 동의', '로그아웃', '계정 삭제']);
-  for (const row of rows.slice(0, 4)) await act(async () => row.props.onPress());
+  expect(rows.map((row) => row.props.title)).toEqual(['알림 설정', '서비스 이용약관', '개인정보 처리방침', '오픈소스 라이선스', '앱 버전', '선택 동의', '로그아웃', '계정 삭제', '문의하기']);
+  for (const row of rows.slice(1, 5)) await act(async () => row.props.onPress());
   expect(navigation.navigate.mock.calls).toEqual([['ServiceTerms'], ['PrivacyPolicy'], ['AppInfo'], ['AppInfo']]);
   for (const route of ['Settings', 'ServiceTerms', 'PrivacyPolicy', 'AppInfo']) expect(ROUTE_TO_TAB[route]).toBe('profile');
-  expect(rows[3].props.value).toBe(require('../app.json').expo.version);
+  expect(rows[4].props.value).toBe(require('../app.json').expo.version);
   expect(output()).not.toContain('최신');
   expect(output()).toContain('계정 삭제');
-  expect(output()).not.toContain('문의하기');
+  expect(output()).toContain('문의하기');
 });
 
 it('adds one settings menu row to the profile home', async () => {
@@ -136,7 +136,7 @@ it('positions the marketing link at the privacy retention section', async () => 
   expect(scrollTo).toHaveBeenCalledWith({ y: 410, animated: false });
 });
 
-it('shows current server canonical text on settings pages when the bundled hash differs', async () => {
+it('[phone 564:1961][phone 567:1909] shows current server canonical text on settings pages when the bundled hash differs', async () => {
   const { canonicalLegalDocument } = require('../src/legal/canonical');
   const manifest = JSON.parse(JSON.stringify(require('./fixtures/s1').s1Manifest));
   manifest.documents.service = { ...manifest.documents.service, content_hash: 'a'.repeat(64), canonical_content: canonicalLegalDocument({ ...terms, title: '서버의 현재 약관' }) };
@@ -156,7 +156,7 @@ it('opens preserved v1 from a newer server privacy document without replacing it
   expect(root.findByType(LegalDocumentBody).props.document.edition).toBe(2);
 });
 
-it('renders the actual configured app version and generated licenses without an update badge', async () => {
+it('[phone 601:3156] renders the actual configured app version and generated licenses without an update badge', async () => {
   const root = await render(AppInfoScreen);
   expect(root.findAll((node) => typeof node.type === 'string' && node.props.testID === 'license-row')).toHaveLength(licenses.length);
   expect(output()).toContain('공용 만남 지역의 기준 좌표는 서울교통공사, 부산교통공사, 국가철도공단의 공공데이터를 활용했습니다. 공공누리 제1유형(출처표시). 데이터 수집일: 2026-10-19. 표시명과 검색 반경은 MealChat에서 편집했습니다.');
@@ -202,7 +202,7 @@ it('ships with notification prompting disabled', () => {
   expect(jest.requireActual('../src/config/features').NOTIFICATION_PERMISSION_PROMPT).toBe(false);
 });
 
-it('skips storage and OS access while disabled even if an old pending marker exists', async () => {
+it('[phone 563:2071] skips storage and OS access while disabled even if an old pending marker exists', async () => {
   await AsyncStorage.setItem('@mealchat/notification-guide/v1/fixture-user', 'pending');
   features.NOTIFICATION_PERMISSION_PROMPT = false;
   AsyncStorage.getItem.mockClear(); AsyncStorage.setItem.mockClear();

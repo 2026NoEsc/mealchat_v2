@@ -90,6 +90,26 @@ beforeEach(() => {
   supabase.functions.invoke.mockResolvedValue({ data: { slotRecommendations: picks() }, error: null });
 });
 afterEach(async () => { if (renderer) await act(async () => renderer.unmount()); renderer = undefined; jest.restoreAllMocks(); jest.useRealTimers(); });
+it.each([
+  ['524:1318', 9, 25], ['599:2781', 10, 25], ['599:3036', 8, 25], ['599:3326', 9, 27],
+])('[phone %s] calendar month=%s selected=%s', async (id, month, selected) => {
+  jest.useFakeTimers().setSystemTime(new Date(2026, 8, 25, 12));
+  const root = await render(ScheduleHomeScreen);
+  if (month === 10) await press(root, '다음 달');
+  if (month === 8) await press(root, '이전 달');
+  expect(text(root).replace(/\s/g, '')).toContain(`${month}월`);
+  const day = targets(root).find(node => node.props.accessibilityLabel?.startsWith(`${month}월 ${selected}일`));
+  expect(day).toBeDefined(); await act(async () => day.props.onPress());
+  expect(day.props.accessibilityState.selected).toBe(true);
+  if (month === 8) expect(target(root, '이전 달').props.disabled).toBe(true);
+});
+it.each([['559:1916', false], ['599:3641', true]])('[phone %s] event sheet editing=%s', async (id, editing) => {
+  const props = sheetProps({ editing: editing ? event : null }); const root = await render(PersonalEventSheet, props);
+  if (editing) { expect(field(root, '일정 이름').props.value).toBe('알바'); expect(target(root, '일정 삭제')).toBeDefined(); }
+  else { expect(field(root, '일정 이름').props.value).toBe(''); expect(target(root, '일정 삭제')).toBeUndefined(); }
+  await act(async () => field(root, '일정 이름').props.onChangeText('로컬 일정'));
+  expect(field(root, '일정 이름').props.value).toBe('로컬 일정'); expect(props.onSave).not.toHaveBeenCalled();
+});
 
 it.each(['mine', 'free', 'busy', 'shared'])('renders the TimeCell %s state with a separate 44px target', async (state) => {
   const onPress = jest.fn(); const root = await render(TimeCell, { state, label: '25일 12시', onPress });
@@ -173,7 +193,7 @@ it('keeps other mates available cells selectable and disables past cells in v3',
   const cell = targets(root).find((node) => node.props.accessibilityLabel?.includes('12시 ~ 13시'));
   expect(cell.props.disabled).toBe(false); await act(async () => cell.props.onPress()); expect(toggle).toHaveBeenCalledWith('2026-09-25', 12);
 });
-it('selects a recommendation for comparison without presenting it as a saved time, then opens restaurants', async () => {
+it('[phone 524:1830][phone 599:4067] selects a recommendation for comparison without presenting it as a saved time, then opens restaurants', async () => {
   const root = await render(ScheduleConfirmedScreen);
   expect(text(root)).toContain('추천은 비교용이며, 시간 미정으로 식당 정하기 단계로 이동해요');
   expect(text(root)).not.toContain('89%'); expect(text(root)).toContain('4명 모두 가능');
@@ -182,7 +202,7 @@ it('selects a recommendation for comparison without presenting it as a saved tim
   expect(text(root)).not.toContain('확정'); expect(target(root, '이 시간으로 확정하기')).toBeUndefined();
   await press(root, '식당 정하러 가기'); expect(navigation.navigate).toHaveBeenCalledWith('ChatRoom', expect.objectContaining({ roomId: 'room', openSheet: 'menu' }));
 });
-it('connects real recommendation failure to retry and manual dates, and never advances stale recommendations', async () => {
+it('[phone 683:13139] connects real recommendation failure to retry and manual dates, and never advances stale recommendations', async () => {
   supabase.functions.invoke.mockResolvedValueOnce({ data: null, error: new Error('provider failure') }).mockResolvedValueOnce({ data: { slotRecommendations: picks() }, error: null });
   const root = await render(ScheduleConfirmedScreen); expect(text(root)).toContain('모두 되는 시간을 계산하지 못했어요'); expect(target(root, '식당 정하러 가기').props.disabled).toBe(true);
   await press(root, '날짜 직접 고르기'); expect(navigation.goBackWith).toHaveBeenCalledWith(expect.objectContaining({ roomId: 'room' }));
@@ -230,12 +250,12 @@ it('passes exact calendar event, edit, delete and memo arguments to existing API
   await act(async () => sheet.props.onDelete('event')); expect(deleteNote).toHaveBeenCalledWith('event');
   await act(async () => sheet.props.onSaveMemo('new memo')); expect(saveMemo).toHaveBeenCalledWith({ profileId: 'me', date: '2026-09-25', existingId: 'memo', content: 'new memo' });
 });
-it('saves one-hour cell keys in the existing availability format before navigation', async () => {
+it('[phone 524:1675] saves one-hour cell keys in the existing availability format before navigation', async () => {
   jest.useFakeTimers().setSystemTime(new Date(2026, 8, 25, 10));
   fetchRoomAvailability.mockResolvedValue({ data: { members: [], mySlots: ['2026-09-25-12'], othersSlots: [] }, error: null });
   const root = await render(ScheduleTimeScreen); await press(root, '선택 완료'); expect(saveMyAvailability).toHaveBeenCalledWith('room', ['2026-09-25-12']); expect(navigation.navigate).toHaveBeenCalledWith('ScheduleConfirmed', expect.objectContaining({ roomId: 'room' })); expect(navigation.navigate.mock.calls.at(-1)[1]).not.toHaveProperty('origin');
 });
-it('creates a room and sends only selected invitations before moving to time selection', async () => {
+it('[phone 524:1572] creates a room and sends only selected invitations before moving to time selection', async () => {
   // Room expiry now follows KST; unlike the personal calendar fixtures this is an absolute instant.
   jest.useFakeTimers().setSystemTime(new Date('2026-09-25T10:00:00+09:00')); navigation.current.params.invitees = ['mate', 'mate2'];
   const root = await render(ScheduleDetailScreen); await press(root, '다음');
@@ -322,7 +342,7 @@ it('creates a meeting without reading or requesting a private origin', async () 
   navigation.current.params={name:'공용 지역 약속',invitees:[]};
   useMyProfile.mockReturnValue({bundle:null});
   const root=await render(ScheduleDetailScreen);
-  expect(text(root)).toContain('공용 만남 지역');expect(target(root,'현재 위치로')).toBeUndefined();expect(target(root,'직접 검색')).toBeUndefined();
+  expect(text(root)).toContain('공용 만남 지역');expect(target(root,'현재 위치로')).toBeDefined(); expect(text(root)).toContain('로컬 입력');expect(target(root,'직접 검색')).toBeUndefined();
   await press(root,'다음');expect(createRoom).toHaveBeenCalled();expect(navigation.navigate).toHaveBeenCalledWith('ScheduleTime',expect.not.objectContaining({origin:expect.anything()}));
 });
 

@@ -16,6 +16,8 @@ export type RouteName =
   | 'Chat'
   | 'ChatRoom'
   | 'RoomDetail'
+  | 'LocalMenu'
+  | 'InviteLanding'
   | 'Profile'
   | 'Friends'
   | 'Privacy'
@@ -23,6 +25,10 @@ export type RouteName =
   | 'ProfileEdit'
   | 'PasswordChange'
   | 'Settings'
+  | 'Contact'
+  | 'NotificationPreferences'
+  | 'MealHistory'
+  | 'MealReceipt'
   | 'OptionalConsents'
   | 'AccountDeletion'
   | 'ServiceTerms'
@@ -56,6 +62,8 @@ export const TAB_ROUTES: Record<TabKey, RouteName> = {
 
 export const ROUTE_TO_TAB: Partial<Record<RouteName, TabKey>> = {
   Settings: 'profile',
+  MealHistory: 'profile',
+  NotificationPreferences: 'profile',
   OptionalConsents: 'profile',
   ServiceTerms: 'profile',
   PrivacyPolicy: 'profile',

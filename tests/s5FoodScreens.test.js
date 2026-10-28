@@ -18,6 +18,20 @@ const catalog={contract_version:2,catalog_version:'v1',food_groups:[],health_gro
 for(const code of ['cuisine','preferred_ingredient','food_form','spice','allergy','avoided_food','diet_type','additional_avoid']){
   const health=['allergy','avoided_food','diet_type','additional_avoid'].includes(code);catalog[health?'health_groups':'food_groups'].push({group_code:code,selection:['spice','diet_type'].includes(code)?'single':'multiple',min:0,max:17,sentinel:code==='cuisine'?'any':['allergy','avoided_food','diet_type'].includes(code)?'none':null,options:signupFoodOptions.filter(o=>o.group===code).map(o=>({...o,enabled:o.code!=='other_input'}))});
 }
+it.each([
+  ['495:1026', 1, 'cuisine'], ['590:2282', 1, 'any'], ['495:1163', 2, 'allergy'], ['495:1248', 2, 'avoided_food'], ['495:1325', 2, 'diet_type'],
+])('[phone %s] food form step=%s panel=%s', async (id, step, panel) => {
+  const Form = require('../src/screens/food/FoodProfileForm').default;
+  const onFood = jest.fn(), onHealth = jest.fn();
+  await act(async () => { renderer = create(React.createElement(Form, { step, catalog, food: { cuisines: ['korean', 'japanese'], ingredients: [], forms: [], spice: null }, health: { allergy_codes: [], avoided_food_codes: [], diet_type_code: null, additional_avoid_codes: [] }, expanded: panel, onFood, onHealth, onExpand: jest.fn(), onBack: jest.fn(), onSkip: jest.fn(), onNext: jest.fn() })); });
+  const group = catalog[step === 1 ? 'food_groups' : 'health_groups'].find(item => item.group_code === (panel === 'any' ? 'cuisine' : panel));
+  const option = group.options.find(item => panel === 'any' ? item.code === 'any' : item.enabled && item.code !== 'none' && item.code !== 'any');
+  const role = panel === 'diet_type' ? 'radio' : 'checkbox';
+  const node = renderer.root.findAll(item => item.props.accessibilityRole === role && item.props.accessibilityLabel === option.label && typeof item.props.onPress === 'function').at(-1);
+  expect(node).toBeDefined(); await act(async () => node.props.onPress());
+  if (step === 1) expect(onFood).toHaveBeenCalledWith(expect.objectContaining({ cuisines: panel === 'any' ? ['any'] : expect.any(Array) }));
+  else { expect(onHealth).toHaveBeenCalled(); expect(text(renderer.root)).toContain('공동 식당 추천에는 사용하지 않아요'); }
+});
 const food={contract_version:2,schema_version:2,catalog_version:'v1',requires_update:false,preferences:{cuisines:['korean'],ingredients:[],forms:[],spice:null},revision:'1',completed_at:null,onboarding:{seen_at:null,snoozed_until:null}};
 const health={contract_version:2,schema_version:2,catalog_version:'v1',requires_update:false,status:'not_started',allergy_codes:[],avoided_food_codes:[],diet_type_code:null,additional_avoid_codes:[],revision:'0',consent_revision:'3',valid_until:new Date(Date.now()+86400000).toISOString(),completed_at:null};
 let renderer,navigation;

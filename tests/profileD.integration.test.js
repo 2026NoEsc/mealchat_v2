@@ -138,7 +138,7 @@ it('announces toast without focusing, expires at 3s/5s, and runs Undo only once'
   expect(renderer.toJSON()).toBe(null);
 });
 
-it('removes immediately, persists before the undo window, restores with a new follow id, and can delete again', async () => {
+it('[phone 530:1594][phone 601:3028] removes immediately, persists before the undo window, restores with a new follow id, and can delete again', async () => {
   jest.useFakeTimers();
   const root = await render(FriendsScreen);
   await press(root, '모아 삭제');
@@ -173,7 +173,7 @@ it('reloads the list after failed removal and reports failed Undo without preten
   expect(action(root, '모아 삭제')).toBeUndefined();
 });
 
-it('searches and adds a real candidate and shows the completion toast', async () => {
+it('[phone 601:2884][phone 601:2954] searches and adds a real candidate and shows the completion toast', async () => {
   friendsApi.searchProfilesByTag.mockResolvedValue({ data: [{ id: 'friend-2', name: '또리', tag: 'user-abcdef12', avatar_color: '' }], error: null });
   const root = await render(FriendsScreen);
   await act(async () => input(root, '닉네임 또는 유저 코드').props.onChangeText('@user-abcdef12'));
@@ -184,7 +184,7 @@ it('searches and adds a real candidate and shows the completion toast', async ()
   expect(output()).toContain('또리님을 메이트로 추가했어요');
 });
 
-it('selects one gender segment and preserves existing profile saving APIs', async () => {
+it('[phone 530:1513] selects one gender segment and preserves existing profile saving APIs', async () => {
   const root = await render(ProfileEditScreen);
   expect(action(root, '남성').props.accessibilityState.checked).toBe(true);
   await press(root, '여성');
@@ -198,7 +198,7 @@ it('selects one gender segment and preserves existing profile saving APIs', asyn
   expect(navigation.resetTo).toHaveBeenCalledWith('Profile');
 });
 
-it.each(['앨범에서 고르기', '사진 찍기'])('explains permission before requesting it and uploads the selected photo (%s)', async (label) => {
+it.each(['앨범에서 고르기', '사진 찍기'])('[phone 601:2603] explains permission before requesting it and uploads the selected photo (%s)', async (label) => {
   const camera = label === '사진 찍기';
   const permission = camera ? picker.requestCameraPermissionsAsync : picker.requestMediaLibraryPermissionsAsync;
   const launch = camera ? picker.launchCameraAsync : picker.launchImageLibraryAsync;
@@ -238,7 +238,7 @@ it('opens the separate password route and preserves unsaved profile edits withou
   expect(root.findAllByType(TextInput).some((node) => node.props.secureTextEntry)).toBe(false);
 });
 
-it('selects an origin result, saves its coordinates, and clears stale coordinates after editing', async () => {
+it('[phone 530:1736][phone 601:3541] selects an origin result, saves its coordinates, and clears stale coordinates after editing', async () => {
   const places = [
     { id: 'p1', name: '서면역 1호선', address: '부산 부산진구', lat: 35.157, lng: 129.059, category: '' },
     { id: 'p2', name: '전포역', address: '부산 부산진구 전포동', lat: 35.15, lng: 129.06, category: '' },
@@ -257,20 +257,20 @@ it('selects an origin result, saves its coordinates, and clears stale coordinate
   expect(api.saveStartLocation).toHaveBeenLastCalledWith('self', '직접 입력한 주소', null);
 });
 
-it('writes one canonical privacy field with its current server revision', async () => {
+it('[phone 530:1656] writes one canonical privacy field with its current server revision', async () => {
   const root = await render(PrivacyScreen);
   await act(async () => root.findAllByType(Switch)[0].props.onChange(false));
   expect(api.setProfileVisibility).toHaveBeenCalledWith('birthdate', 'private', '2');
   expect(api.savePrivacySettings).not.toHaveBeenCalled();
 });
 
-it('uses actual data and a three-item completion denominator without unavailable menu entries', async () => {
+it('[phone 530:1403] uses actual data and a three-item completion denominator without unavailable menu entries', async () => {
   await render(ProfileHomeScreen);
   const text = output();
   expect(text).toContain('계정 완성하기');
   expect(text).toContain('음식 취향 매칭');
   expect(text).not.toContain('일정 입력하기');
-  expect(text).not.toContain('밥약 기록');
+  expect(text).toContain('밥약 기록');
   expect(text).toContain('음식 취향 다시 고르기');
 });
 
@@ -449,7 +449,7 @@ it.each([
   expect(output()).not.toContain(friendly);
 });
 
-it('keeps all password inputs secure and requires the current field before enabling submission', async () => {
+it('[phone 601:2733] keeps all password inputs secure and requires the current field before enabling submission', async () => {
   const root = await render(PasswordChangeScreen);
   expect(root.findAllByType(TextInput).every((node) => node.props.secureTextEntry)).toBe(true);
   await act(async () => {
@@ -460,7 +460,7 @@ it('keeps all password inputs secure and requires the current field before enabl
   expect(output()).toContain('비밀번호가 일치해요.');
 });
 
-it('submits once, returns with a completion flag, and renders the destination Toast once', async () => {
+it('[phone 601:2759] submits once, returns with a completion flag, and renders the destination Toast once', async () => {
   let finish;
   auth.updatePassword.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
   const root = await render(PasswordChangeScreen);

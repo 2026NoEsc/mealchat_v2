@@ -23,6 +23,14 @@ const List = require('../src/screens/settlement/SettlementsScreen').default;
 const { SettlementSheet } = require('../src/screens/chat/ChatRoomSheets');
 const { settlementDetailRoute, settlementDetailBackRoute, ROUTE_TO_TAB } = require('../src/navigation/routes');
 const { setConsentAccess } = require('../src/consents/access');
+const phoneSettlementCases = [
+  ['541:1617', 'sender'], ['541:1714', 'expenses'], ['563:1936', 'confirmation'], ['588:1860', 'sent'],
+  ['588:2024', 'empty'], ['588:2166', 'expenses'], ['588:2320', 'complete'],
+  ['629:1858', 'more'], ['629:1993', 'sender-more'], ['629:2128', 'cancel'], ['629:2256', 'cancel-pending'],
+  ['629:2362', 'reminder-all'], ['629:2461', 'reminder-one'],
+  ['631:5227', 'empty'], ['631:5296', 'reminder-all'], ['631:5534', 'expenses'], ['631:5634', 'reminder-one'],
+  ['631:5738', 'complete'], ['631:5851', 'more'], ['631:5940', 'cancel'], ['631:6021', 'cancel-pending'],
+];
 let renderer, row, query, navigation, user, appEvents;
 function setUser(id) { user = { id }; setConsentAccess(id, 'accepted'); }
 const text = () => JSON.stringify(renderer.toJSON());
@@ -48,6 +56,47 @@ beforeEach(() => {
   supabase.from.mockReturnValue(query); supabase.rpc.mockResolvedValue({ data: null, error: null });
 });
 afterEach(async () => { if (renderer) await act(async () => renderer.unmount()); renderer = undefined; setConsentAccess(null, 'loading'); jest.restoreAllMocks(); });
+it.each(phoneSettlementCases)('[phone %s] settlement state %s', async (id, state) => {
+  const shabu = id.startsWith('631:');
+  row.rooms.location_name = shabu ? '채선당 서면점' : '돼지집 서면점';
+  row.rooms.confirmed_menu = row.rooms.location_name;
+  row.rooms.title = shabu ? '오늘 저녁팟 · 샤브샤브' : '오늘 저녁팟';
+  if (['sender', 'confirmation', 'sent', 'sender-more'].includes(state)) setUser('sender');
+  if (state === 'complete') row.dutch_pay_members.forEach(member => { member.is_completed = true; });
+  if (state === 'sent') row.dutch_pay_members[1].is_completed = true;
+  await mount(); expect(text()).toContain(row.rooms.title); expect(text()).toContain(row.rooms.location_name);
+  expect(text()).toContain('52,000원');
+  if (state === 'empty') expect(text()).toContain('지출 내역이 아직 없어요');
+  if (state === 'sender') expect(renderer.root.findByProps({ testID: 'payment-boundary' }).props.canSend).toBe(true);
+  if (state === 'confirmation') { await press('나야나 (나), 대기'); expect(text()).toContain('보냈어요'); expect(supabase.rpc).not.toHaveBeenCalled(); }
+  if (state === 'sent') expect(text()).toContain('모아에게 보냈다고 알렸어요');
+  if (state === 'complete') { expect(text()).toContain('4명 모두 완료'); expect(renderer.root.findAllByProps({ testID: 'payment-boundary' })).toHaveLength(0); }
+  if (state === 'expenses') {
+    await press('영수증 찍어서 올리기'); await press('촬영'); await press('직접 입력');
+    const fields = renderer.root.findAllByType(TextInput);
+    await act(async () => { fields[0].props.onChangeText(row.rooms.location_name); fields[1].props.onChangeText('52000'); });
+    await press('로컬 초안으로 넣기'); await press('지출 내역 펼치기'); expect(text()).toContain('실제 정산에 반영되지 않았어요');
+    expect(text()).toContain(row.rooms.location_name); await press('지출 내역 접기'); expect(control('지출 내역 펼치기')).toBeDefined();
+  }
+  if (state === 'reminder-all') { await press('미완료 메이트 모두에게 알리기'); expect(text()).toContain('전체 재알림 요청 준비'); }
+  if (state === 'reminder-one') { await press('웰링에게 알리기'); expect(text()).toContain('웰링 재알림 요청 준비'); }
+  if (['more', 'sender-more', 'cancel', 'cancel-pending'].includes(state)) {
+    await press('정산 더보기'); expect(control('채팅방으로 가기')).toBeDefined();
+    if (state === 'sender-more') expect(control('정산 취소')).toBeUndefined();
+    if (state.startsWith('cancel')) { await press('정산 취소'); expect(text()).toContain('이미 보낸 돈은 직접 돌려줘야 해요'); }
+    if (state === 'cancel-pending') { await press('취소 요청 준비'); expect(navigation.replace).toHaveBeenCalledWith('ChatRoom', { roomId: 'room', localSettlementAction: 'cancel-prepared' }); }
+  }
+  expect(supabase.rpc).not.toHaveBeenCalled();
+});
+it('expands a local receipt draft without altering the settlement or writing payment data', async () => {
+  await mount(); await press('영수증 찍어서 올리기'); await press('촬영'); await press('직접 입력');
+  const fields = renderer.root.findAllByType(TextInput);
+  await act(async () => { fields[0].props.onChangeText('새 식당'); fields[1].props.onChangeText('12000'); });
+  await press('로컬 초안으로 넣기'); expect(text()).toContain('지출 내역 · 로컬 초안');
+  expect(text()).not.toContain('새 식당'); await press('지출 내역 펼치기');
+  expect(text()).toContain('새 식당'); expect(text()).toContain('실제 정산에 반영되지 않았어요'); expect(text()).toContain('52,000원');
+  await press('지출 내역 접기'); expect(text()).not.toContain('새 식당'); expect(supabase.rpc).not.toHaveBeenCalled();
+});
 it('renders requester summary, recipient and progress, and hides unavailable actions', async () => {
   await mount(); expect(text()).toContain('오늘 저녁팟'); expect(text()).toContain('52,000원'); expect(text()).toContain('4명 중 2명 완료');
   expect(text()).toContain('받는 사람'); expect(text()).toContain('지출 내역이 아직 없어요');

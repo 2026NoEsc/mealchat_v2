@@ -1,3 +1,4 @@
+import SettlementAccountForm, { type SettlementAccountDraft } from '../settlement/SettlementAccountForm';
 import { Check, Info, Wallet } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
@@ -47,9 +48,11 @@ export function SettlementSheet({ visible, roomId, roomStage = null, appointment
   const currentStage = useRef(roomStage); currentStage.current = roomStage;
   const currentOwnerConfirmed = useRef(Boolean(appointmentConfirmedAt)); currentOwnerConfirmed.current = Boolean(appointmentConfirmedAt);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [accountDraft, setAccountDraft] = useState<{ key: string; value: SettlementAccountDraft } | null>(null);
   const [pendingMember, setPendingMember] = useState<SettlementMember | null>(null);
   const [completionError, setCompletionError] = useState<string | null>(null);
-  useEffect(() => { setPendingMember(null); setCompletionError(null); }, [visible, roomId, user?.id]);
+  useEffect(() => { setAccountOpen(false); setAccountDraft(null); setPendingMember(null); setCompletionError(null); }, [visible, roomId, user?.id]);
   const [reloadToken, setReloadToken] = useState(0); const [loadStatus, setLoadStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const { height } = useWindowDimensions();
   const { showToast, toastProps } = useToast(); const accountToastShown = useRef(false);
@@ -165,8 +168,9 @@ export function SettlementSheet({ visible, roomId, roomStage = null, appointment
   };
   const closeConfirmation = () => { if (!busy) { setPendingMember(null); setCompletionError(null); } };
   // Change content in one modal instead of stacking iOS sheet presentations.
-  return <BottomSheet visible={visible} title={pendingMember?.isCompleted ? '송금 완료 표시를 되돌릴까요?' : pendingMember ? '' : 'N빵 정산'} subtitle={pendingMember ? undefined : '결제 금액을 넣으면 참여한 사람 수로 나눠요.'} onClose={() => { if (!busy) { if (pendingMember) closeConfirmation(); else onClose(); } }}>
-    {pendingMember ? pendingMember.isCompleted ? <SettlementStatusConfirmationContent kind="undo" busy={busy} error={completionError} onClose={closeConfirmation} onConfirm={() => void toggleMine(pendingMember, true)} /> : <TransferConfirmationContent recipient={members.find(member => member.profileId === settlement?.creatorId)?.name || null} amount={confirmationAmount} busy={busy} error={completionError} onClose={closeConfirmation} onConfirm={() => void toggleMine(pendingMember, true)} /> : <ScrollView style={styles.scroll} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+  return <BottomSheet visible={visible} title={accountOpen ? '정산 받을 계좌 등록' : pendingMember?.isCompleted ? '송금 완료 표시를 되돌릴까요?' : pendingMember ? '' : 'N빵 정산'} subtitle={accountOpen || pendingMember ? undefined : '결제 금액을 넣으면 참여한 사람 수로 나눠요.'} onClose={() => { if (!busy) { if (accountOpen) setAccountOpen(false); else if (pendingMember) closeConfirmation(); else onClose(); } }}>
+    {accountOpen ? <SettlementAccountForm key={sheetKey} onClose={() => setAccountOpen(false)} onOpenProfile={registerAccount} onDraft={draft => { if (currentRoom.current !== roomId || currentUser.current !== user?.id) return; setAccountDraft({ key: sheetKey, value: draft }); setAccountOpen(false); }} /> : pendingMember ? pendingMember.isCompleted ? <SettlementStatusConfirmationContent kind="undo" busy={busy} error={completionError} onClose={closeConfirmation} onConfirm={() => void toggleMine(pendingMember, true)} /> : <TransferConfirmationContent recipient={members.find(member => member.profileId === settlement?.creatorId)?.name || null} amount={confirmationAmount} busy={busy} error={completionError} onClose={closeConfirmation} onConfirm={() => void toggleMine(pendingMember, true)} /> : <ScrollView style={styles.scroll} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      {accountDraft?.key === sheetKey && <Text accessibilityLiveRegion="polite" style={styles.note}>{accountDraft.value.bank} · 끝 {accountDraft.value.account.slice(-4)}자리 계좌 초안을 준비했어요. 아직 저장되지 않아 정산에 사용할 수 없어요.</Text>}
       {loadStatus === 'error' ? <FailureCard title="정산을 불러오지 못했어요" reason="이전 정산을 확인한 뒤 요청할 수 있어요." onRetry={() => setReloadToken(n => n + 1)} /> : null}
       {unverifiedLabel ? <Text style={styles.note}>{unverifiedLabel} · 이전 정산의 약속 확정 여부는 확인할 수 없어요.</Text> : null}
       {!settlement && !canCreate ? <Text style={styles.note}>{roomStage ? settlementConfirmationRequired : '방의 약속 확정 상태를 확인한 뒤 정산을 시작할 수 있어요.'}</Text> : null}
@@ -189,7 +193,7 @@ export function SettlementSheet({ visible, roomId, roomStage = null, appointment
       <View style={styles.eachBox}><Text style={styles.eachLabel}>1인당</Text><Text style={styles.each}>{settlement ? formatAmount(each) : '요청 후 표시'}</Text></View>
       {settlement ? <SettlementPaymentAccountView payment={payment} amount={confirmationAmount} canSend={members.some(member => member.profileId === user?.id && !member.isCompleted)} disabled={busy || loadStatus !== 'ready'} completed={finished} /> : null}
       {editable ? !bundle ? <View><Text style={styles.note}>{profileStatus === 'error' ? '받을 계좌를 확인하지 못했어요. 프로필을 다시 불러와 주세요.' : '받을 계좌를 확인하고 있어요'}</Text>{profileStatus === 'error' ? <Button variant="secondary" label="계좌 다시 확인" onPress={() => reloadProfile?.()} /> : null}</View> : hasAccount ? <View style={styles.account}><Info size={16} color={colors.sub} /><Text accessibilityLabel={accountAccessibilityLabel} style={styles.note}>받을 계좌: {bankName} {maskedAccount} (프로필에 등록된 내 계좌)</Text></View>
-        : <View style={styles.warning}><View style={styles.account}><Wallet size={18} color={v3FeedbackColors.error} /><View style={styles.grow}><Text style={styles.warningTitle}>받을 계좌가 아직 없어요</Text><Text style={styles.warningNote}>계좌를 등록해야 메이트가 바로 보낼 수 있어요.</Text></View></View><Button variant="secondary" style={styles.register} label="계좌 등록하기" disabled={busy} onPress={registerAccount} /></View> : null}
+        : <View style={styles.warning}><View style={styles.account}><Wallet size={18} color={v3FeedbackColors.error} /><View style={styles.grow}><Text style={styles.warningTitle}>받을 계좌가 아직 없어요</Text><Text style={styles.warningNote}>계좌를 등록해야 메이트가 바로 보낼 수 있어요.</Text></View></View><Button variant="secondary" style={styles.register} label="계좌 등록하기" disabled={busy} onPress={() => setAccountOpen(true)} /></View> : null}
       {finished ? <Text style={styles.note}>정산이 끝났어요. 되돌릴 수 없어요.</Text> : null}
       {(finished || disclosureClosed) && canCreate ? <Button variant="secondary" label="새 정산 요청하기" disabled={busy || loadStatus !== 'ready'} onPress={() => { setSettlement(null); setAmountText(''); }} /> : null}
       {editable ? <Text style={styles.note}>정산을 요청하면 이 계좌를 정산이 끝날 때까지 정산 참여자와 생성자에게 공개해요. 프로필의 계좌 공개 설정과는 별개예요.</Text> : null}
@@ -219,7 +223,7 @@ export function MembersSheet({ visible, participants, code, myId, ownerId = null
   };
   // One modal changes its contents, avoiding overlapping iOS sheet presentations.
   return <BottomSheet visible={visible} title={selected ? '' : inviting && canInvite ? '메이트 초대' : '멤버 ' + participants.length + '명'} subtitle={selected ? undefined : canInvite ? inviteSubtitle : '정산이 시작되어 메이트를 더 초대할 수 없어요.'} onClose={() => selected ? setSelection(null) : inviting ? setInviting(false) : onClose()}>
-    {selected ? <MateProfileSheet key={`${contextKey}:${selected.id}:${selected.profileId ?? ''}`} visible embedded profileId={selected.profileId} roomId={roomId} myId={myId} name={selected.name} avatarUrl={selected.avatarUrl} onClose={() => setSelection(null)} /> : inviting && canInvite && code ? <MateInviteContent code={code} roomId={roomId ?? undefined} /> : <>{canInvite ? <InviteCodeBox code={code} /> : null}<ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+    {selected ? <MateProfileSheet key={`${contextKey}:${selected.id}:${selected.profileId ?? ''}`} visible embedded profileId={selected.profileId} roomId={roomId} myId={myId} name={selected.name} avatarUrl={selected.avatarUrl} onClose={() => setSelection(null)} /> : inviting && canInvite && code ? <><MateInviteContent code={code} roomId={roomId ?? undefined} /><Button variant="text" label="초대받는 화면 보기" onPress={() => { onClose(); navigate('InviteLanding', { code }); }} /></> : <>{canInvite ? <InviteCodeBox code={code} /> : null}<ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
       {participants.length === 0 ? <Text style={styles.note}>참여 멤버를 불러오지 못했어요</Text> : participants.map(participant => <RoomMemberRow key={participant.id} participant={participant} myId={myId} ownerId={ownerId} onPress={() => selectMember(participant)} />)}
     </ScrollView>{canInvite && code ? <Button variant="secondary" label="＋ 메이트 초대" onPress={() => setInviting(true)} /> : null}</>}
   </BottomSheet>;

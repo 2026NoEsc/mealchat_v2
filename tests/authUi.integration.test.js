@@ -77,6 +77,24 @@ function action(root, label) {
   return root.findAll((node) => typeof node.props.style === 'function' && typeof node.props.onPress === 'function' && node.props.accessibilityLabel === label)[0];
 }
 function input(root, label) { return root.findAllByType(TextInput).find((node) => node.props.accessibilityLabel === label); }
+it.each([
+  ['519:1216', 'start'], ['519:1229', 'login'], ['519:1262', 'personal'], ['520:1244', 'calendar'],
+  ['558:1631', 'reset'], ['558:1686', 'new-password'], ['558:1712', 'reconsent'], ['599:4206', 'duplicate'], ['543:1777', 'loading'],
+])('[phone %s] auth state %s', async (id, state) => {
+  const allText = () => JSON.stringify(renderer.toJSON());
+  if (state === 'start') { const root = await render(SignupStartScreen); await act(async () => action(root, '가입하기').props.onPress()); expect(navigation.navigate).toHaveBeenCalledWith('SignupPersonal'); expect(allText()).toContain('밥 한 끼'); }
+  if (state === 'login') { const root = await render(LoginScreen); expect(input(root, '이메일')).toBeDefined(); expect(input(root, '비밀번호').props.secureTextEntry).toBe(true); }
+  if (state === 'calendar') { const root = await render(require('../src/screens/signup/SignupCalendarScreen').default); expect(action(root, '구글 캘린더 연결하기 · 준비 중').props.disabled).toBe(true); await act(async () => action(root, '나중에 할게요').props.onPress()); expect(navigation.navigate).toHaveBeenCalledWith('SignupTaste'); }
+  if (state === 'personal' || state === 'duplicate') {
+    checkEmailAvailable.mockResolvedValue({ status: 'taken' }); const root = await render(SignupPersonalScreen, undefined, SignupDraftProvider);
+    expect(input(root, '계좌번호')).toBeDefined();
+    if (state === 'duplicate') { await act(async () => input(root, '이메일').props.onChangeText('fixture@example.test')); await act(async () => root.findByType(SecondaryButton).props.onPress()); expect(allText()).toContain('이미 가입된 이메일'); expect(input(root, '이메일').props['aria-invalid']).toBe(true); }
+  }
+  if (state === 'reset') { const root = await render(PasswordResetSheet, { onClose: jest.fn() }); expect(input(root, '이메일')).toBeDefined(); expect(auth.sendPasswordReset).not.toHaveBeenCalled(); }
+  if (state === 'new-password') { const root = await render(NewPasswordScreen); expect(root.findAllByType(TextInput).every(node => node.props.secureTextEntry)).toBe(true); expect(auth.completePasswordReset).not.toHaveBeenCalled(); }
+  if (state === 'reconsent') { const root = await render(ReConsentScreen, { onDone: jest.fn() }); expect(root.findAllByType(Checkbox)).toHaveLength(3); expect(root.findByType(PrimaryButton).props.disabled).toBe(true); }
+  if (state === 'loading') { await render(require('../src/components/ui/StartupLoading').default, { visible: true }); expect(allText()).toContain('불러'); }
+});
 
 it('toggles password visibility without changing the password and exposes the toggle state', async () => {
   const root = await render(PasswordField, { label: '비밀번호', value: 'fixture-password' });
@@ -355,7 +373,7 @@ function SeededSignupProvider({ children }) {
   return React.createElement(SignupDraftProvider, null, React.createElement(SignupSeed, null, children));
 }
 
-it.each([false, true])('blocks signup until both required terms are chosen and preserves its API arguments, marketing=%s', async (marketing) => {
+it.each([false, true])('[phone 520:1285][phone 590:2447] blocks signup until both required terms are chosen and preserves its API arguments, marketing=%s', async (marketing) => {
   const root = await render(SignupTermsScreen, undefined, SeededSignupProvider);
   expect(root.findByType(PrimaryButton).props.disabled).toBe(true);
   await act(async () => root.findByType(PrimaryButton).props.onPress());

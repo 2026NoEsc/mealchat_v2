@@ -16,11 +16,13 @@ export default function SettingsScreen() {
   const { navigate } = useNavigation();
   const serverMode = useConsentServerMode();
   const { leave, leaving, toastProps } = useSignOutAction();
-  // TODO(서버 단계): 알림 설정 계약이 없으므로 알림 묶음은 표시하지 않는다.
-  // TODO(서버 단계): 앱 안 문의 계약이 없으므로 도움 묶음은 표시하지 않는다.
   // S1 9.9: 계정 삭제는 S2 미구현 안내로만 연결하며 실제 삭제 요청은 보내지 않는다.
   return <SettingsFrame title="설정">
     <ScrollView contentContainerStyle={styles.body}>
+      <View style={styles.group}>
+        <Text style={styles.groupTitle}>알림</Text>
+        <View style={styles.card}><ListRow title="알림 설정" value="준비 중" style={styles.lastRow} onPress={() => navigate('NotificationPreferences')} /></View>
+      </View>
       <View style={styles.group}>
         <Text style={styles.groupTitle}>정보</Text>
         <View style={styles.card}>
@@ -39,6 +41,10 @@ export default function SettingsScreen() {
         <Text style={styles.groupTitle}>계정</Text>
         <View style={styles.card}><ListRow title="로그아웃" disabled={leaving} onPress={() => void leave()} />
           <ListRow title="계정 삭제" style={styles.lastRow} onPress={() => navigate('AccountDeletion')} /></View>
+      </View>
+      <View style={styles.group}>
+        <Text style={styles.groupTitle}>도움</Text>
+        <View style={styles.card}><ListRow title="문의하기" value="전송 준비 중" style={styles.lastRow} onPress={() => navigate('Contact')} /></View>
       </View>
     </ScrollView>
     <Toast {...toastProps} />
