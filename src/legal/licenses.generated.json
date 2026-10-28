@@ -1,0 +1,122 @@
+[
+  {
+    "name": "@expo/metro-runtime",
+    "version": "6.1.2",
+    "license": "MIT"
+  },
+  {
+    "name": "@react-native-async-storage/async-storage",
+    "version": "2.2.0",
+    "license": "MIT"
+  },
+  {
+    "name": "@supabase/supabase-js",
+    "version": "2.112.3",
+    "license": "MIT"
+  },
+  {
+    "name": "expo",
+    "version": "54.0.37",
+    "license": "MIT"
+  },
+  {
+    "name": "expo-calendar",
+    "version": "15.0.8",
+    "license": "MIT"
+  },
+  {
+    "name": "expo-font",
+    "version": "14.0.12",
+    "license": "MIT"
+  },
+  {
+    "name": "expo-image-picker",
+    "version": "17.0.11",
+    "license": "MIT"
+  },
+  {
+    "name": "expo-linear-gradient",
+    "version": "15.0.8",
+    "license": "MIT"
+  },
+  {
+    "name": "expo-linking",
+    "version": "8.0.12",
+    "license": "MIT"
+  },
+  {
+    "name": "expo-notifications",
+    "version": "0.32.17",
+    "license": "MIT"
+  },
+  {
+    "name": "expo-secure-store",
+    "version": "15.0.8",
+    "license": "MIT"
+  },
+  {
+    "name": "expo-status-bar",
+    "version": "3.0.9",
+    "license": "MIT"
+  },
+  {
+    "name": "expo-system-ui",
+    "version": "6.0.9",
+    "license": "MIT"
+  },
+  {
+    "name": "lucide-react-native",
+    "version": "0.300.0",
+    "license": "ISC"
+  },
+  {
+    "name": "react",
+    "version": "19.1.0",
+    "license": "MIT"
+  },
+  {
+    "name": "react-dom",
+    "version": "19.1.0",
+    "license": "MIT"
+  },
+  {
+    "name": "react-native",
+    "version": "0.81.5",
+    "license": "MIT"
+  },
+  {
+    "name": "react-native-safe-area-context",
+    "version": "5.6.2",
+    "license": "MIT"
+  },
+  {
+    "name": "react-native-svg",
+    "version": "15.12.1",
+    "license": "MIT"
+  },
+  {
+    "name": "react-native-url-polyfill",
+    "version": "4.0.0",
+    "license": "MIT"
+  },
+  {
+    "name": "react-native-web",
+    "version": "0.21.2",
+    "license": "MIT"
+  },
+  {
+    "name": "react-native-webview",
+    "version": "13.15.0",
+    "license": "MIT"
+  },
+  {
+    "name": "42dot Sans",
+    "version": null,
+    "license": "SIL OFL 1.1"
+  },
+  {
+    "name": "Iosevka Charon",
+    "version": null,
+    "license": "SIL OFL 1.1"
+  }
+]

@@ -1,368 +1,130 @@
+import { Check, ChevronRight } from 'lucide-react-native';
+import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useAuth } from '../../auth/AuthProvider';
-import AppHeader from '../../components/AppHeader';
+import { useSignOutAction } from '../../auth/useSignOutAction';
 import Avatar from '../../components/Avatar';
-import {
-  countLikedTastes,
-  formatAccount,
-  formatBirthDate,
-  formatGender,
-} from '../../lib/format';
+import FailureCard from '../../components/ui/FailureCard';
+import { ListRow } from '../../components/ui/ListRow';
+import Toast from '../../components/ui/Toast';
+import { formatAccount, formatBirthDate, formatGender } from '../../lib/format';
+import { fetchMyFriends } from '../../lib/friends';
 import { useNavigation } from '../../navigation/NavigationContext';
-import type { RouteName } from '../../navigation/routes';
 import { useMyProfile } from '../../profile/useMyProfile';
-import { fs, s } from '../../theme/scale';
-import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { v3Colors as colors, v3FeedbackColors } from '../../theme/tokens';
+import { fontFamily } from '../../theme/typography';
+import ProfileFrame, { profileStyles as shared } from './ProfileFrame';
 
-
-type InfoRow = { label: string; value: string; danger?: boolean };
-
-type Step = { done: boolean; label: string; action: string; route?: RouteName };
-
-const LINKS: { label: string; route: RouteName }[] = [
-  { label: '일정 입력하기', route: 'Schedule' },
-  { label: '내 친구 관리', route: 'Friends' },
-  { label: '정보 공개 범위 설정', route: 'Privacy' },
-];
-
-/**
- * Figma 프로필/프로필 홈 (159:544) — 220 x 486
- * body x11.5 y82 w197 / 카드 y82 h145, y233 h98, y337 h71.2 / 푸터 y414
- */
+/** Phone 530:1403. Completion uses persisted fields, never a fixture count. */
 export default function ProfileHomeScreen() {
-  const insets = useSafeAreaInsets();
   const { navigate } = useNavigation();
-  const { signOut } = useAuth();
-  const { status, bundle } = useMyProfile();
-
+  const { leave, leaving, toastProps } = useSignOutAction();
+  const { status, bundle, userId, reload } = useMyProfile();
+  const [friendCount, setFriendCount] = useState<number | null>(null);
+  useEffect(() => {
+    let active = true;
+    setFriendCount(null);
+    if (userId) void fetchMyFriends(userId).then(({ data, error }) => {
+      if (active && !error) setFriendCount(data?.length ?? 0);
+    });
+    return () => { active = false; };
+  }, [userId]);
+  if (status !== 'ready' || !bundle) return <ProfileFrame><ScrollView contentContainerStyle={styles.body}>
+    {status === 'error' ? <FailureCard title="프로필을 불러오지 못했어요" onRetry={reload} />
+      : <View testID="profile-loading" accessible accessibilityLabel="프로필 불러오는 중" accessibilityState={{ busy: true }} style={styles.skeleton}>
+        <View style={styles.skeletonAvatar} /><View style={styles.skeletonLine} /><View style={styles.skeletonLine} />
+      </View>}
+  </ScrollView></ProfileFrame>;
   const privateProfile = bundle?.privateProfile;
-  const likedTastes = countLikedTastes(privateProfile?.tastes);
   const account = formatAccount(privateProfile?.bankName, privateProfile?.accountNumber);
-  const birth = formatBirthDate(privateProfile?.birthDate);
-  const gender = formatGender(privateProfile?.personalData.gender);
-  const startLocation = privateProfile?.startLocationName?.trim() || null;
-
-  /* 값이 없으면 채워야 할 곳으로 보이게 danger 로 표시한다 */
-  const info: InfoRow[] = [
-    { label: '생년월일', value: birth ?? '아직 설정 안됨', danger: !birth },
-    { label: '성별', value: gender ?? '아직 설정 안됨', danger: !gender },
-    { label: '송금 계좌', value: account ?? '아직 설정 안됨', danger: !account },
-    {
-      label: '음식 취향',
-      value: likedTastes > 0 ? `${likedTastes}개 선택함` : '아직 설정 안됨',
-      danger: likedTastes === 0,
-    },
+  const origin = privateProfile?.startLocationName?.trim();
+  const info = [
+    { label: '생년월일', value: formatBirthDate(privateProfile?.birthDate) ?? '아직 설정 안 됨' },
+    { label: '성별', value: formatGender(privateProfile?.personalData.gender) ?? '아직 설정 안 됨' },
+    { label: '송금 계좌', value: account ?? '아직 등록 안 됨', missing: !account },
   ];
-
-  const steps: Step[] = [
-    { done: Boolean(account), label: '송금 계좌 등록', action: '설정하기', route: 'ProfileEdit' },
-    { done: Boolean(startLocation), label: '사는 곳 설정', action: '설정하기', route: 'Origin' },
-    { done: likedTastes > 0, label: '음식 취향 매칭', action: '게임 시작', route: 'TasteGame' },
+  // TODO(서버 단계): 일정 입력 완료를 판단할 계약이 없어 항목과 분모에서 제외한다.
+  const steps = [
+    ...(privateProfile?.foodProfileAvailable !== false ? [{ label: '음식 취향 매칭', done: privateProfile?.foodProfileCompleted === true, action: '설정하기', onPress: () => navigate('FoodProfile') }] : []),
+    { label: '송금 계좌 등록', done: Boolean(account), action: '등록하기', onPress: () => navigate('ProfileEdit') },
+    { label: '출발지 설정', done: Boolean(origin), action: '설정하기', onPress: () => navigate('Origin') },
   ];
-  const doneCount = steps.filter((step) => step.done).length;
-
-  const confirmDelete = () =>
-    Alert.alert('계정 삭제 준비 중', '본인 재인증과 기록 보존 정책이 준비된 뒤 제공됩니다.', [
-      { text: '확인' },
-    ]);
-
-  const handleSignOut = async () => {
-    const error = await signOut();
-    if (error) Alert.alert('로그아웃 실패', error.message);
-  };
-
-  return (
-    <View style={styles.screen}>
-      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
-      <AppHeader />
-
-      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        <View style={styles.card}>
-          {/* 아바타·이름을 누르면 프로필 수정 (309:1086) 으로 들어간다 */}
-          <Pressable style={styles.identity} onPress={() => navigate('ProfileEdit')}>
-            <Avatar
-              name={bundle?.profile.name ?? '?'}
-              color={bundle?.profile.avatarColor ?? colors.primary}
-              url={bundle?.profile.avatarUrl}
-              size={s(46)}
-              radius={s(12)}
-            />
-            <Text style={styles.name}>
-              {status === 'ready' && bundle ? bundle.profile.name : '불러오는 중'}
-            </Text>
-            <Text style={styles.bio}>
-              {status === 'ready' && bundle ? `@${bundle.profile.tag}` : ' '}
-            </Text>
-          </Pressable>
-
-          <View style={styles.infoList}>
-            {info.map((row) => (
-              <View key={row.label} style={styles.infoRow}>
-                <Text style={styles.infoLabel}>{row.label}</Text>
-                <Text style={[styles.infoValue, row.danger && styles.infoValueDanger]}>
-                  {row.value}
-                </Text>
-              </View>
-            ))}
-          </View>
+  const completed = steps.filter((step) => step.done).length;
+  const bio = typeof privateProfile?.personalData.bio === 'string' ? privateProfile.personalData.bio : '';
+  return <ProfileFrame>
+    <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+      <View testID="profile-identity-card" style={shared.card}>
+        <View style={styles.identity}>
+          <Avatar name={bundle?.profile.name ?? '?'} seed={bundle?.profile.id} url={bundle?.profile.avatarUrl} size={64} />
+          <View style={shared.grow}><Text style={styles.name}>{bundle?.profile.name ?? '불러오는 중'}</Text><Text style={shared.sub}>{bio || (bundle ? '@' + bundle.profile.tag : '')}</Text></View>
+          <Pressable accessibilityRole="button" accessibilityLabel="프로필 수정" onPress={() => navigate('ProfileEdit')}
+            style={({ pressed }) => [styles.edit, pressed && shared.pressed]}><Text style={styles.editText}>수정</Text></Pressable>
         </View>
-
-        <View style={[styles.card, styles.cardSpacing]}>
-          <View style={styles.completeHeader}>
-            <Text style={styles.completeTitle}>🎉 계정 완성하기</Text>
-            <Text style={styles.completeCount}>
-              {doneCount} / {steps.length} 단계
-            </Text>
-          </View>
-
-          <View style={styles.track}>
-            {/* 진행 막대는 실제 완료 개수를 따른다 */}
-            <View style={[styles.fill, { flex: doneCount, minWidth: 0 }]} />
-            <View style={{ flex: steps.length - doneCount }} />
-          </View>
-
-          {steps.map((step) => (
-            <View key={step.label} style={styles.stepRow}>
-              <Text style={[styles.stepMark, step.done && styles.stepMarkDone]}>
-                {step.done ? '✓' : '○'}
-              </Text>
-              <Text style={styles.stepLabel}>{step.label}</Text>
-              <Pressable
-                style={[styles.badge, step.done ? styles.badgeDone : styles.badgeAction]}
-                disabled={!step.route}
-                onPress={() => step.route && navigate(step.route)}>
-                <Text style={[styles.badgeText, step.done ? styles.badgeTextDone : styles.badgeTextAction]}>
-                  {step.done ? '완료됨' : step.action}
-                </Text>
-              </Pressable>
-            </View>
-          ))}
+        <View style={styles.info}>{info.map((row) => <View key={row.label} style={styles.infoRow}>
+          <Text style={styles.infoLabel}>{row.label}</Text><Text style={[styles.infoValue, row.missing && styles.selected]}>{row.value}</Text>
+        </View>)}</View>
+      </View>
+      <View testID="profile-completion-card" style={[shared.card, styles.completion]}>
+        <View style={shared.row}><Text style={styles.completeTitle}>계정 완성하기</Text><Text style={styles.count}>{completed} / {steps.length}</Text></View>
+        <View accessible accessibilityRole="progressbar" accessibilityLabel="계정 완성" accessibilityValue={{ min: 0, max: steps.length, now: completed }} style={styles.track}>
+          <View style={[styles.fill, { width: `${completed / steps.length * 100}%` }]} />
         </View>
-
-        <View style={[styles.card, styles.cardSpacing, styles.linkCard]}>
-          {LINKS.map((link, i) => (
-            <Pressable
-              key={link.label}
-              style={[styles.linkRow, i > 0 && styles.linkDivider]}
-              onPress={() => navigate(link.route)}>
-              <Text style={styles.linkLabel}>{link.label}</Text>
-              <Text style={styles.linkArrow}>→</Text>
-            </Pressable>
-          ))}
-        </View>
-
-        <View style={styles.footer}>
-          <Pressable onPress={() => void handleSignOut()}>
-            <Text style={styles.logout}>로그아웃</Text>
-          </Pressable>
-          <Pressable onPress={confirmDelete}>
-            <Text style={styles.deleteAccount}>계정 삭제</Text>
-          </Pressable>
-        </View>
-      </ScrollView>
-    </View>
-  );
+        {steps.map((step) => <View key={step.label} style={styles.task}>
+          <View style={[styles.status, step.done && styles.statusDone]}>{step.done ? <Check size={14} color={colors.safeText} aria-hidden={true} /> : null}</View>
+          <Text style={[styles.taskLabel, step.done && styles.doneLabel]}>{step.label}</Text>
+          {step.done ? <Text style={styles.done}>완료</Text> : <Pressable accessibilityRole="button" accessibilityLabel={step.label + ' ' + step.action} onPress={step.onPress}
+            style={({ pressed }) => [styles.taskTouch, pressed && shared.pressed]}><View style={styles.pill}><Text style={styles.count}>{step.action}</Text><ChevronRight size={16} color={colors.selectedText} aria-hidden={true} /></View></Pressable>}
+        </View>)}
+      </View>
+      <View testID="profile-menu-card" style={styles.menu}>
+        <ListRow title="내 친구 관리" value={friendCount === null ? undefined : friendCount + '명'} onPress={() => navigate('Friends')} />
+        <ListRow title="출발지 설정" value={origin || '아직 설정 안 됨'} onPress={() => navigate('Origin')} />
+        <ListRow title="정보 공개 범위" onPress={() => navigate('Privacy')} style={styles.lastRow} />
+        <ListRow title="설정" value="약관 · 계정" style={[styles.lastRow, { borderTopWidth: 1, borderTopColor: colors.border }]} onPress={() => navigate('Settings')} />
+        <ListRow title="밥약 기록" value="준비 중" onPress={() => navigate('MealHistory')} />
+        {privateProfile?.foodProfileAvailable !== false ? <ListRow title="음식 취향 다시 고르기" onPress={() => navigate('FoodProfile')} /> : null}
+      </View>
+      <View style={styles.accountActions}>
+        <Pressable accessibilityRole="button" accessibilityLabel="로그아웃" disabled={leaving} accessibilityState={{ disabled: leaving, busy: leaving }} onPress={() => void leave()}
+          style={({ pressed }) => [styles.accountAction, pressed && shared.pressed]}><Text style={shared.sub}>로그아웃</Text></Pressable>
+        {/* TODO(서버 단계): 계정 삭제는 기존 준비 중 알림을 유지한다. */}
+        <Pressable accessibilityRole="button" accessibilityLabel="계정 삭제" onPress={() => Alert.alert('계정 삭제 준비 중', '본인 재인증과 기록 보존 정책이 준비된 뒤 제공합니다.')}
+          style={({ pressed }) => [styles.accountAction, pressed && shared.pressed]}><Text style={styles.delete}>계정 삭제</Text></Pressable>
+      </View>
+    </ScrollView>
+    <Toast {...toastProps} />
+  </ProfileFrame>;
 }
-
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.surfaceSunken,
-  },
-  body: {
-    // body x11.5 w197, 헤더 하단(y73) → 카드(y82)
-    paddingHorizontal: s(11.5),
-    paddingTop: s(9),
-    paddingBottom: s(16),
-  },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: s(10),
-    paddingHorizontal: s(9),
-    paddingTop: s(8),
-    paddingBottom: s(8),
-  },
-  cardSpacing: {
-    marginTop: s(6),
-  },
-  identity: {
-    alignItems: 'center',
-  },
-  name: {
-    // ph 기준 y40
-    marginTop: s(2),
-    textAlign: 'center',
-    fontFamily: fontFamily.body,
-    fontSize: fs(11),
-    lineHeight: fs(14),
-    fontWeight: weight.bold,
-    color: colors.textPrimary,
-  },
-  bio: {
-    marginTop: s(2),
-    textAlign: 'center',
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    lineHeight: fs(9),
-    color: colors.textMuted,
-  },
-  infoList: {
-    // ph 하단(y77) → 첫 행(y80)
-    marginTop: s(11),
-    gap: s(3),
-  },
-  infoRow: {
-    height: s(12),
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  infoLabel: {
-    flex: 1,
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    lineHeight: fs(10),
-    color: colors.textMuted,
-  },
-  infoValue: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    lineHeight: fs(10),
-    fontWeight: weight.bold,
-    color: colors.textPrimary,
-  },
-  infoValueDanger: {
-    color: colors.danger,
-  },
-  completeHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  completeTitle: {
-    flex: 1,
-    fontFamily: fontFamily.body,
-    fontSize: fs(8),
-    lineHeight: fs(11),
-    fontWeight: weight.bold,
-    color: colors.textPrimary,
-  },
-  completeCount: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(9),
-    color: colors.textMuted,
-  },
-  track: {
-    // y23 h4, 폭 179
-    marginTop: s(4),
-    height: s(4),
-    borderRadius: s(4),
-    backgroundColor: colors.surfaceSunken,
-    overflow: 'hidden',
-  },
-  fill: {
-    width: `${(60 / 179) * 100}%`,
-    height: '100%',
-    borderRadius: s(4),
-    backgroundColor: colors.primary,
-  },
-  stepRow: {
-    // y31 부터 21 간격, 높이 17
-    marginTop: s(4),
-    height: s(17),
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  stepMark: {
-    width: s(11),
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    lineHeight: fs(10),
-    color: colors.textMuted,
-  },
-  stepMarkDone: {
-    color: colors.primary,
-    fontWeight: weight.bold,
-  },
-  stepLabel: {
-    flex: 1,
-    fontFamily: fontFamily.body,
-    fontSize: fs(7.5),
-    lineHeight: fs(10),
-    color: colors.textPrimary,
-  },
-  badge: {
-    height: s(13),
-    paddingHorizontal: s(6),
-    borderRadius: s(4),
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  badgeDone: {
-    backgroundColor: colors.surfaceSunken,
-  },
-  badgeAction: {
-    backgroundColor: colors.primarySoft,
-  },
-  badgeText: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(9),
-    fontWeight: weight.bold,
-  },
-  badgeTextDone: {
-    color: colors.textMuted,
-  },
-  badgeTextAction: {
-    color: colors.primary,
-  },
-  linkCard: {
-    paddingTop: 0,
-    paddingBottom: 0,
-  },
-  linkRow: {
-    height: s(18),
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  linkDivider: {
-    borderTopWidth: s(0.6),
-    borderTopColor: colors.border,
-  },
-  linkLabel: {
-    flex: 1,
-    fontFamily: fontFamily.body,
-    fontSize: fs(7.5),
-    lineHeight: fs(10),
-    color: colors.textPrimary,
-  },
-  linkArrow: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    lineHeight: fs(9),
-    color: colors.textMuted,
-  },
-  footer: {
-    // y414, 카드3 하단(y408) 에서 6
-    marginTop: s(6),
-    paddingHorizontal: s(6),
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  logout: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(9),
-    color: colors.textMuted,
-  },
-  deleteAccount: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(9),
-    fontWeight: weight.bold,
-    color: colors.danger,
-  },
+  body: { paddingTop: 4, paddingHorizontal: 20, paddingBottom: 8, gap: 14 },
+  identity: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  name: { fontFamily: fontFamily.bold, fontSize: 20, lineHeight: 28, color: colors.ink, marginBottom: 2 },
+  edit: { minWidth: 54, minHeight: 44, paddingHorizontal: 14, borderRadius: 12, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+  editText: { fontFamily: fontFamily.bold, fontSize: 14, lineHeight: 20, color: colors.ink },
+  info: { gap: 6 },
+  infoRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
+  infoLabel: { fontFamily: fontFamily.body, fontSize: 14, lineHeight: 22, color: colors.sub },
+  infoValue: { flexShrink: 1, textAlign: 'right', fontFamily: fontFamily.medium, fontSize: 14, lineHeight: 22, color: colors.ink },
+  selected: { color: colors.selectedText, fontFamily: fontFamily.bold },
+  completion: { gap: 10 },
+  completeTitle: { flex: 1, fontFamily: fontFamily.bold, fontSize: 16, lineHeight: 24, color: colors.ink },
+  count: { fontFamily: fontFamily.bold, fontSize: 13, lineHeight: 20, color: colors.selectedText },
+  track: { height: 6, borderRadius: 3, backgroundColor: colors.border, overflow: 'hidden' },
+  fill: { height: 6, borderRadius: 3, backgroundColor: colors.primary },
+  task: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  status: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.mutedBg, alignItems: 'center', justifyContent: 'center' },
+  statusDone: { backgroundColor: colors.safeBg },
+  taskLabel: { flex: 1, fontFamily: fontFamily.medium, fontSize: 15, lineHeight: 22, color: colors.ink },
+  doneLabel: { fontFamily: fontFamily.body, color: colors.sub },
+  done: { fontFamily: fontFamily.bold, fontSize: 13, lineHeight: 20, color: colors.safeText },
+  taskTouch: { minHeight: 44, minWidth: 44, justifyContent: 'center' },
+  pill: { minHeight: 32, paddingLeft: 10, paddingRight: 4, gap: 2, borderRadius: 16, backgroundColor: colors.selectedBg, flexDirection: 'row', alignItems: 'center' },
+  menu: { borderWidth: 1, borderColor: colors.border, borderRadius: 16, overflow: 'hidden' },
+  lastRow: { borderBottomWidth: 0 },
+  accountActions: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 8 },
+  accountAction: { minHeight: 44, minWidth: 44, justifyContent: 'center' },
+  delete: { fontFamily: fontFamily.bold, fontSize: 13, lineHeight: 20, color: v3FeedbackColors.error },
+  skeleton: { borderRadius: 16, padding: 16, gap: 14, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  skeletonAvatar: { width: 64, height: 64, borderRadius: 32, backgroundColor: colors.mutedBg },
+  skeletonLine: { height: 22, borderRadius: 6, backgroundColor: colors.mutedBg },
 });

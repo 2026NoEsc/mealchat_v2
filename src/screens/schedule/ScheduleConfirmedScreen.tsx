@@ -1,437 +1,194 @@
-import {
-  CalendarDays,
-  MapPin,
-  Sparkles,
-  Users,
-} from 'lucide-react-native';
-import { useState } from 'react';
-import {
-  Alert,
-  Image,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Clock, CloudRain, Sparkles, Users } from 'lucide-react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
 
-import { useAuth } from '../../auth/AuthProvider';
-import AppHeader from '../../components/AppHeader';
-import { CompleteButton } from '../../components/ui/Button';
-import {
-  createRoom,
-  inviteFriendToRoom,
-} from '../../lib/rooms';
+import { Button } from '../../components/ui/Button';
+import { Radio } from '../../components/ui/Radio';
+import { BREAKTIME_NOTICE, hasBreaktimeRisk } from '../../lib/breaktime';
+import { advanceRoomStage, fetchRoom } from '../../lib/rooms';
+import { fetchConsentManifest, getConsentServerMode } from '../../lib/consents';
+import { fetchFoodCatalog } from '../../lib/foodProfile';
+import { supabase } from '../../lib/supabase';
 import { useNavigation } from '../../navigation/NavigationContext';
-import { formatSlotDate } from '../../lib/scheduleSlots';
-import { fs, s } from '../../theme/scale';
-import { colors, shadows } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
-import type { RecommendationPick } from './scheduleTypes';
+import { scheduleColors, scheduleLayout as layout } from '../../theme/scheduleTokens';
+import { v3Colors as colors, v3FeedbackColors } from '../../theme/tokens';
+import { fontFamily } from '../../theme/typography';
+import ScheduleFrame from './ScheduleFrame';
+import { recommendationDate } from './scheduleState';
+import type { ScheduleRecommendResponse, SlotPick } from './scheduleTypes';
+import { useRoomDecision } from '../../lib/useRoomDecision';
+import { S4TimeSelection } from './S4ScheduleFlow';
 
-const moa = require('../../../assets/brand/moa.png');
+const INVOKE_TIMEOUT_MS = 70_000;
 
-type Params = {
-  pick?: RecommendationPick;
-  name?: string;
-  invitees?: string[];
-};
+/** Transport status only. Never display a server/provider's raw error text. */
+function functionStatus(error: unknown) {
+  const value = error as { status?: number; context?: { status?: number } } | null;
+  return value?.context?.status ?? value?.status;
+}
+
+type Params = { roomId?: string; name?: string; invitees?: string[] };
+type Failure = { title: string; message: string; action: 'restart' | 'home' | 'retry' | 'continue' };
 
 export default function ScheduleConfirmedScreen() {
-  const insets = useSafeAreaInsets();
+  const { current } = useNavigation();
+  const params = current.params as Params | undefined;
+  const roomId = params?.roomId ?? null;
+  const decision = useRoomDecision(roomId, Boolean(roomId));
+  return !roomId || decision.mode === 'legacy' ? <LegacyScheduleConfirmedScreen key={`${roomId}:${decision.accountId}`} /> : <S4TimeSelection key={`${roomId}:${decision.accountId}`} roomId={roomId} name={params?.name ?? '새 밥약'} decision={decision} />;
+}
+function LegacyScheduleConfirmedScreen() {
+  /* 상태바 높이는 insets.top 만으로는 모자란 기기가 있다 */
 
-  const {
-    navigate,
-    current,
-  } = useNavigation();
+  const { navigate, resetTo, goBackWith, current } = useNavigation();
 
-  const { user } = useAuth();
+  const params = current.params as Params | undefined;
 
-  const params =
-    current.params as Params | undefined;
+  const roomId = params?.roomId ?? null;
+  const title = params?.name || '새 밥약';
+  const invitees = params?.invitees ?? [];
 
-  const pick =
-    params?.pick;
+  const [picks, setPicks] = useState<SlotPick[]>([]);
+  const [selected, setSelected] = useState(0);
 
-  const title =
-    params?.name || '새 밥약';
+  const [loading, setLoading] = useState(true);
+  const [failure, setFailure] = useState<Failure | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
-  const invitees =
-    params?.invitees ?? [];
-
-  const [creating, setCreating] =
-    useState(false);
-
-  const openRoom = async () => {
-    if (!user?.id) {
-      Alert.alert(
-        '로그인 필요',
-        '로그인 정보를 확인해 주세요.',
-      );
-
-      return;
+  const load = useCallback(async () => {
+    setLoading(true);
+    setPicks([]);
+    setFailure(null);
+    if (!roomId) {
+      setFailure({ title: '밥약 정보가 없어요', message: '새 밥약을 만들고 가능한 시간을 골라 주세요.', action: 'restart' });
+      setLoading(false); return;
     }
-
-    if (!pick) {
-      Alert.alert(
-        '일정 정보 없음',
-        '확정할 일정 정보가 없습니다.',
-      );
-
-      return;
-    }
-
-    setCreating(true);
-
+    let phase: 'capability' | 'room' | 'recommendation' = 'capability';
     try {
-      const meetingDate =
-        pick.slot.date;
-
-      const confirmedSlot =
-        `${pick.slot.date} ` +
-        `${pick.slot.startTime}~${pick.slot.endTime}` +
-        ` · ${pick.place.name}`;
-
-      const {
-        roomId,
-        error,
-      } = await createRoom({
-        ownerId: user.id,
-        title,
-        meetingDate,
-
-        expiresAt: new Date(
-          `${meetingDate}T23:59:59`,
-        ).toISOString(),
-
-        locationName:
-          pick.place.name,
-
-        confirmedSlot,
+      if (getConsentServerMode() === 'unknown') {
+        const capability = await fetchConsentManifest();
+        if (capability.error) throw capability.error;
+      }
+      if (getConsentServerMode() === 'legacy') {
+        setFailure({ title: '시간 추천은 곧 다시 이용할 수 있어요', message: '추천 없이 식당 정하기로 넘어갈 수 있어요.', action: 'continue' }); return;
+      }
+      if (getConsentServerMode() !== 's1') throw new Error('Capability not established');
+      // S1 can be deployed without S5/new Edge. Do not send the old Edge an empty candidate list.
+      const s5 = await fetchFoodCatalog();
+      if ((s5.error as { code?: string } | null)?.code === 'S5_UNAVAILABLE') {
+        setFailure({ title: '시간 추천은 곧 다시 이용할 수 있어요', message: '추천 없이 식당 정하기로 넘어갈 수 있어요.', action: 'continue' }); return;
+      }
+      if (!s5.data) throw s5.error ?? new Error('S5 capability not established');
+      phase = 'room';
+      const room = await fetchRoom(roomId);
+      // A failed room lookup cannot establish membership for the candidate request.
+      if (room.error) throw room.error;
+      if (!room.data) {
+        setFailure({ title: '밥약을 찾을 수 없어요', message: '방이 없어졌거나 참여 정보를 확인할 수 없어요.', action: 'home' }); return;
+      }
+      phase = 'recommendation';
+      const { data, error } = await supabase.functions.invoke('schedule-recommend', {
+        body: { meetingName: title, roomId, placeCandidates: [] }, timeout: INVOKE_TIMEOUT_MS,
       });
+      if (error) throw error;
+      const response = data as ScheduleRecommendResponse;
+      if (!response || !Array.isArray(response.slotRecommendations)) throw new Error('Invalid recommendation response');
+      if (!response.slotRecommendations.length) throw new Error('Empty recommendation response');
+      setPicks([...response.slotRecommendations].sort((a, b) => a.rank - b.rank)); setSelected(0);
+    } catch (error) {
+      if (phase === 'recommendation' && functionStatus(error) === 400) {
+        setFailure({ title: '시간 추천을 준비하고 있어요', message: '현재 서버와 앱의 시간 추천 방식이 달라요. 추천 없이 식당 정하기로 넘어갈 수 있어요.', action: 'continue' }); return;
+      }
+      setFailure(phase === 'capability'
+        ? { title: '시간 추천 지원 여부를 확인하지 못했어요', message: '연결 상태를 확인하고 다시 시도해 주세요.', action: 'retry' }
+        : phase === 'room'
+        ? { title: '밥약 정보를 불러오지 못했어요', message: '연결 상태를 확인하고 다시 시도해 주세요.', action: 'retry' }
+        : { title: '모두 되는 시간을 계산하지 못했어요', message: '다시 시도하거나 날짜를 직접 골라 주세요.', action: 'retry' });
+    } finally { setLoading(false); }
+  }, [roomId, title]);
 
-      if (error || !roomId) {
-        Alert.alert(
-          '방 만들기 실패',
-          error?.message ??
-            '잠시 후 다시 시도해 주세요.',
-        );
+  useEffect(() => {
+    void load();
+  }, [load]);
 
+  const goPrev = () => goBackWith({ roomId, name: title, invitees });
+
+  const chosen = picks[selected];
+
+  /* 시간 추천 선택은 이 화면에서만 유지하고 기존 식당 단계로 이동한다. */
+  const manualContinuation = failure?.action === 'continue';
+  const goToRestaurants = async () => {
+    if (!roomId || (!manualContinuation && (!chosen || failure)) || loading || confirming) return;
+
+    setConfirming(true);
+    try {
+      // Pre-S4 only: a recommendation remains a comparison, never a persisted appointment time.
+      const { error } = await advanceRoomStage(roomId, 'place');
+      if (error) {
+        Alert.alert('식당 정하기로 넘어가지 못했어요', '방장과 참여 상태를 확인한 뒤 다시 시도해 주세요.');
         return;
       }
 
-      const failed: string[] = [];
-
-      for (const friendId of invitees) {
-        const result =
-          await inviteFriendToRoom(
-            roomId,
-            friendId,
-          );
-
-        if (result.error) {
-          failed.push(friendId);
-        }
-      }
-
-      if (failed.length > 0) {
-        Alert.alert(
-          '일부 초대 실패',
-          `${failed.length}명을 넣지 못했어요. 방에서 초대 코드를 공유해 주세요.`,
-        );
-      }
-
-      navigate('ChatRoom', {
-        roomId,
-        title,
-      });
+      navigate('ChatRoom', { roomId, title, openSheet: 'menu' });
     } finally {
-      setCreating(false);
+      setConfirming(false);
     }
   };
 
-  return (
-    <View style={styles.screen}>
-      <View
-        style={{
-          height: insets.top,
-          backgroundColor: colors.surface,
-        }}
-      />
-
-      <AppHeader />
-
-      <ScrollView
-        contentContainerStyle={styles.body}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.hero}>
-          <Image
-            source={moa}
-            style={styles.heroImage}
-            resizeMode="contain"
-          />
-        </View>
-
-        <Text style={styles.title}>
-          일정이 확정됐어요!
-        </Text>
-
-        <Text style={styles.subtitle}>
-          선택한 일정으로 채팅방을 만들 수 있어요
-        </Text>
-
-        {pick ? (
-          <View style={styles.card}>
-            <View style={styles.cardHead}>
-              <Text style={styles.cardTitle}>
-                {title}
-              </Text>
-
-              <View style={styles.badge}>
-                <Text
-                  style={styles.badgeText}
-                >
-                  확정
-                </Text>
+  return <ScheduleFrame step={3} title="언제가 좋을까요?" subtitle="모인 일정으로 추천한 시간을 살펴보고, 식당을 정하러 가요." onBack={goPrev}
+    footer={<Button label={manualContinuation ? '추천 없이 식당 정하기' : '식당 정하러 가기'} loading={confirming} disabled={confirming || loading || (!manualContinuation && (Boolean(failure) || !chosen))} onPress={() => void goToRestaurants()} />}>
+    <Text style={styles.note} accessibilityLiveRegion="polite">시간 저장은 아직 지원하지 않는 서버예요. 추천은 비교용이며, 시간 미정으로 식당 정하기 단계로 이동해요.</Text>
+    {loading ? <View style={styles.state}><ActivityIndicator color={colors.primary} /><Text style={styles.note}>가능한 시간을 분석하고 있어요.</Text></View>
+      : failure ? <View style={styles.state}>
+        <View style={styles.stateIcon}><Clock size={28} color={colors.selectedText} /></View>
+        <Text accessibilityRole="header" style={styles.stateTitle}>{failure.title}</Text>
+        <Text accessibilityRole="alert" style={styles.stateNote}>{failure.message}</Text>
+        <View style={styles.actions}>{failure.action === 'retry' ? <><Button label="다시 시도" onPress={() => void load()} /><Button label="날짜 직접 고르기" variant="secondary" onPress={goPrev} /></> : <Button
+          label={failure.action === 'restart' ? '새 밥약 만들기' : '홈으로 가기'}
+          onPress={() => { if (failure.action === 'restart') navigate('ScheduleDetail'); else resetTo('Home'); }} />}</View>
+      </View> : <>
+        <View accessibilityRole="radiogroup" accessibilityLabel="추천 시간" style={styles.recommendations}>
+          {picks.map((pick, index) => {
+            const on = selected === index;
+            const attendance = pick.availableCount === pick.totalCount ? pick.totalCount + '명 모두 가능' : pick.availableCount + '명 가능 · ' + (pick.totalCount - pick.availableCount) + '명 불가';
+            return <Radio key={pick.slot.id} label={pick.rank + '순위, ' + recommendationDate(pick.slot) + ', ' + attendance} selected={on} radioSize={24} onSelect={() => setSelected(index)} style={[styles.card, on && styles.selected]}>
+              <View style={styles.cardBody}>
+                <View style={styles.cardHead}><View style={[styles.rank, on && styles.rankOn]}><Text style={[styles.rankText, on && styles.rankTextOn]}>{pick.rank}순위</Text></View><Text style={styles.date}>{recommendationDate(pick.slot)}</Text></View>
+                <View style={styles.attendance}><Users size={16} color={colors.safeText} /><Text style={styles.attendanceText}>{attendance}</Text>
+                  {pick.rainChance !== null ? <View style={styles.rain}><CloudRain size={12} color={colors.sub} /><Text style={styles.rainText}>강수 {pick.rainChance}%</Text></View> : null}
+                </View>
+                {/* TODO(서버 단계): 추천별 불참자 이름은 응답에 없어 인원만 표시한다. */}
+                <Text style={styles.reason}>{pick.reason}</Text>
+                {hasBreaktimeRisk(pick.slot.startTime) ? <Text style={styles.warning}>{BREAKTIME_NOTICE}</Text> : null}
               </View>
-            </View>
-
-            <InfoRow
-              icon={
-                <CalendarDays
-                  size={s(9)}
-                  color={colors.primary}
-                  strokeWidth={2}
-                />
-              }
-              text={formatSlotDate(pick.slot)}
-            />
-
-            <InfoRow
-              icon={
-                <MapPin
-                  size={s(9)}
-                  color={colors.primary}
-                  strokeWidth={2}
-                />
-              }
-              text={pick.place.name}
-            />
-
-            <InfoRow
-              icon={
-                <Users
-                  size={s(9)}
-                  color={colors.primary}
-                  strokeWidth={2}
-                />
-              }
-              text={
-                `${pick.availableCount} / ` +
-                `${pick.totalCount}명 참석 가능`
-              }
-            />
-
-            <InfoRow
-              icon={
-                <Sparkles
-                  size={s(9)}
-                  color={colors.primary}
-                  strokeWidth={2}
-                />
-              }
-              text={
-                `AI 적합도 ${Math.round(
-                  pick.score,
-                )}%`
-              }
-            />
-
-            <Text style={styles.reason}>
-              {pick.reason}
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.card}>
-            <Text style={styles.errorText}>
-              확정된 일정 정보를 찾을 수 없어요.
-            </Text>
-          </View>
-        )}
-
-        <Text style={styles.note}>
-          채팅방으로 이동하면 방을 생성하고 선택한 메이트를 초대해요.
-        </Text>
-
-        <CompleteButton
-          label={
-            creating
-              ? '방 만드는 중'
-              : '채팅방으로 이동'
-          }
-          showNext
-          style={styles.cta}
-          disabled={
-            creating || !pick
-          }
-          onPress={() =>
-            void openRoom()
-          }
-        />
-      </ScrollView>
-    </View>
-  );
+            </Radio>;
+          })}
+        </View>
+        {chosen && chosen.availableCount < chosen.totalCount ? <View style={styles.warningCard}><Text style={styles.warning}>{chosen.totalCount - chosen.availableCount}명은 이 시간에 오기 어려워요. 메이트들과 확인해 주세요.</Text></View> : null}
+        <View style={styles.hint}><Sparkles size={16} color={colors.selectedText} /><Text style={styles.hintText}>식당은 방에서 함께 정해요.</Text></View>
+      </>}
+  </ScheduleFrame>;
 }
-
-function InfoRow({
-  icon,
-  text,
-}: {
-  icon: React.ReactNode;
-  text: string;
-}) {
-  return (
-    <View style={styles.infoRow}>
-      {icon}
-
-      <Text style={styles.infoText}>
-        {text}
-      </Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.surfaceSunken,
-  },
-
-  body: {
-    paddingBottom: s(16),
-  },
-
-  hero: {
-    marginTop: s(20),
-    alignSelf: 'center',
-    width: s(56),
-    height: s(56),
-    borderRadius: s(14),
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  heroImage: {
-    width: s(34),
-    height: s(40),
-  },
-
-  title: {
-    marginTop: s(10),
-    textAlign: 'center',
-    fontFamily: fontFamily.body,
-    fontSize: fs(13),
-    lineHeight: fs(17),
-    fontWeight: weight.extrabold,
-    color: colors.textPrimary,
-  },
-
-  subtitle: {
-    marginTop: s(3),
-    textAlign: 'center',
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(9),
-    color: colors.textMuted,
-  },
-
-  card: {
-    marginTop: s(14),
-    marginHorizontal: s(11.5),
-    borderRadius: s(10),
-    borderWidth: s(0.8),
-    borderColor: colors.primary,
-    backgroundColor: colors.card,
-    paddingHorizontal: s(11),
-    paddingVertical: s(10),
-    ...shadows.button,
-  },
-
-  cardHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-
-  cardTitle: {
-    flex: 1,
-    fontFamily: fontFamily.body,
-    fontSize: fs(10),
-    lineHeight: fs(13),
-    fontWeight: weight.extrabold,
-    color: colors.textPrimary,
-  },
-
-  badge: {
-    paddingHorizontal: s(6),
-    paddingVertical: s(2),
-    borderRadius: s(4),
-    backgroundColor: colors.primary,
-  },
-
-  badgeText: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(8),
-    fontWeight: weight.bold,
-    color: colors.textOnAccent,
-  },
-
-  infoRow: {
-    marginTop: s(7),
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: s(5),
-  },
-
-  infoText: {
-    flex: 1,
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    lineHeight: fs(10),
-    color: colors.textPrimary,
-  },
-
-  reason: {
-    marginTop: s(10),
-    paddingTop: s(8),
-    borderTopWidth: s(0.6),
-    borderTopColor: colors.border,
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(9),
-    color: colors.textMuted,
-  },
-
-  errorText: {
-    textAlign: 'center',
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    color: colors.textMuted,
-  },
-
-  note: {
-    marginTop: s(8),
-    textAlign: 'center',
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(8),
-    color: colors.textMuted,
-  },
-
-  cta: {
-    marginTop: s(12),
-    marginHorizontal: s(11.5),
-  },
+  recommendations: { gap: 12 },
+  card: { flexDirection: 'row-reverse', alignItems: 'flex-start', gap: 8, padding: layout.cardPadding, borderRadius: layout.cardRadius, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  selected: { padding: layout.cardPadding, borderWidth: 2, borderColor: colors.primary, backgroundColor: scheduleColors.recommendationSelected },
+  cardBody: { flex: 1, minWidth: 0, gap: 8 },
+  cardHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  rank: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, backgroundColor: colors.mutedBg },
+  rankOn: { backgroundColor: colors.primary }, rankText: { fontFamily: fontFamily.bold, fontSize: 12, lineHeight: 17, color: colors.sub }, rankTextOn: { color: colors.onPrimary },
+  date: { flex: 1, fontFamily: fontFamily.bold, fontSize: 17, lineHeight: 25, color: colors.ink },
+  attendance: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
+  attendanceText: { fontFamily: fontFamily.bold, fontSize: 13, lineHeight: 19, color: colors.safeText },
+  rain: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, backgroundColor: colors.mutedBg },
+  rainText: { fontFamily: fontFamily.bold, fontSize: 12, lineHeight: 17, color: colors.sub },
+  reason: { fontFamily: fontFamily.body, fontSize: 13, lineHeight: 19, color: colors.sub },
+  hint: { flexDirection: 'row', gap: 8 }, hintText: { flex: 1, fontFamily: fontFamily.medium, fontSize: 13, lineHeight: 19, color: colors.selectedText },
+  warning: { fontFamily: fontFamily.body, fontSize: 13, lineHeight: 19, color: v3FeedbackColors.error },
+  warningCard: { backgroundColor: colors.selectedBg, padding: 12, borderRadius: layout.fieldRadius },
+  state: { paddingHorizontal: 20, paddingTop: 40, paddingBottom: 24, alignItems: 'center', gap: 12 },
+  stateIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: colors.selectedBg, alignItems: 'center', justifyContent: 'center' },
+  stateTitle: { fontFamily: fontFamily.bold, fontSize: 18, lineHeight: 26, color: colors.ink, textAlign: 'center' },
+  stateNote: { fontFamily: fontFamily.body, fontSize: 14, lineHeight: 20, color: colors.sub, textAlign: 'center' },
+  actions: { gap: 8, width: '100%' }, note: { fontFamily: fontFamily.body, fontSize: 13, lineHeight: 19, color: colors.sub },
 });

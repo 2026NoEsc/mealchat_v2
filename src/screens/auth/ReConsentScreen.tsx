@@ -1,177 +1,115 @@
-import { CheckSquare, Square } from 'lucide-react-native';
-import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { FileText } from 'lucide-react-native';
+import { useEffect, useRef, useState } from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../auth/AuthProvider';
-import ScreenHeader from '../../components/ScreenHeader';
-import { AccentButton } from '../../components/ui/Button';
-import { recordTermsConsent } from '../../lib/consents';
-import { fs, s } from '../../theme/scale';
-import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { AuthFooter, authStyles } from '../../components/ui/AuthLayout';
+import { PrimaryButton, TextButton } from '../../components/ui/Button';
+import TermsCard, { type TermChoices } from '../../components/ui/TermsCard';
+import { completeSignupConsents, recordRequiredConsents, recordLegacyTermsConsent } from '../../lib/consents';
+import { consentErrorMessage, newConsentRequestId, type ConsentManifest, type ConsentStatus, type ConsentSubmission } from '../../consents/contracts';
+import { useConsentManifest } from '../../consents/useConsentManifest';
+import { changedConsentKinds, consentDocumentIdentity } from '../../consents/documentIdentity';
+import { consentSubmission, manifestDocument } from '../../legal/manifest';
+import OptionalConsentControls from '../settings/OptionalConsentControls';
+import AccountDeletionScreen from '../settings/AccountDeletionScreen';
+import { v3Colors as colors, v3FeedbackColors } from '../../theme/tokens';
+import LegalDocumentSheet, { legalViewForTerm, type LegalView } from '../settings/LegalDocumentSheet';
 
-const TERMS = [
-  { key: 'service', label: '서비스 이용약관 동의', required: true },
-  { key: 'privacy', label: '개인정보 수집·이용 동의', required: true },
-  { key: 'marketing', label: '마케팅 정보 수신 동의 (선택)', required: false },
-] as const;
-
-type TermKey = (typeof TERMS)[number]['key'];
-
-/**
- * 동의 기록이 생기기 전에 가입한 사용자에게 현재 약관 동의를 다시 받는다.
- *
- * 기존 사용자는 어떤 버전에 동의했는지 기록이 없어서 일부러 backfill 하지 않았다.
- * 없는 동의를 만들어 두는 것보다 다시 받는 편이 정확하다.
- */
-export default function ReConsentScreen({ onDone }: { onDone: () => void }) {
+/** 558:1712. Existing consent RPC remains the only persistence path. */
+export default function ReConsentScreen({ onDone, manifest: initialManifest, status, gateError = false, gateErrorMessage, onRetry, signupReview = false, legacy: gateLegacy = false }: {
+  onDone: () => void; manifest?: ConsentManifest | null; status?: ConsentStatus | null; gateError?: boolean; gateErrorMessage?: string; onRetry?: () => void; signupReview?: boolean; legacy?: boolean;
+}) {
   const insets = useSafeAreaInsets();
   const { signOut } = useAuth();
-
-  const [agreed, setAgreed] = useState<Record<TermKey, boolean>>({
-    service: false,
-    privacy: false,
-    marketing: false,
-  });
+  const [agreed, setAgreed] = useState<TermChoices>({ service: false, privacy: false, health: false, marketing: false });
   const [submitting, setSubmitting] = useState(false);
-
-  const allAgreed = TERMS.every((term) => agreed[term.key]);
-  const canSubmit = TERMS.filter((term) => term.required).every((term) => agreed[term.key]);
-
-  const toggleAll = () => {
-    const next = !allAgreed;
-    setAgreed({ service: next, privacy: next, marketing: next });
-  };
-
+  const [error, setError] = useState('');
+  const [legalView, setLegalView] = useState<LegalView | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const { manifest, legacy: detectedLegacy, loading, reload } = useConsentManifest(initialManifest);
+  const legacy = gateLegacy || detectedLegacy;
+  const request = useRef<{ key: string; submission: ConsentSubmission } | null>(null);
+  const mounted = useRef(true), locked = useRef(false);
+  const identity = consentDocumentIdentity(manifest, legacy);
+  const previousIdentity = useRef<string | null>(identity);
+  useEffect(() => {
+    if (!identity) return;
+    if (previousIdentity.current && previousIdentity.current !== identity) {
+      const changed = changedConsentKinds(previousIdentity.current, identity);
+      request.current = null; setLegalView(null); setAgreed(current => {
+        const choices = { ...current }; for (const kind of changed) choices[kind] = false; return choices;
+      });
+    }
+    previousIdentity.current = identity;
+  }, [identity]);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const canSubmit = agreed.service && agreed.privacy && (Boolean(manifest) || legacy) && !gateError && (!previousIdentity.current || previousIdentity.current === identity);
   const submit = async () => {
-    if (!canSubmit) {
-      Alert.alert('약관 동의', '필수 약관에 동의해 주세요.');
-      return;
-    }
-
+    if (!canSubmit || locked.current || (!manifest && !legacy)) return;
+    locked.current = true;
     setSubmitting(true);
-    const error = await recordTermsConsent(agreed.marketing);
-    setSubmitting(false);
-
-    if (error) {
-      Alert.alert('저장 실패', error.message);
-      return;
-    }
-
-    onDone();
+    setError('');
+    try {
+      if (legacy) {
+        const result = await recordLegacyTermsConsent(agreed.marketing);
+        if (!mounted.current) return;
+        if (result.error) setError(consentErrorMessage(result.error)); else onDone();
+        return;
+      }
+      if (!manifest) return;
+      const key = JSON.stringify([manifest, agreed, signupReview]);
+      if (request.current?.key !== key) request.current = { key, submission: consentSubmission(manifest, agreed, newConsentRequestId(), !signupReview) };
+      const result = await (signupReview ? completeSignupConsents : recordRequiredConsents)(request.current.submission);
+      if (!mounted.current) return;
+      if (result.error || result.data?.required.status !== 'accepted') {
+        setError(consentErrorMessage(result.error));
+        if ((result.error as { code?: string } | null)?.code === 'S1002') {
+          request.current = null; setAgreed({ service: false, privacy: false, health: false, marketing: false }); reload();
+        }
+        if ((result.error as { code?: string } | null)?.code === 'S1004') { request.current = null; onRetry?.(); }
+      } else onDone();
+    } catch { if (mounted.current) setError('동의를 저장하지 못했어요. 잠시 후 다시 시도해 주세요.'); }
+    finally { locked.current = false; if (mounted.current) setSubmitting(false); }
   };
-
   const leave = async () => {
-    const error = await signOut();
-    if (error) Alert.alert('로그아웃 실패', error.message);
+    if (locked.current) return;
+    locked.current = true;
+    setSubmitting(true);
+    try {
+      const result = await signOut();
+      if (result && mounted.current) setError('로그아웃하지 못했어요. 잠시 후 다시 시도해 주세요.');
+    } catch { if (mounted.current) setError('로그아웃하지 못했어요. 잠시 후 다시 시도해 주세요.'); }
+    finally { locked.current = false; if (mounted.current) setSubmitting(false); }
   };
-
-  return (
-    <View style={[styles.screen, { paddingTop: insets.top }]}>
-      <ScreenHeader title="약관 동의" />
-
-      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        <Text style={styles.intro}>
-          {'약관이 새로 정리됐어요.\n계속 이용하시려면 아래 항목에 동의해 주세요.'}
-        </Text>
-
-        <Pressable style={styles.allRow} onPress={toggleAll}>
-          <Check checked={allAgreed} />
-          <Text style={styles.allLabel}>전체 동의하기</Text>
-        </Pressable>
-
-        <View style={styles.terms}>
-          {TERMS.map((term) => (
-            <Pressable
-              key={term.key}
-              style={styles.row}
-              onPress={() => setAgreed((prev) => ({ ...prev, [term.key]: !prev[term.key] }))}>
-              <Check checked={agreed[term.key]} />
-              <Text style={styles.label}>{term.label}</Text>
-            </Pressable>
-          ))}
-        </View>
-
-        <AccentButton
-          label={submitting ? '저장 중' : '동의하고 계속하기'}
-          style={styles.submit}
-          disabled={!canSubmit || submitting}
-          onPress={() => void submit()}
-        />
-
-        <Pressable style={styles.leaveRow} onPress={() => void leave()} disabled={submitting}>
-          <Text style={styles.leave}>나중에 하기 (로그아웃)</Text>
-        </Pressable>
-      </ScrollView>
-    </View>
-  );
-}
-
-function Check({ checked }: { checked: boolean }) {
-  return checked ? (
-    <CheckSquare size={s(11)} color={colors.primary} strokeWidth={2} />
-  ) : (
-    <Square size={s(11)} color={colors.textMuted} strokeWidth={2} />
-  );
+  if (deleting) return <AccountDeletionScreen onBack={() => { setDeleting(false); onRetry?.(); }} />;
+  return <View style={[authStyles.screen, { paddingTop: insets.top }]}>
+    <ScrollView style={authStyles.scroll} contentContainerStyle={styles.body}>
+      <View style={authStyles.iconBadge}><FileText size={26} color={colors.selectedText} aria-hidden={true} /></View>
+      <View style={styles.titleGroup}>
+        <Text accessibilityRole="header" style={authStyles.title}>{gateError ? '동의 상태를 확인하지 못했어요' : signupReview ? '가입 동의를 다시 확인해 주세요' : '약관이 새로 정리됐어요'}</Text>
+        <Text style={authStyles.subtitle}>{gateError ? gateErrorMessage ?? '연결을 확인하고 다시 시도해 주세요. 문서 보기와 선택 동의 철회는 이용할 수 있어요.' : '계속 이용하려면 아래 항목에 동의해 주세요.'}</Text>
+      </View>
+      {manifest?.change_summary ? <View style={styles.summary}><Text style={authStyles.label}>바뀐 점</Text><Text style={authStyles.helper}>{manifest.change_summary}</Text></View> : null}
+      {(gateError || (!manifest && !legacy)) ? <TextButton label={loading ? '동의 상태 확인 중' : '동의 상태 다시 확인'} disabled={loading} onPress={() => { reload(); onRetry?.(); }} /> : null}
+      <TermsCard reconsent includeOptional={signupReview || legacy} includeHealth={!legacy} agreed={agreed} onChange={setAgreed} disabled={submitting || (!manifest && !legacy) || gateError}
+        onView={(key) => setLegalView({ ...legalViewForTerm(key), ...(manifest ? { content: manifestDocument(manifest, key) } : { fallback: !legacy }) })} />
+      {!legacy ? <OptionalConsentControls withdrawalOnly manifest={manifest} status={status ?? null} /> : null}
+      <TextButton label="계정 삭제 안내" onPress={() => setDeleting(true)} />
+      {error ? <Text accessibilityRole="alert" style={[authStyles.helper, styles.error]}>{error}</Text> : null}
+    </ScrollView>
+    <AuthFooter>
+      <PrimaryButton label="동의하고 계속하기" loading={submitting} disabled={!canSubmit} onPress={() => void submit()} />
+      <TextButton label="나중에 하기 (로그아웃)" disabled={submitting} onPress={() => void leave()} />
+    </AuthFooter>
+    <LegalDocumentSheet view={legalView} onClose={() => setLegalView(null)} />
+  </View>;
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.surface,
-  },
-  body: {
-    paddingHorizontal: s(18),
-    paddingBottom: s(30),
-  },
-  intro: {
-    marginTop: s(26),
-    fontFamily: fontFamily.body,
-    fontSize: fs(7.5),
-    lineHeight: fs(12),
-    color: colors.textPrimary,
-  },
-  allRow: {
-    marginTop: s(20),
-    paddingBottom: s(10),
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: s(7),
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  allLabel: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(8),
-    fontWeight: weight.bold,
-    color: colors.textPrimary,
-  },
-  terms: {
-    marginTop: s(10),
-    gap: s(10),
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: s(7),
-  },
-  label: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(7),
-    color: colors.textPrimary,
-  },
-  submit: {
-    marginTop: s(24),
-    marginHorizontal: s(-6),
-  },
-  leaveRow: {
-    marginTop: s(10),
-    alignItems: 'center',
-  },
-  leave: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    color: colors.textMuted,
-  },
+  titleGroup: { gap: 6 },
+  body: { paddingTop: 56, paddingHorizontal: 20, paddingBottom: 24, gap: 16 },
+  error: { color: v3FeedbackColors.error },
+  summary: { paddingVertical: 12, paddingHorizontal: 14, borderRadius: 12, gap: 4, backgroundColor: colors.mutedBg },
 });

@@ -1,240 +1,105 @@
-import { Lock } from 'lucide-react-native';
-import { useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Info, Lock } from 'lucide-react-native';
+import { useEffect, useRef, useState } from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import AppHeader from '../../components/AppHeader';
-import { CompleteButton } from '../../components/ui/Button';
-import Toggle from '../../components/ui/Toggle';
-import { savePrivacySettings } from '../../lib/profile';
-import { useMyProfile } from '../../profile/useMyProfile';
+import { PrimaryButton, TextButton } from '../../components/ui/Button';
+import { Switch } from '../../components/ui/Switch';
+import { formatBirthDate, formatGender } from '../../lib/format';
+import { fetchProfileVisibility, setProfileVisibility } from '../../lib/profile';
+import { getConsentServerMode } from '../../lib/consents';
+import { consentErrorMessage, type ProfileVisibility, type VisibilityField } from '../../consents/contracts';
 import { useNavigation } from '../../navigation/NavigationContext';
-import { fs, s } from '../../theme/scale';
-import { colors } from '../../theme/tokens';
-import { fontFamily, weight } from '../../theme/typography';
+import { useMyProfile } from '../../profile/useMyProfile';
+import { v3Colors as colors, v3FeedbackColors } from '../../theme/tokens';
+import { fontFamily } from '../../theme/typography';
+import ProfileFrame, { profileStyles as shared } from './ProfileFrame';
 
-type Field = { key: string; label: string; detail: string };
+type Field = { key: VisibilityField; label: string; detail: string };
 
-const BASIC: Field[] = [
-  { key: 'birth', label: '생년월일', detail: '1111년 11월 11일' },
-  { key: 'gender', label: '성별', detail: '남성' },
-  { key: 'bio', label: '한마디 멘트', detail: '오늘도 맛있는 하루' },
-];
-
-const SENSITIVE: Field[] = [
-  { key: 'account', label: '계좌번호', detail: '정산 시에만 공개' },
-  { key: 'origin', label: '출발지 주소', detail: '중간 지점 계산에만 사용' },
-];
-
-/** Figma 기본 상태 — 한마디 멘트와 계좌번호만 꺼져 있다 */
-const INITIAL: Record<string, boolean> = {
-  birth: true,
-  gender: true,
-  bio: false,
-  account: false,
-  origin: true,
-};
-
-/**
- * Figma 프로필/정보 공개 범위 (256:2494) — 220 x 486
- * body x11.5 y82 w197 / 기본 정보 카드 y121 / 민감 정보 카드 y246 /
- * 자물쇠 안내 y341 / 저장 버튼 y358
- */
+/** Phone 530:1656, S1 canonical keys and server revision; no bulk JSON overwrite. */
 export default function PrivacyScreen() {
-  const { userId, bundle, reload } = useMyProfile();
-  const insets = useSafeAreaInsets();
+  const { userId, bundle } = useMyProfile();
+  const legacy = getConsentServerMode() === 'legacy';
   const { resetTo } = useNavigation();
-  const [shared, setShared] = useState(INITIAL);
-  const [loaded, setLoaded] = useState(false);
-
-  /* 저장된 값은 "public"/"private" 문자열이라 토글용 boolean 으로 바꾼다 */
+  const [data, setData] = useState<ProfileVisibility | null>(null);
+  const [ownerId, setOwnerId] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const locked = useRef(false);
+  const conflictOwner = useRef<string | null>(null);
+  const mounted = useRef(true);
+  const currentUserId = useRef(userId); currentUserId.current = userId;
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => {
-    if (loaded || !bundle) return;
-    const saved = bundle.privateProfile.privacySettings;
-    setShared((prev) => {
-      const next = { ...prev };
-      for (const key of Object.keys(prev)) {
-        if (saved[key]) next[key] = saved[key] === 'public';
+    let active = true; setData(null); setOwnerId(null);
+    if (conflictOwner.current !== userId) { conflictOwner.current = null; setError(''); }
+    locked.current = false; setSaving(false);
+    if (!userId || legacy) return;
+    void fetchProfileVisibility().then(result => {
+      if (!active) return;
+      setData(result.data);
+      setOwnerId(userId);
+      if (result.error || !result.data) setError('공개 설정을 불러오지 못했어요. 다시 시도해 주세요.');
+    }).catch(() => { if (active) setError('공개 설정을 불러오지 못했어요. 다시 시도해 주세요.'); });
+    return () => { active = false; };
+  }, [userId, attempt, legacy]);
+  const profile = bundle?.privateProfile;
+  const bio = typeof profile?.personalData.bio === 'string' ? profile.personalData.bio : '';
+  const basic: Field[] = [
+    { key: 'birthdate', label: '생년월일', detail: formatBirthDate(profile?.birthDate) ?? '아직 설정 안 됨' },
+    { key: 'gender', label: '성별', detail: formatGender(profile?.personalData.gender) ?? '아직 설정 안 됨' },
+    { key: 'bio', label: '한마디 멘트', detail: bio || '아직 설정 안 됨' },
+  ];
+  const sensitive: Field[] = [
+    { key: 'bank_account', label: '프로필 계좌번호', detail: '켜면 같은 유효한 밥약의 현재 메이트에게 프로필 계좌를 보여요.' },
+    { key: 'origin', label: '출발지 계산 사용', detail: '서버 계산에만 쓰며 출발지 원문과 좌표는 메이트에게 보여 주지 않아요.' },
+  ];
+  const toggle = async (key: VisibilityField) => {
+    if (legacy || !userId || ownerId !== userId || !data || locked.current) return;
+    locked.current = true;
+    setSaving(true);
+    const previous = data;
+    const visibility = data.settings[key] === 'public' ? 'private' : 'public';
+    setData({ ...data, settings: { ...data.settings, [key]: visibility } }); setError('');
+    try {
+      const result = await setProfileVisibility(key, visibility, previous.revision);
+      if (!mounted.current || currentUserId.current !== userId) return;
+      if (result.error || !result.data) {
+        setData(previous); setError(consentErrorMessage(result.error));
+        if ((result.error as { code?: string } | null)?.code === 'S1004') { conflictOwner.current = userId; setAttempt(value => value + 1); }
+        return;
       }
-      return next;
-    });
-    setLoaded(true);
-  }, [bundle, loaded]);
-
-  const toggle = async (key: string) => {
-    const next = { ...shared, [key]: !shared[key] };
-    setShared(next);
-    if (!userId) return;
-
-    const settings = Object.fromEntries(
-      Object.entries(next).map(([name, open]) => [name, open ? 'public' : 'private']),
-    );
-    const error = await savePrivacySettings(userId, settings);
-    if (error) {
-      Alert.alert('저장 실패', error.message);
-      setShared(shared);
-      return;
-    }
-    reload();
+      setData(result.data);
+      conflictOwner.current = null;
+    } catch {
+      if (mounted.current && currentUserId.current === userId) { setError('저장하지 못했어요. 다시 시도해 주세요.'); setData(previous); }
+    } finally { if (mounted.current && currentUserId.current === userId) { locked.current = false; setSaving(false); } }
   };
-
-  return (
-    <View style={styles.screen}>
-      <View style={{ height: insets.top, backgroundColor: colors.surface }} />
-      <AppHeader />
-
-      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        <Text style={styles.title}>정보 공개 범위</Text>
-        <Text style={styles.sub}>밥약 메이트에게 보여줄 정보를 선택하세요</Text>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>기본 정보</Text>
-          {BASIC.map((field, i) => (
-            <Row
-              key={field.key}
-              field={field}
-              divided={i > 0}
-              value={shared[field.key]}
-              onChange={() => void toggle(field.key)}
-            />
-          ))}
-        </View>
-
-        <View style={[styles.card, styles.cardSpacing]}>
-          <Text style={[styles.cardTitle, styles.cardTitleDanger]}>민감 정보</Text>
-          {SENSITIVE.map((field, i) => (
-            <Row
-              key={field.key}
-              field={field}
-              divided={i > 0}
-              value={shared[field.key]}
-              onChange={() => void toggle(field.key)}
-            />
-          ))}
-        </View>
-
-        <View style={styles.notice}>
-          <Lock size={s(7)} color={colors.primary} strokeWidth={2.5} />
-          <Text style={styles.noticeText}>꺼둔 정보는 방장에게도 보이지 않아요</Text>
-        </View>
-
-        <CompleteButton label="저장하기" style={styles.cta} onPress={() => resetTo('Profile')} />
-      </ScrollView>
-    </View>
-  );
-}
-
-function Row({
-  field,
-  divided,
-  value,
-  onChange,
-}: {
-  field: Field;
-  divided: boolean;
-  value: boolean;
-  onChange: () => void;
-}) {
-  return (
-    <View style={[styles.row, divided && styles.rowDivided]}>
-      <View style={styles.rowBody}>
-        <Text style={styles.rowLabel}>{field.label}</Text>
-        <Text style={styles.rowDetail}>{field.detail}</Text>
+  const renderFields = (fields: Field[]) => fields.map((field, index) => <View key={field.key} style={[styles.row, index > 0 && styles.divider]}>
+    <View style={shared.grow}><Text style={styles.rowLabel}>{field.label}</Text><Text style={shared.sub}>{field.detail}</Text></View>
+    <Switch accessibilityLabel={field.label} value={ownerId === userId && data?.settings[field.key] === 'public'} disabled={ownerId !== userId || !data || saving} onChange={() => void toggle(field.key)} />
+  </View>);
+  return <ProfileFrame title="정보 공개 범위" footer={<PrimaryButton label="저장하기" disabled={ownerId !== userId || !data || saving} onPress={() => resetTo('Profile')} />}>
+    <ScrollView contentContainerStyle={shared.body}>
+      <Text style={shared.intro}>유효한 밥약에 함께 참여한 현재 메이트에게 보여 줄 정보를 고르세요. 친구라는 이유만으로는 공개되지 않아요.</Text>
+      {legacy ? <Text accessibilityLiveRegion="polite" style={shared.sub}>곧 이용할 수 있어요. 공개 범위 설정이 준비되면 변경할 수 있어요. 아래 항목은 아직 서버 설정을 불러오지 않은 상태예요.</Text> : !data && !error ? <Text accessibilityLiveRegion="polite" style={shared.sub}>공개 설정을 불러오고 있어요</Text> : null}
+      {error ? <><Text accessibilityRole="alert" style={[shared.sub, { color: v3FeedbackColors.error }]}>{error}</Text><TextButton label="공개 설정 다시 불러오기" onPress={() => setAttempt(value => value + 1)} /></> : null}
+      <View testID="profile-privacy-basic" style={styles.card}><Text style={shared.title}>기본 정보</Text>{renderFields(basic)}</View>
+      <View testID="profile-privacy-sensitive" style={styles.card}>
+        <View style={shared.row}><Lock size={16} color={colors.selectedText} aria-hidden={true} /><Text style={[shared.title, styles.sensitive]}>계좌·계산 사용</Text></View>
+        {renderFields(sensitive)}
       </View>
-      <Toggle value={value} onChange={onChange} />
-    </View>
-  );
+      <View style={styles.hint}><Info size={16} color={colors.sub} aria-hidden={true} /><Text style={[shared.sub, shared.grow]}>꺼 둔 정보는 방장에게도 보이지 않아요.</Text></View>
+      <Text style={shared.sub}>프로필 계좌를 비공개로 바꿔도 이미 요청한 미완료 정산의 계좌는 고정 참여자와 생성자에게 보여요. 정산 계좌 공개는 이 스위치와 별개예요.</Text>
+    </ScrollView>
+  </ProfileFrame>;
 }
-
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.surfaceSunken,
-  },
-  body: {
-    paddingHorizontal: s(11.5),
-    paddingTop: s(10),
-    paddingBottom: s(20),
-  },
-  title: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(12),
-    lineHeight: fs(16),
-    fontWeight: weight.bold,
-    color: colors.textPrimary,
-  },
-  sub: {
-    marginTop: s(7),
-    fontFamily: fontFamily.body,
-    fontSize: fs(6.5),
-    lineHeight: fs(9),
-    color: colors.textMuted,
-  },
-  card: {
-    marginTop: s(7),
-    backgroundColor: colors.card,
-    borderRadius: s(10),
-    paddingHorizontal: s(9),
-    paddingTop: s(8),
-    paddingBottom: s(4),
-  },
-  cardSpacing: {
-    marginTop: s(7),
-  },
-  cardTitle: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(8),
-    lineHeight: fs(11),
-    fontWeight: weight.bold,
-    color: colors.textPrimary,
-  },
-  cardTitleDanger: {
-    color: colors.danger,
-  },
-  row: {
-    height: s(30),
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  rowDivided: {
-    borderTopWidth: s(0.6),
-    borderTopColor: colors.border,
-  },
-  rowBody: {
-    flex: 1,
-  },
-  rowLabel: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(7.5),
-    lineHeight: fs(10),
-    fontWeight: weight.semibold,
-    color: colors.textPrimary,
-  },
-  rowDetail: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(8),
-    color: colors.textMuted,
-  },
-  notice: {
-    marginTop: s(8),
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: s(5),
-    paddingHorizontal: s(9),
-    paddingVertical: s(4),
-    borderRadius: s(10),
-    backgroundColor: colors.primarySoft,
-  },
-  noticeText: {
-    fontFamily: fontFamily.body,
-    fontSize: fs(6),
-    lineHeight: fs(9),
-    fontWeight: weight.semibold,
-    color: colors.primary,
-  },
-  cta: {
-    marginTop: s(9),
-  },
+  card: { borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, paddingTop: 12, paddingHorizontal: 16, paddingBottom: 4 },
+  row: { minHeight: 64, paddingVertical: 10, flexDirection: 'row', gap: 12, alignItems: 'center' },
+  divider: { borderTopWidth: 1, borderTopColor: colors.border },
+  rowLabel: { fontFamily: fontFamily.medium, fontSize: 15, lineHeight: 22, color: colors.ink },
+  sensitive: { color: colors.selectedText },
+  hint: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
 });

@@ -1,8 +1,26 @@
 import type { Session, User } from '@supabase/supabase-js';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Linking from 'expo-linking';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { Alert, AppState } from 'react-native';
 
+import { purgeLegacyScheduleDrafts } from '../lib/legacyScheduleCleanup';
+import { setConsentAccess } from '../consents/access';
+import { getConsentServerMode } from '../lib/consents';
 import { supabase } from '../lib/supabase';
+import { clearPendingSignupProfile, readPendingSignupProfile } from './pendingSignupProfile';
+import { clearPendingSignupConsents } from './pendingSignupConsents';
+import { forgetImmediateSignupProfile } from './completePendingProfile';
+import {
+  authRedirectErrorMessage,
+  classifyAuthRedirect,
+  createAuthRedirectGuard,
+} from './authRedirect';
+import {
+  clearPasswordResetPending,
+  persistPasswordResetPending,
+  readPasswordResetPending,
+} from './passwordResetState';
 
 type SignUpResult = {
   confirmationRequired: boolean;
@@ -22,8 +40,8 @@ type AuthValue = {
     email: string;
     password: string;
     displayName: string;
-    /** 선택 동의. 필수 동의는 계정 생성 자체가 증거이므로 서버가 기록한다 */
-    marketingOptIn: boolean;
+    /** 레거시 가입 트리거에만 전달한다. S1에서는 별도 동의 RPC를 사용한다. */
+    marketingOptIn?: boolean;
   }) => Promise<SignUpResult>;
   sendPasswordReset: (email: string) => Promise<Error | null>;
   updatePassword: (password: string) => Promise<Error | null>;
@@ -46,49 +64,90 @@ function redirectUrl(path: string) {
   return Linking.createURL(path);
 }
 
-/** Expo Go 는 `exp://…/--/auth/reset`, 스탠드얼론은 `mealchat://auth/reset` 로 들어온다 */
-function isPasswordResetLink(url: string) {
-  return url.includes(RESET_PATH);
-}
-
-function codeFrom(url: string) {
-  try {
-    return new URL(url).searchParams.get('code');
-  } catch {
-    return null;
-  }
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [passwordResetPending, setPasswordResetPending] = useState(false);
 
   useEffect(() => {
+    void purgeLegacyScheduleDrafts().catch(() => undefined);
+    void readPendingSignupProfile(AsyncStorage).catch(() => undefined);
+    const pendingCleanup = AppState.addEventListener('change', state => {
+      if (state === 'active') void readPendingSignupProfile(AsyncStorage).catch(() => undefined);
+    });
     let active = true;
+    let currentUserId: string | null = null;
+    const redirectGuard = createAuthRedirectGuard();
+
+    const showRedirectError = (message: string) => {
+      if (!active) return;
+      Alert.alert('인증 링크를 열 수 없어요', message);
+    };
 
     const handleUrl = async (url: string) => {
-      const code = codeFrom(url);
-      if (!code) return;
+      const redirect = classifyAuthRedirect(url);
+      if (!redirect.kind || !redirectGuard.claim(url)) return;
 
-      const { error } = await supabase.auth.exchangeCodeForSession(code);
-      if (error || !active) return;
+      if (!redirect.code) {
+        showRedirectError(authRedirectErrorMessage(redirect, 'missing-code'));
+        return;
+      }
 
-      if (isPasswordResetLink(url)) setPasswordResetPending(true);
+      try {
+        // exchangeCodeForSession은 복구 세션도 일반 세션처럼 영속화한다. 교환보다
+        // 먼저 표식을 저장해야 교환 직후 프로세스가 종료돼도 앱 본문으로 우회하지 않는다.
+        if (redirect.kind === 'reset') {
+          await persistPasswordResetPending(AsyncStorage);
+          if (!active) return;
+          setPasswordResetPending(true);
+        }
+
+        const { error } = await supabase.auth.exchangeCodeForSession(redirect.code);
+        if (!active) return;
+
+        if (error) {
+          if (redirect.kind === 'reset') {
+            await clearPasswordResetPending(AsyncStorage).catch(() => undefined);
+            if (active) setPasswordResetPending(false);
+          }
+          showRedirectError(authRedirectErrorMessage(redirect, 'exchange-failed'));
+          return;
+        }
+
+        if (redirect.kind === 'callback') {
+          await clearPasswordResetPending(AsyncStorage);
+          if (active) setPasswordResetPending(false);
+        }
+      } catch {
+        if (!active) return;
+        showRedirectError(authRedirectErrorMessage(redirect, 'exchange-failed'));
+      }
     };
 
     const initialize = async () => {
       const initialUrl = await Linking.getInitialURL();
       if (initialUrl) {
-        await handleUrl(initialUrl).catch(() => undefined);
+        await handleUrl(initialUrl);
       }
 
       const {
         data: { session: restoredSession },
       } = await supabase.auth.getSession();
 
+      let restoredResetPending = false;
+      try {
+        restoredResetPending = await readPasswordResetPending(AsyncStorage);
+      } catch {
+        // 저장소를 읽지 못한 세션을 정상 로그인으로 추정하면 복구 세션이 본문으로
+        // 들어갈 수 있다. 세션이 있으면 fail closed로 새 비밀번호 화면에 머문다.
+        restoredResetPending = Boolean(restoredSession);
+      }
+
       if (active) {
+        currentUserId = restoredSession?.user?.id ?? null;
+        setConsentAccess(currentUserId, 'loading');
         setSession(restoredSession);
+        setPasswordResetPending(restoredResetPending);
         setIsReady(true);
       }
     };
@@ -101,28 +160,60 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       data: { subscription: authSubscription },
     } = supabase.auth.onAuthStateChange((event, nextSession) => {
       if (!active) return;
+      const previousUserId = currentUserId;
+      currentUserId = nextSession?.user?.id ?? null;
+      if (previousUserId !== currentUserId) setConsentAccess(currentUserId, 'loading');
       setSession(nextSession);
       // 웹은 URL 조각이 아니라 이벤트로 복구 흐름을 알려준다
-      if (event === 'PASSWORD_RECOVERY') setPasswordResetPending(true);
-      if (event === 'SIGNED_OUT') setPasswordResetPending(false);
+      if (event === 'PASSWORD_RECOVERY') {
+        setPasswordResetPending(true);
+        void persistPasswordResetPending(AsyncStorage).catch(() => {
+          // 표식을 영속화하지 못하면 재시작 시 복구 세션을 일반 세션으로 오인한다.
+          // 세션을 유지하지 않는 쪽으로 닫는다.
+          void supabase.auth.signOut();
+        });
+      }
+      if (event === 'SIGNED_OUT') {
+        forgetImmediateSignupProfile();
+        // Expiration and external sign-outs bypass the public signOut callback.
+        setPasswordResetPending(false);
+        void clearPasswordResetPending(AsyncStorage).catch(() => undefined);
+        void clearPendingSignupProfile(AsyncStorage).catch(() => undefined);
+        void clearPendingSignupConsents(AsyncStorage).catch(() => undefined);
+      }
     });
 
     const linkSubscription = Linking.addEventListener('url', ({ url }) => {
-      void handleUrl(url).catch(() => undefined);
+      void handleUrl(url);
     });
 
     return () => {
       active = false;
+      pendingCleanup.remove();
       authSubscription.unsubscribe();
       linkSubscription.remove();
     };
   }, []);
+
+  // Signup personal fields are flushed only by the accepted consent gate (completePendingProfile).
 
   const signInWithEmail = useCallback(async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({
       email: email.trim().toLowerCase(),
       password,
     });
+
+    if (!error) {
+      try {
+        await clearPasswordResetPending(AsyncStorage);
+        setPasswordResetPending(false);
+      } catch (storageError) {
+        return storageError instanceof Error
+          ? storageError
+          : new Error('비밀번호 재설정 상태를 정리하지 못했습니다.');
+      }
+    }
+
     return error;
   }, []);
 
@@ -136,7 +227,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       email: string;
       password: string;
       displayName: string;
-      marketingOptIn: boolean;
+      marketingOptIn?: boolean;
     }) => {
       const { data, error } = await supabase.auth.signUp({
         email: email.trim().toLowerCase(),
@@ -146,14 +237,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
            * private.handle_new_user 트리거가 읽는 값이다.
            * 약관 버전과 동의 시각은 서버가 정하므로 여기서 보내지 않는다.
            */
-          data: { name: displayName.trim(), marketing_opt_in: marketingOptIn },
+          // Legacy trigger consumes this choice; S1 never treats metadata as consent.
+          data: { name: displayName.trim(), ...(getConsentServerMode() === 'legacy' ? { marketing_opt_in: marketingOptIn === true } : {}) },
           emailRedirectTo: redirectUrl(CALLBACK_PATH),
         },
       });
 
       return {
         confirmationRequired: !data.session,
-        userId: data.user?.id ?? null,
+        userId: data.user?.identities?.length === 0 ? null : data.user?.id ?? null,
         error,
       };
     },
@@ -175,21 +267,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const completePasswordReset = useCallback(
     async (password: string) => {
       const error = await updatePassword(password);
-      if (!error) setPasswordResetPending(false);
-      return error;
+      if (error) return error;
+
+      try {
+        await clearPasswordResetPending(AsyncStorage);
+        setPasswordResetPending(false);
+        return null;
+      } catch (storageError) {
+        return storageError instanceof Error
+          ? storageError
+          : new Error('비밀번호 재설정 상태를 정리하지 못했습니다.');
+      }
     },
     [updatePassword],
   );
 
   const signOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
-    if (!error) setPasswordResetPending(false);
-    return error;
+    if (error) return error;
+    forgetImmediateSignupProfile();
+    await clearPendingSignupProfile(AsyncStorage).catch(() => undefined);
+    await clearPendingSignupConsents(AsyncStorage).catch(() => undefined);
+
+    try {
+      await clearPasswordResetPending(AsyncStorage);
+      setPasswordResetPending(false);
+      return null;
+    } catch (storageError) {
+      return storageError instanceof Error
+        ? storageError
+        : new Error('비밀번호 재설정 상태를 정리하지 못했습니다.');
+    }
   }, []);
 
   /** 새 비밀번호를 정하지 않고 빠져나가면 링크로 얻은 세션을 그대로 두지 않는다 */
   const cancelPasswordReset = useCallback(async () => {
-    setPasswordResetPending(false);
     return signOut();
   }, [signOut]);
 

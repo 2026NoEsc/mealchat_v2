@@ -6,22 +6,47 @@ export type RouteName =
   | 'SignupPersonal'
   | 'SignupCalendar'
   | 'SignupTaste'
-  | 'TasteGame'
+  | 'FoodProfile'
   | 'SignupTerms'
   | 'Home'
   | 'Schedule'
   | 'ScheduleDetail'
   | 'ScheduleTime'
-  | 'ScheduleRecommend'
   | 'ScheduleConfirmed'
   | 'Chat'
   | 'ChatRoom'
   | 'RoomDetail'
+  | 'LocalMenu'
+  | 'InviteLanding'
   | 'Profile'
   | 'Friends'
   | 'Privacy'
   | 'Origin'
-  | 'ProfileEdit';
+  | 'ProfileEdit'
+  | 'PasswordChange'
+  | 'Settings'
+  | 'Contact'
+  | 'NotificationPreferences'
+  | 'MealHistory'
+  | 'MealReceipt'
+  | 'OptionalConsents'
+  | 'AccountDeletion'
+  | 'ServiceTerms'
+  | 'PrivacyPolicy'
+  | 'PrivacyRevision'
+  | 'AppInfo'
+  | 'Settlements'
+  | 'SettlementDetail';
+
+/** Notifications and list entries pass IDs only; account data never enters route state. */
+export function settlementDetailRoute(billId: string): Route {
+  return { name: 'SettlementDetail', params: { billId } };
+}
+
+/** P06 E0803/E0816 -> list, E0818/E0825/E0831 -> requester chat. */
+export function settlementDetailBackRoute(requester: boolean, roomId: string | null): Route {
+  return requester && roomId ? { name: 'ChatRoom', params: { roomId } } : { name: 'Settlements' };
+}
 
 export type Route = {
   name: RouteName;
@@ -32,11 +57,18 @@ export type Route = {
 export const TAB_ROUTES: Record<TabKey, RouteName> = {
   home: 'Home',
   schedule: 'Schedule',
-  chat: 'Chat',
   profile: 'Profile',
 };
 
 export const ROUTE_TO_TAB: Partial<Record<RouteName, TabKey>> = {
+  Settings: 'profile',
+  MealHistory: 'profile',
+  NotificationPreferences: 'profile',
+  OptionalConsents: 'profile',
+  ServiceTerms: 'profile',
+  PrivacyPolicy: 'profile',
+  PrivacyRevision: 'profile',
+  AppInfo: 'profile',
   // 프로필 하위 화면도 Figma 상 하단 탭이 유지된다 (프로필 탭 활성)
   Friends: 'profile',
   Privacy: 'profile',
@@ -44,11 +76,10 @@ export const ROUTE_TO_TAB: Partial<Record<RouteName, TabKey>> = {
   ProfileEdit: 'profile',
   Home: 'home',
   Schedule: 'schedule',
-  // 일정 추가 3단계와 확정 화면도 하단 탭을 유지한다 (Figma 309:1065 / 160:733 / 159:491 / 160:827)
-  ScheduleDetail: 'schedule',
-  ScheduleTime: 'schedule',
-  ScheduleRecommend: 'schedule',
-  ScheduleConfirmed: 'schedule',
-  Chat: 'chat',
+  // 새 밥약 3단계와 출발지 검색에서는 하단 탭을 숨긴다.
+  // 정산은 홈에서 들어가므로 홈 탭을 유지한다
+  Settlements: 'home',
+  /* 채팅방 목록은 홈으로 합쳤다. 예전 경로로 들어와도 홈 탭이 켜져 있어야 한다 */
+  Chat: 'home',
   Profile: 'profile',
 };

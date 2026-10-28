@@ -63,6 +63,7 @@ describe('parsePoiSearch', () => {
         address: '부산 사하구 하단동 낙동대로550번길 37',
         lat: 35.118,
         lng: 128.966,
+        category: '',
       },
     ]);
   });

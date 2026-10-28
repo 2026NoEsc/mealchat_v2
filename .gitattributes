@@ -1,0 +1,4 @@
+# Legal source and generated artifacts must be identical on Windows and Unix checkouts.
+src/legal/*.ts text eol=lf
+src/legal/*.json text eol=lf
+scripts/generate-legal-hashes.mjs text eol=lf

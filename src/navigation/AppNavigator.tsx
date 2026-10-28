@@ -1,3 +1,5 @@
+import LocalMenuScreen from '../screens/chat/LocalMenuScreen';
+import InviteLandingScreen from '../screens/chat/InviteLandingScreen';
 import { StyleSheet, View } from 'react-native';
 
 import BottomNav from '../components/BottomNav';
@@ -10,18 +12,32 @@ import FriendsScreen from '../screens/profile/FriendsScreen';
 import OriginScreen from '../screens/profile/OriginScreen';
 import PrivacyScreen from '../screens/profile/PrivacyScreen';
 import ProfileEditScreen from '../screens/profile/ProfileEditScreen';
+import PasswordChangeScreen from '../screens/profile/PasswordChangeScreen';
 import ProfileHomeScreen from '../screens/profile/ProfileHomeScreen';
 import ScheduleConfirmedScreen from '../screens/schedule/ScheduleConfirmedScreen';
+import SettlementsScreen from '../screens/settlement/SettlementsScreen';
+import SettlementDetailScreen from '../screens/settlement/SettlementDetailScreen';
 import ScheduleDetailScreen from '../screens/schedule/ScheduleDetailScreen';
 import ScheduleHomeScreen from '../screens/schedule/ScheduleHomeScreen';
-import ScheduleRecommendScreen from '../screens/schedule/ScheduleRecommendScreen';
 import ScheduleTimeScreen from '../screens/schedule/ScheduleTimeScreen';
 import SignupCalendarScreen from '../screens/signup/SignupCalendarScreen';
 import SignupPersonalScreen from '../screens/signup/SignupPersonalScreen';
 import SignupStartScreen from '../screens/signup/SignupStartScreen';
 import SignupTasteScreen from '../screens/signup/SignupTasteScreen';
 import SignupTermsScreen from '../screens/signup/SignupTermsScreen';
-import TasteGameScreen from '../screens/taste/TasteGameScreen';
+import FoodProfileScreen from '../screens/food/FoodProfileScreen';
+import FoodProfilePrompt from '../screens/food/FoodProfilePrompt';
+import SettingsScreen from '../screens/settings/SettingsScreen';
+import ContactScreen from '../screens/settings/ContactScreen';
+import NotificationPreferencesScreen from '../screens/settings/NotificationPreferencesScreen';
+import MealHistoryScreen from '../screens/history/MealHistoryScreen';
+import MealReceiptScreen from '../screens/history/MealReceiptScreen';
+import ServiceTermsScreen from '../screens/settings/ServiceTermsScreen';
+import PrivacyPolicyScreen from '../screens/settings/PrivacyPolicyScreen';
+import AppInfoScreen from '../screens/settings/AppInfoScreen';
+import OptionalConsentsScreen from '../screens/settings/OptionalConsentsScreen';
+import PrivacyRevisionScreen from '../screens/settings/PrivacyRevisionScreen';
+import AccountDeletionScreen from '../screens/settings/AccountDeletionScreen';
 import { colors } from '../theme/tokens';
 import { useNavigation } from './NavigationContext';
 import { ROUTE_TO_TAB, TAB_ROUTES, type RouteName } from './routes';
@@ -34,6 +50,7 @@ export default function AppNavigator() {
     <View style={styles.root}>
       <View style={styles.screen}>{renderScreen(current.name)}</View>
 
+      <FoodProfilePrompt />
       {activeTab ? (
         <BottomNav active={activeTab} onChange={(tab) => resetTo(TAB_ROUTES[tab])} />
       ) : null}
@@ -43,6 +60,30 @@ export default function AppNavigator() {
 
 function renderScreen(name: RouteName) {
   switch (name) {
+    case 'LocalMenu': return <LocalMenuScreen />;
+    case 'InviteLanding': return <InviteLandingScreen />;
+    case 'Contact':
+      return <ContactScreen />;
+    case 'NotificationPreferences':
+      return <NotificationPreferencesScreen />;
+    case 'MealHistory':
+      return <MealHistoryScreen />;
+    case 'MealReceipt':
+      return <MealReceiptScreen />;
+    case 'Settings':
+      return <SettingsScreen />;
+    case 'OptionalConsents':
+      return <OptionalConsentsScreen />;
+    case 'AccountDeletion':
+      return <AccountDeletionRoute />;
+    case 'ServiceTerms':
+      return <ServiceTermsScreen />;
+    case 'PrivacyPolicy':
+      return <PrivacyPolicyScreen />;
+    case 'PrivacyRevision':
+      return <PrivacyRevisionScreen />;
+    case 'AppInfo':
+      return <AppInfoScreen />;
     case 'Login':
       return <LoginScreen />;
     case 'SignupStart':
@@ -53,8 +94,8 @@ function renderScreen(name: RouteName) {
       return <SignupCalendarScreen />;
     case 'SignupTaste':
       return <SignupTasteScreen />;
-    case 'TasteGame':
-      return <TasteGameScreen />;
+    case 'FoodProfile':
+      return <FoodProfileScreen />;
     case 'SignupTerms':
       return <SignupTermsScreen />;
     case 'Home':
@@ -65,10 +106,12 @@ function renderScreen(name: RouteName) {
       return <ScheduleDetailScreen />;
     case 'ScheduleTime':
       return <ScheduleTimeScreen />;
-    case 'ScheduleRecommend':
-      return <ScheduleRecommendScreen />;
     case 'ScheduleConfirmed':
       return <ScheduleConfirmedScreen />;
+    case 'Settlements':
+      return <SettlementsScreen />;
+    case 'SettlementDetail':
+      return <SettlementDetailScreen />;
     case 'Chat':
       return <ChatHomeScreen />;
     case 'ChatRoom':
@@ -85,7 +128,14 @@ function renderScreen(name: RouteName) {
       return <OriginScreen />;
     case 'ProfileEdit':
       return <ProfileEditScreen />;
+    case 'PasswordChange':
+      return <PasswordChangeScreen />;
   }
+}
+
+function AccountDeletionRoute() {
+  const { goBack } = useNavigation();
+  return <AccountDeletionScreen onBack={goBack} />;
 }
 
 const styles = StyleSheet.create({

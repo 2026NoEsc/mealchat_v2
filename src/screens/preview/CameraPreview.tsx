@@ -1,0 +1,16 @@
+import { useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { Action, Art, Card, Copy, IconAction, ui } from './PreviewUI';
+import { previewAssets as a } from './previewAssets';
+
+export default function CameraPreview({ scene, onBack, onScene, notify }: { scene: string; onBack: () => void; onScene: (scene: string) => void; notify: (message: string) => void }) {
+  const [flash, setFlash] = useState(false);
+  const denied = scene === 'camera-denied';
+  return <View style={[ui.screen, { backgroundColor: '#111' }]}><View style={ui.header}><IconAction label="뒤로가기" source={a.cameraClose} onPress={onBack} /><Copy bold size={17} style={[ui.grow, { color: 'white', textAlign: 'center' }]}>영수증 찍기</Copy><IconAction label={flash ? '플래시 예시 끄기' : '플래시 예시 켜기'} source={flash ? a.flashOn : a.flashOff} onPress={() => setFlash(!flash)} size={22} /></View>
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16 }}>
+      {denied ? <View style={{ paddingHorizontal: 40, alignItems: 'center', gap: 12, width: '100%' }}><View style={{ backgroundColor: '#3A3631', padding: 14, borderRadius: 28 }}><Art source={a.camera} width={28} /></View><Copy bold size={18} style={styles.white}>카메라 권한이 꺼져 있어요</Copy><Copy style={[styles.white, { color: '#D6D3CE', textAlign: 'center' }]}>영수증을 찍으려면 설정에서 카메라를 허용해 주세요. 앨범에 있는 사진으로도 할 수 있어요.</Copy><View style={[ui.row, { alignSelf: 'stretch', marginTop: 12 }]}><Action label="설정 열기" onPress={() => notify('권한 안내 예시 · 기기 설정을 열지 않아요.')} /></View></View> : <><View style={{ width: 300, height: 460, borderRadius: 16, borderWidth: 3, borderStyle: 'dashed', borderColor: '#FF9900', overflow: 'hidden' }}><View style={{ opacity: 0.35 }}><Art source={a.guide} width={294} height={454} svg={false} resizeMode="cover" /></View></View>{scene !== 'camera-failure' && <Copy size={14} style={styles.white}>영수증이 네모 안에 다 들어오게 맞춰 주세요</Copy>}</>}
+      {scene === 'camera-failure' && <Card style={{ position: 'absolute', bottom: 20, left: 20, right: 20 }}><Copy bold size={15}>영수증을 읽지 못했어요</Copy><Copy sub size={13}>빛 반사 없이 영수증 전체가 네모 안에 들어오게 다시 찍거나, 금액을 직접 입력해 주세요.</Copy><View style={ui.row}><Action secondary label="직접 입력" onPress={() => { onScene('receipt-result'); notify('직접 입력 반응 예시 · 고정 영수증 예시예요.'); }} /><Action label="다시 찍기" onPress={() => onScene('camera')} /></View></Card>}
+    </View><View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 40, paddingTop: 16, paddingBottom: 40 }}><Pressable accessibilityRole="button" accessibilityLabel="앨범 예시" onPress={() => onScene('receipt-result')} style={{ alignItems: 'center', gap: 4 }}><View style={{ backgroundColor: '#2A2A2A', borderRadius: 12, padding: 13 }}><Art source={a.album} width={22} /></View><Copy size={12} style={styles.white}>앨범</Copy></Pressable><Pressable accessibilityRole="button" accessibilityLabel="촬영 예시" disabled={denied} accessibilityState={{ disabled: denied }} onPress={() => onScene('receipt-result')} style={{ opacity: denied ? 0.35 : 1 }}><Art source={a.shutter} width={80} /></Pressable><View style={{ width: 48 }} /></View>
+  </View>;
+}
+const styles = StyleSheet.create({ white: { color: 'white' } });

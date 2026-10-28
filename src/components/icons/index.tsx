@@ -107,3 +107,34 @@ export function RoomCalendarIcon({ size }: { size: number }) {
     </StrokeIcon>
   );
 }
+
+/**
+ * 채팅방 나가기(뒤로) 화살표 — Figma 2178:611 (24 x 24).
+ *
+ * 선으로 그린 화살표(lucide ChevronLeft) 대신 꽉 찬 쐐기다. 시안이 굵기를
+ * 선 두께가 아니라 모양으로 잡아 두어서, 스트로크 아이콘으로는 같은 무게가 안 난다.
+ */
+export function RoomBackIcon({ size, color = colors.textPrimary }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M15 7L10 12L15 17L14 19L7 12L14 5L15 7Z" fill={color} />
+    </Svg>
+  );
+}
+
+/**
+ * 채팅방 헤더 오른쪽 메뉴 — Figma 2178:619 (24 x 24, Material `dehaze`).
+ *
+ * 점 세 개(⋮) 대신 가로줄 세 개다. RoomMenuIcon 은 방 카드의 액션 아이콘이라
+ * 이름을 따로 둔다.
+ */
+export function MenuBarsIcon({ size, color = colors.textPrimary }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M18.0996 15.2337V16.7669H5.90039V15.2337H18.0996ZM18.0996 11.2337V12.7669H5.90039V11.2337H18.0996ZM18.0996 7.23372V8.76693H5.90039V7.23372H18.0996Z"
+        fill={color}
+      />
+    </Svg>
+  );
+}
